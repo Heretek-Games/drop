@@ -15,6 +15,7 @@ export default {
 
   ssr: false,
   devtools: false,
+  telemetry: false,
 
   extends: [["../../libraries/base"]],
 
