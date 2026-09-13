@@ -25,6 +25,8 @@ jobs:
     permissions:
       packages: write
       contents: read
+    outputs:
+      today: ${{ steps.get_final_ver.outputs.today }}
     steps:
       - name: Check out the repo
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # actions/checkout@v7
@@ -33,11 +35,12 @@ jobs:
           fetch-tags: true
           ref: ${{ github.ref }}
           token: ${{ secrets.GITHUB_TOKEN }}
+          persist-credentials: false
 
       - name: Prepare
         run: |
           platform=${{ matrix.platform }}
-          echo "PLATFORM_PAIR=${platform//\//-}" >> $GITHUB_ENV
+          echo "PLATFORM_PAIR=${platform//\//-}" >> "$GITHUB_ENV"
 
       - name: Docker meta
         id: meta
@@ -65,7 +68,7 @@ jobs:
           TODAY=$(date +'%Y.%m.%d')
 
           echo "Today will be: $TODAY"
-          echo "today=$TODAY" >> $GITHUB_OUTPUT
+          echo "today=$TODAY" >> "$GITHUB_OUTPUT"
 
           if [[ "${{ github.event_name }}" == "release" ]]; then
             FINAL_VER="$BASE_VER"
@@ -74,7 +77,7 @@ jobs:
           fi
 
           echo "Drop's release tag will be: $FINAL_VER"
-          echo "final_ver=$FINAL_VER" >> $GITHUB_OUTPUT
+          echo "final_ver=$FINAL_VER" >> "$GITHUB_OUTPUT"
 
       - name: Build and push by digest
         id: build
@@ -91,9 +94,11 @@ jobs:
             BUILD_GIT_REF=${{ github.sha }}
 
       - name: Export digest
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
         run: |
           mkdir -p ${{ runner.temp }}/digests
-          digest="${{ steps.build.outputs.digest }}"
+          digest="$DIGEST"
           touch "${{ runner.temp }}/digests/${digest#sha256:}"
 
       - name: Upload digest
@@ -136,7 +141,7 @@ jobs:
             ${{ env.REGISTRY_IMAGE }}
           tags: |
             type=schedule,pattern=nightly
-            type=schedule,pattern=nightly.${{ steps.get_final_ver.outputs.today }}
+            type=schedule,pattern=nightly.${{ needs.build.outputs.today }}
             type=semver,pattern=v{{version}}
             type=semver,pattern=v{{major}}.{{minor}}
             type=semver,pattern=v{{major}}
@@ -149,9 +154,14 @@ jobs:
       - name: Create manifest list and push
         working-directory: ${{ runner.temp }}/digests
         run: |
+          # shellcheck disable=SC2046
+          # Command substitution is intentionally split into separate arguments.
           docker buildx imagetools create $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
             $(printf '${{ env.REGISTRY_IMAGE }}@sha256:%s ' *)
 
       - name: Inspect image
+        env:
+          REGISTRY_IMAGE: ${{ env.REGISTRY_IMAGE }}
+          VERSION: ${{ steps.meta.outputs.version }}
         run: |
-          docker buildx imagetools inspect ${{ env.REGISTRY_IMAGE }}:${{ steps.meta.outputs.version }}
+          docker buildx imagetools inspect "$REGISTRY_IMAGE:$VERSION"

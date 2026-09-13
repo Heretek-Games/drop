@@ -47,6 +47,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # actions/checkout@v7
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+          persist-credentials: false
 
       - name: setup pnpm
         uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # pnpm/action-setup@v6
@@ -57,18 +58,13 @@ jobs:
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # actions/setup-node@v7
         with:
           node-version: lts/*
-          cache: pnpm
+          package-manager-cache: false
 
       - name: install Rust nightly
         uses: dtolnay/rust-toolchain@7c8d7d138f5c09cef361f8214cf96882cd029cdb # dtolnay/rust-toolchain@nightly
         with:
           # Those targets are only used on macos runners so it's in an `if` to slightly speed up windows and linux builds.
           targets: ${{ matrix.platform == 'macos-14' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
-
-      - name: Rust cache
-        uses: swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # swatinem/rust-cache@v2
-        with:
-          workspaces: "./desktop/src-tauri -> target"
 
       - name: install dependencies (ubuntu only)
         if: matrix.platform == 'ubuntu-22.04' || matrix.platform == 'ubuntu-22.04-arm' # This must match the platform value defined above.
@@ -163,6 +159,8 @@ jobs:
       WINGET_TOKEN: ${{ secrets.WINGET_TOKEN }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # actions/checkout@v7
+        with:
+          persist-credentials: false
       - name: Submit package to Windows Package Manager Community Repository
         if: env.WINGET_TOKEN != ''
         uses: vedantmgoyal2009/winget-releaser@4ffc7888bffd451b357355dc214d43bb9f23917e # v2
@@ -179,7 +177,7 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'release' && github.event.action == 'published')
     steps:
       - name: Trigger FlatPark Release Webhook
-        uses: flatpark/publish-action@v1
+        uses: flatpark/publish-action@b67fca1b80b095541bc011967e0a35292bed14d8 # v1
         continue-on-error: true # Non-blocking until PR #343 is merged on FlatPark
         with:
           app-id: org.heretek_games.Drop
