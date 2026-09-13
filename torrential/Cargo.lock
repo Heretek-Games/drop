@@ -578,7 +578,6 @@ dependencies = [
  "anyhow",
  "async-trait",
  "droplet_types",
- "dyn-clone",
  "futures",
  "getrandom 0.3.4",
  "hex",
@@ -587,7 +586,6 @@ dependencies = [
  "rcgen",
  "ring",
  "serde",
- "serde_json",
  "sha2",
  "test-generator",
  "time",
@@ -602,12 +600,6 @@ version = "0.1.0"
 dependencies = [
  "serde",
 ]
-
-[[package]]
-name = "dyn-clone"
-version = "1.0.20"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d0881ea181b1df73ff77ffaaf9c7544ecc11e82fba9b5f27b262a3c73a332555"
 
 [[package]]
 name = "either"

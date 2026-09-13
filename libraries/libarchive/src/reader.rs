@@ -57,10 +57,10 @@ pub trait Reader: Handle {
             match ffi::archive_read_data_block(self.handle(), &mut buff, &mut size, &mut offset) {
                 ffi::ARCHIVE_EOF => Ok(None),
                 ffi::ARCHIVE_OK => {
-                    if buff != ptr::null() {
+                    if !buff.is_null() {
                         Ok(Some(slice::from_raw_parts(buff as *const u8, size)))
                     } else {
-                        return self.read_block();
+                        self.read_block()
                     }
                 }
                 _ => Err(ArchiveError::Sys(self.err_code(), self.err_msg())),
@@ -126,7 +126,7 @@ impl FileReader {
 
     fn new(handle: *mut ffi::Struct_archive) -> Self {
         FileReader {
-            handle: handle,
+            handle,
             entry: ReaderEntry::default(),
         }
     }
@@ -272,7 +272,7 @@ impl Builder {
                     ffi::archive_read_support_filter_program_signature(
                         self.handle,
                         c_prog.as_ptr(),
-                        mem::transmute(cb),
+                        mem::transmute::<Option<extern "C" fn() -> ()>, *const libc::c_void>(cb),
                         size,
                     )
                 }
@@ -360,7 +360,7 @@ impl Default for Builder {
                 panic!("Allocation error");
             }
             Builder {
-                handle: handle,
+                handle,
                 consumed: false,
             }
         }
@@ -369,7 +369,7 @@ impl Default for Builder {
 
 impl ReaderEntry {
     pub fn new(handle: *mut ffi::Struct_archive_entry) -> Self {
-        ReaderEntry { handle: handle }
+        ReaderEntry { handle }
     }
 }
 

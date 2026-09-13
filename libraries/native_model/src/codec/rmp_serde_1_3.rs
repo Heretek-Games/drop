@@ -27,7 +27,6 @@
 ///     my_string: String
 /// }
 /// ```
-
 pub struct RmpSerde;
 
 #[cfg(all(feature = "serde", feature = "rmp_serde_1_3"))]
@@ -69,7 +68,6 @@ impl<T: for<'de> serde::Deserialize<'de>> crate::Decode<T> for RmpSerde {
 ///     my_string: String
 /// }
 /// ```
-
 pub struct RmpSerdeNamed;
 
 #[cfg(all(feature = "serde", feature = "rmp_serde_1_3"))]

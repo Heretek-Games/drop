@@ -10,7 +10,7 @@ fn wrap(data: &mut Vec<u8>) {
     native_model::wrapper::native_model_encode(data, 1, 1);
 }
 
-fn unwrap(data: &mut Vec<u8>) {
+fn unwrap(data: &mut [u8]) {
     native_model::wrapper::Wrapper::deserialize(&data[..]).unwrap();
 }
 

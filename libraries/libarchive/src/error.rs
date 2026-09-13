@@ -23,9 +23,9 @@ pub enum ArchiveError {
 impl error::Error for ArchiveError {
     fn description(&self) -> &str {
         match self {
-            &ArchiveError::Consumed => "Builder already consumed",
-            &ArchiveError::HeaderPosition => "Header position expected to be 0",
-            &ArchiveError::Sys(_, _) => "libarchive system error",
+            ArchiveError::Consumed => "Builder already consumed",
+            ArchiveError::HeaderPosition => "Header position expected to be 0",
+            ArchiveError::Sys(_, _) => "libarchive system error",
         }
     }
 }
@@ -33,9 +33,9 @@ impl error::Error for ArchiveError {
 impl fmt::Display for ArchiveError {
     fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            &ArchiveError::Consumed => write!(fmt, "Builder already consumed"),
-            &ArchiveError::HeaderPosition => write!(fmt, "Header position expected to be 0"),
-            &ArchiveError::Sys(ref code, ref msg) => {
+            ArchiveError::Consumed => write!(fmt, "Builder already consumed"),
+            ArchiveError::HeaderPosition => write!(fmt, "Header position expected to be 0"),
+            ArchiveError::Sys(code, msg) => {
                 write!(fmt, "{} (libarchive err_code={})", msg, code)
             }
         }

@@ -24,7 +24,7 @@ pub struct Builder {
 
 impl Writer {
     pub fn new(handle: *mut ffi::Struct_archive) -> Self {
-        Writer { handle: handle }
+        Writer { handle }
     }
 }
 
@@ -202,7 +202,7 @@ impl Default for Disk {
             if handle.is_null() {
                 panic!("Allocation error");
             }
-            Disk { handle: handle }
+            Disk { handle }
         }
     }
 }
@@ -305,7 +305,7 @@ impl Default for Builder {
                 panic!("Allocation error");
             }
             Builder {
-                handle: handle,
+                handle,
                 consumed: false,
             }
         }

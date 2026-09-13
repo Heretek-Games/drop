@@ -29,7 +29,6 @@
 ///     my_string: String
 /// }
 /// ```
-
 pub struct PostCard;
 
 #[cfg(all(feature = "serde", feature = "postcard_1_0"))]

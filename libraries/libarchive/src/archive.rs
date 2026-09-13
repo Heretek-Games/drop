@@ -1,6 +1,5 @@
-use std::default::Default;
 use std::ffi::{CStr, CString};
-use std::path::PathBuf;
+use std::path::Path;
 use std::str;
 
 use error::ErrCode;
@@ -104,6 +103,10 @@ pub enum FileType {
 }
 
 pub trait Handle {
+    /// # Safety
+    ///
+    /// The returned raw pointer is only valid while the underlying libarchive
+    /// handle remains alive.
     unsafe fn handle(&self) -> *mut ffi::Struct_archive;
 
     fn err_code(&self) -> ErrCode {
@@ -121,6 +124,10 @@ pub trait Handle {
 }
 
 pub trait Entry {
+    /// # Safety
+    ///
+    /// The returned raw pointer is only valid while the owning entry remains
+    /// alive.
     unsafe fn entry(&self) -> *mut ffi::Struct_archive_entry;
 
     fn filetype(&self) -> FileType {
@@ -183,14 +190,14 @@ pub trait Entry {
         }
     }
 
-    fn set_link(&mut self, path: &PathBuf) {
+    fn set_link(&mut self, path: &Path) {
         unsafe {
             let c_str = CString::new(path.to_str().unwrap()).unwrap();
             ffi::archive_entry_set_link(self.entry(), c_str.as_ptr());
         }
     }
 
-    fn set_pathname(&mut self, path: &PathBuf) {
+    fn set_pathname(&mut self, path: &Path) {
         unsafe {
             let c_str = CString::new(path.to_str().unwrap()).unwrap();
             ffi::archive_entry_set_pathname(self.entry(), c_str.as_ptr());
@@ -261,6 +268,7 @@ pub enum ExtractOption {
     ClearNoChangeFFlags,
 }
 
+#[derive(Default)]
 pub struct ExtractOptions {
     pub flags: i32,
 }
@@ -293,11 +301,5 @@ impl ExtractOptions {
         };
         self.flags |= flag;
         self
-    }
-}
-
-impl Default for ExtractOptions {
-    fn default() -> ExtractOptions {
-        ExtractOptions { flags: 0 }
     }
 }

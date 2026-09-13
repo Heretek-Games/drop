@@ -32,7 +32,6 @@
 ///     my_string: String
 /// }
 /// ```
-
 pub struct Bincode;
 
 #[cfg(all(feature = "serde", feature = "bincode_2"))]
