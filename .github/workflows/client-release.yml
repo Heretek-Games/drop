@@ -169,5 +169,6 @@ jobs:
     steps:
       - name: Trigger FlatPark Release Webhook
         uses: flatpark/publish-action@v1
+        continue-on-error: true # Non-blocking until PR #343 is merged on FlatPark
         with:
           app-id: org.heretek_games.Drop

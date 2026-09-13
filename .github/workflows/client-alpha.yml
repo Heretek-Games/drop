@@ -102,6 +102,7 @@ jobs:
 
       - name: Trigger FlatPark Alpha Release Webhook
         uses: flatpark/publish-action@v1
+        continue-on-error: true # Non-blocking until PR #344 is merged on FlatPark
         with:
           app-id: org.heretek_games.Drop.Alpha
           tag: alpha
