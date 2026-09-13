@@ -129,9 +129,9 @@ Owner: TBD · Depends on: M0
 - [x] **A3** Interface extractor → `steam_interfaces.txt` (`interfaces.rs`)
 - [x] **A4** Patcher/replacer + digest verify + rollback (`patch.rs`/`dll.rs`)
 - [x] **A5** Per-flavor config generation (`config.rs`)
-- [x] **A6** Emulator release manager: `release.json` + SHA-256 verify/stage and
-      a transport-agnostic `fetch_release` hook (`dist.rs`; 19 engine tests).
-      The desktop supplies the reqwest-backed fetch.
+- [x] **A6** Emulator release manager: `release.json` + SHA-256 verify/stage
+      (`dist.rs`, 19 engine tests) and the desktop `gse_fetch_release` command
+      that downloads a release into `<dataDir>/tools/gse/<flavor>`.
 - [x] **P5/P7/P9** Bundle integrity: `checksum`/`signature` verified before an
       external bundle is imported (`DROP_PLUGIN_SIGNING_KEY`,
       `DROP_PLUGIN_REQUIRE_SIGNATURE`); P9 via the `hello-world` reference plugin;
@@ -237,8 +237,8 @@ The checklists above are authoritative. Summary:
   `websocket` + `registerWebSocket`), trust model, storage migrations, test
   runner + CI, PATCH fix, frozen A↔B contract.
 - **M1 (A1–A6) complete** — `gse-engine` crate (19 tests); the interceptor
-  applies a staged payload and restores on exit. Open: a release manager that
-  populates `<dataDir>/tools/gse/`, and the desktop install/update UI.
+  applies a staged payload and restores on exit; `gse_fetch_release` downloads
+  and verifies an emulator release into `<dataDir>/tools/gse/`.
 - **M2 complete** — opt-in room-gated interceptor, crash recovery, AppID
   pinning end-to-end, compat registry + consent UI.
 - **M3 — all except B6 client-side VPN validators**: durable store, host lease,

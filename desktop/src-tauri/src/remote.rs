@@ -305,6 +305,68 @@ pub fn plugin_subscribe(app: AppHandle, channel: String) -> Result<(), RemoteAcc
     Ok(())
 }
 
+/// Download and verify an emulator release into
+/// `<dataDir>/tools/gse/<flavor>/`, where the launch interceptor picks it up.
+///
+/// `manifest_url` points at a `release.json`; payload files are fetched from
+/// the same directory and each SHA-256 is verified before writing.
+#[tauri::command]
+pub async fn gse_fetch_release(manifest_url: String) -> Result<(), String> {
+    use gse_engine::dist::{ReleaseSpec, fetch_release};
+
+    let client = DROP_CLIENT_WS_CLIENT.clone();
+    let manifest_bytes = client
+        .get(&manifest_url)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?
+        .bytes()
+        .await
+        .map_err(|e| e.to_string())?;
+    let spec: ReleaseSpec =
+        serde_json::from_slice(&manifest_bytes).map_err(|e| e.to_string())?;
+
+    let base = Url::parse(&manifest_url)
+        .map_err(|e| e.to_string())?
+        .join(".")
+        .map_err(|e| e.to_string())?;
+
+    let mut payloads = std::collections::HashMap::new();
+    for name in spec.files.keys() {
+        let url = base.join(name).map_err(|e| e.to_string())?;
+        let bytes = client
+            .get(url)
+            .send()
+            .await
+            .map_err(|e| e.to_string())?
+            .bytes()
+            .await
+            .map_err(|e| e.to_string())?
+            .to_vec();
+        payloads.insert(name.clone(), bytes);
+    }
+
+    let flavor = match spec.flavor {
+        gse_engine::EmulatorFlavor::GbeFork => "gbe_fork",
+        gse_engine::EmulatorFlavor::GseFork => "gse_fork",
+    };
+    let dest = database::db::DATA_ROOT_DIR.join("tools/gse").join(flavor);
+    fetch_release(
+        &spec,
+        |name| {
+            payloads.get(name).cloned().ok_or_else(|| {
+                gse_engine::EngineError::ScanFailed(format!(
+                    "missing downloaded release file {name}"
+                ))
+            })
+        },
+        &dest,
+    )
+    .map_err(|e| e.to_string())?;
+
+    Ok(())
+}
+
 #[tauri::command]
 pub fn gse_write_room_config(
     install_dir: String,

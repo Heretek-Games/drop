@@ -259,6 +259,7 @@ pub fn run() {
             check_online,
             plugin_request,
             plugin_subscribe,
+            gse_fetch_release,
             gse_write_room_config,
             // Library
             fetch_library,

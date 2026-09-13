@@ -1371,6 +1371,7 @@ dependencies = [
  "futures-util",
  "games",
  "gethostname",
+ "gse-engine",
  "hex",
  "http",
  "http-serde",
