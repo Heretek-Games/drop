@@ -1,18 +1,17 @@
 use std::{
     io::Error,
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::{Arc, LazyLock},
 };
 
 use aes::cipher::{KeyIvInit, StreamCipher};
 use axum::{
     body::Body,
-    extract::{Path, State},
-    http::HeaderMap,
+    extract::{Path as AxumPath, State},
+    http::{HeaderMap, HeaderValue},
     response::{IntoResponse, Response},
 };
 use bytes::Bytes;
-use dashmap::{DashMap, mapref::one::RefMut};
 use droplet_rs::{
     manifest::ChunkData,
     versions::types::{MinimumFileObject, VersionFile},
@@ -54,10 +53,7 @@ impl<'a, T: Stream> SemaphoreStream<'a, T> {
     }
 }
 
-impl<T: Stream> Stream for SemaphoreStream<'_, T>
-where
-    T: Stream,
-{
+impl<T: Stream> Stream for SemaphoreStream<'_, T> {
     type Item = T::Item;
 
     fn poll_next(
@@ -69,54 +65,79 @@ where
     }
 }
 
-static SEMPAHORE_COUNT: LazyLock<usize> =
-    LazyLock::new(|| file_open_limit::get().expect("failed to count max open files"));
-static FILE_SEMAPHORE: LazyLock<Semaphore> = LazyLock::new(|| Semaphore::new(*SEMPAHORE_COUNT));
+/// Number of file descriptors the process may hold open, used to bound the
+/// number of concurrent source readers. Falls back to a conservative default if
+/// the platform limit cannot be read.
+static FILE_OPEN_LIMIT: LazyLock<usize> = LazyLock::new(|| {
+    file_open_limit::get().unwrap_or_else(|err| {
+        warn!("failed to read open file limit, defaulting to 512: {err:?}");
+        512
+    })
+});
+static FILE_SEMAPHORE: LazyLock<Semaphore> = LazyLock::new(|| Semaphore::new(*FILE_OPEN_LIMIT));
 
+/// Serves an encrypted depot chunk.
+///
+/// # Errors
+///
+/// Returns a status code when the context cannot be created, the chunk is not
+/// present in the manifest, or the chunk has too many parts to serve safely.
 pub async fn serve_file(
     State(state): State<Arc<AppState>>,
-    Path((game_id, version_name, chunk_id)): Path<(String, String, String)>,
+    AxumPath((game_id, version_name, chunk_id)): AxumPath<(String, String, String)>,
 ) -> Result<Response, StatusCode> {
-    let context_cache = &state.context_cache;
-
-    let mut context = get_or_create_context(&state, context_cache, game_id, version_name).await?;
+    let context = get_or_create_context(&state, game_id, version_name).await?;
     context.reset_last_access();
 
     let chunk_data = lookup_chunk(&chunk_id, &context)?;
-    if chunk_data.files.len() >= *SEMPAHORE_COUNT {
+    if chunk_data.files.len() >= *FILE_OPEN_LIMIT {
         return Err(StatusCode::INSUFFICIENT_STORAGE);
     }
 
     // Read-through cache: hits skip source storage entirely; misses fill the
-    // cache best-effort and fall back to direct streaming on any failure.
+    // cache best-effort. Any cache failure falls back to streaming directly.
     if state.chunk_cache.enabled() {
-        if let Some(path) = state.chunk_cache.hit(&chunk_data.checksum) {
-            return serve_from_file(&path, &context, &chunk_data).await;
+        if let Some(path) = state.chunk_cache.hit(&chunk_data.checksum)
+            && let Some(response) = serve_from_file(&path, &context, &chunk_data).await
+        {
+            return Ok(response);
         }
 
-        if let Some(path) = fill_cache(&state.chunk_cache, &mut context, &chunk_data).await {
-            return serve_from_file(&path, &context, &chunk_data).await;
+        if let Some(path) = fill_cache(&state.chunk_cache, &context, &chunk_data).await
+            && let Some(response) = serve_from_file(&path, &context, &chunk_data).await
+        {
+            return Ok(response);
         }
     }
 
+    serve_from_source(&context, &chunk_data).await
+}
+
+/// Streams a chunk directly from the source backend.
+async fn serve_from_source(
+    context: &DownloadContext,
+    chunk_data: &ChunkData,
+) -> Result<Response, StatusCode> {
+    let file_count =
+        u32::try_from(chunk_data.files.len()).map_err(|_| StatusCode::INSUFFICIENT_STORAGE)?;
     let permit = FILE_SEMAPHORE
-        .acquire_many(chunk_data.files.len().try_into().unwrap())
+        .acquire_many(file_count)
         .await
         .map_err(|_| StatusCode::INSUFFICIENT_STORAGE)?;
+
     let mut streams = Vec::with_capacity(chunk_data.files.len());
     let mut content_length = 0usize;
 
     for file_entry in &chunk_data.files {
         let reader = get_file_reader(
-            &mut context,
+            context,
             file_entry.filename.clone(),
             file_entry.start,
             file_entry.start + file_entry.length,
         )
         .await?;
 
-        let stream = ReaderStream::new(reader);
-        streams.push(stream);
+        streams.push(ReaderStream::new(reader));
         content_length += file_entry.length;
     }
 
@@ -130,22 +151,29 @@ pub async fn serve_file(
     ))
 }
 
-/// Serves a chunk straight from the content-addressed cache file.
+/// Serves a chunk straight from the content-addressed cache file. Returns `None`
+/// when the file is missing, the wrong size, or cannot be opened, so the caller
+/// can fall back to source streaming.
 async fn serve_from_file(
-    path: &std::path::Path,
-    context: &RefMut<'_, (String, String), DownloadContext>,
+    path: &Path,
+    context: &DownloadContext,
     chunk_data: &ChunkData,
-) -> Result<Response, StatusCode> {
-    let file = tokio::fs::File::open(path)
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    let content_length = chunk_data.files.iter().map(|f| f.length).sum();
-    let permit = FILE_SEMAPHORE
-        .acquire()
-        .await
-        .map_err(|_| StatusCode::INSUFFICIENT_STORAGE)?;
+) -> Option<Response> {
+    let file = tokio::fs::File::open(path).await.ok()?;
+    let actual = file.metadata().await.ok()?.len();
+    let expected: u64 = chunk_data.files.iter().map(|f| f.length as u64).sum();
+    if actual != expected {
+        warn!(
+            "chunk cache entry {} is {actual} bytes, expected {expected}; ignoring",
+            chunk_data.checksum
+        );
+        return None;
+    }
 
-    Ok(encrypted_response(
+    let content_length = chunk_data.files.iter().map(|f| f.length).sum();
+    let permit = FILE_SEMAPHORE.acquire().await.ok()?;
+
+    Some(encrypted_response(
         ReaderStream::new(file),
         content_length,
         context.manifest.key,
@@ -158,17 +186,40 @@ async fn serve_from_file(
 /// path on success, or `None` (leaving the caller to stream directly).
 async fn fill_cache(
     cache: &ChunkCache,
-    context: &mut RefMut<'_, (String, String), DownloadContext>,
+    context: &DownloadContext,
     chunk_data: &ChunkData,
 ) -> Option<PathBuf> {
     let guard = cache.reserve(&chunk_data.checksum)?;
-    let mut file = tokio::fs::File::create(&guard.temp_path).await.ok()?;
+
+    let file_count = u32::try_from(chunk_data.files.len()).ok()?;
+    let permit = FILE_SEMAPHORE.acquire_many(file_count).await.ok()?;
+
+    let mut file = match tokio::fs::File::create(&guard.temp_path).await {
+        Ok(file) => file,
+        Err(e) => {
+            warn!("chunk cache fill failed to create temp file: {e}");
+            return None;
+        }
+    };
+
+    // The cache holds decrypted bytes; keep the file private even if the
+    // containing directory's permissions were widened.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if let Err(e) = file
+            .set_permissions(std::fs::Permissions::from_mode(0o600))
+            .await
+        {
+            warn!("chunk cache fill failed to restrict temp file permissions: {e}");
+        }
+    }
 
     let expected: u64 = chunk_data.files.iter().map(|f| f.length as u64).sum();
     let mut written: u64 = 0;
 
     for file_entry in &chunk_data.files {
-        let mut reader = context
+        let mut reader = match context
             .backend
             .reader(
                 &VersionFile {
@@ -180,7 +231,13 @@ async fn fill_cache(
                 (file_entry.start + file_entry.length) as u64,
             )
             .await
-            .ok()?;
+        {
+            Ok(reader) => reader,
+            Err(e) => {
+                warn!("chunk cache fill failed to open reader: {e:?}");
+                return None;
+            }
+        };
 
         match tokio::io::copy(&mut reader, &mut file).await {
             Ok(bytes) => written += bytes,
@@ -191,10 +248,12 @@ async fn fill_cache(
         }
     }
 
-    if file.flush().await.is_err() {
+    if let Err(e) = file.flush().await {
+        warn!("chunk cache fill flush failed: {e}");
         return None;
     }
     drop(file);
+    drop(permit);
 
     if written != expected {
         warn!(
@@ -236,24 +295,26 @@ where
     let body: Body = Body::from_stream(permit_stream);
 
     let mut headers = HeaderMap::new();
-    headers.insert("Content-Type", "application/octet-stream".parse().unwrap());
+    headers.insert(
+        "Content-Type",
+        HeaderValue::from_static("application/octet-stream"),
+    );
     headers.insert("Content-Length", content_length.into());
 
     (headers, body).into_response()
 }
-async fn acquire_permit<'a>() -> SemaphorePermit<'a> {
-    return GLOBAL_CONTEXT_SEMAPHORE
+
+async fn acquire_permit() -> Result<SemaphorePermit<'static>, StatusCode> {
+    GLOBAL_CONTEXT_SEMAPHORE
         .acquire()
         .await
-        .expect("failed to acquire semaphore");
+        .map_err(|_| StatusCode::SERVICE_UNAVAILABLE)
 }
+
 /**
  * Needs to be cloned for reference reasons
  */
-fn lookup_chunk(
-    chunk_id: &str,
-    context: &RefMut<'_, (String, String), DownloadContext>,
-) -> Result<ChunkData, StatusCode> {
+fn lookup_chunk(chunk_id: &str, context: &DownloadContext) -> Result<ChunkData, StatusCode> {
     context
         .manifest
         .chunks
@@ -261,8 +322,9 @@ fn lookup_chunk(
         .cloned()
         .ok_or(StatusCode::NOT_FOUND)
 }
+
 async fn get_file_reader(
-    context: &mut RefMut<'_, (String, String), DownloadContext>,
+    context: &DownloadContext,
     relative_filename: String,
     start: usize,
     end: usize,
@@ -284,34 +346,36 @@ async fn get_file_reader(
             StatusCode::INTERNAL_SERVER_ERROR
         })
 }
-async fn get_or_create_context<'a>(
+
+async fn get_or_create_context(
     state: &Arc<AppState>,
-    context_cache: &'a DashMap<(String, String), DownloadContext>,
     game_id: String,
     version_name: String,
-) -> Result<RefMut<'a, (String, String), DownloadContext>, StatusCode> {
+) -> Result<Arc<DownloadContext>, StatusCode> {
     let key = (game_id.clone(), version_name.clone());
 
-    if let Some(context) = context_cache.get_mut(&key) {
-        Ok(context)
-    } else {
-        let permit = acquire_permit().await;
-
-        // Check if it's been done while we've been sitting here
-        if let Some(already_done) = context_cache.get_mut(&key) {
-            Ok(already_done)
-        } else {
-            info!("generating context for {game_id}...");
-            let context_result =
-                create_download_context(state, game_id.clone(), version_name.clone()).await?;
-
-            state.context_cache.insert(key.clone(), context_result);
-
-            info!("continuing download for {game_id}");
-
-            drop(permit);
-
-            Ok(context_cache.get_mut(&key).unwrap())
-        }
+    if let Some(context) = state.context_cache.get(&key) {
+        return Ok(Arc::clone(&context));
     }
+
+    let permit = acquire_permit().await?;
+
+    // Another request may have created the context while we waited.
+    if let Some(context) = state.context_cache.get(&key) {
+        return Ok(Arc::clone(&context));
+    }
+
+    info!("generating context for {game_id}...");
+    let context = create_download_context(state, game_id.clone(), version_name.clone()).await?;
+    state.context_cache.insert(key.clone(), Arc::new(context));
+
+    info!("continuing download for {game_id}");
+
+    drop(permit);
+
+    state
+        .context_cache
+        .get(&key)
+        .map(|context| Arc::clone(&context))
+        .ok_or(StatusCode::INTERNAL_SERVER_ERROR)
 }

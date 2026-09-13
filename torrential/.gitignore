@@ -1,3 +1,5 @@
 /target
+# Generated rust-protobuf output is built into OUT_DIR by build.rs. `mod.rs` is
+# the hand-written wrapper that includes it.
 /src/proto/*
-!/src/proto/.gitkeep
+!/src/proto/mod.rs

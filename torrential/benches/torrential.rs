@@ -1,3 +1,5 @@
+#![allow(clippy::unwrap_used)]
+
 use criterion::{Criterion, criterion_group, criterion_main};
 use torrential::downloads::cache::ChunkCache;
 
@@ -12,7 +14,7 @@ fn cache_bench(c: &mut Criterion) {
     assert!(guard.commit(64 * 1024));
 
     c.bench_function("chunk cache hit", |b| {
-        b.iter(|| cache.hit("aa00bb11cc22dd33"))
+        b.iter(|| cache.hit("aa00bb11cc22dd33"));
     });
 }
 

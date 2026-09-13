@@ -8,6 +8,11 @@ use crate::{
     util::ErrorOption,
 };
 
+/// Fetches full version data (including the manifest) for a game version.
+///
+/// # Errors
+///
+/// Returns an error when the query cannot be sent or no response arrives.
 pub async fn fetch_version_data(
     app_state: &AppState,
     _game_id: String,
@@ -25,10 +30,19 @@ pub async fn fetch_version_data(
     Ok(response)
 }
 
+/// Fetches the list of games known to the connected Drop server.
+///
+/// # Errors
+///
+/// Returns an error when the query cannot be sent or no response arrives.
 pub async fn fetch_instance_games(app_state: &AppState) -> Result<Vec<SkeletonGame>, ErrorOption> {
     let message_id = app_state
         .server
-        .send_message(DropBoundType::SERVER_GAMES_QUERY, ServerGamesQuery::new(), None)
+        .send_message(
+            DropBoundType::SERVER_GAMES_QUERY,
+            ServerGamesQuery::new(),
+            None,
+        )
         .await?;
 
     let response: ServerGamesResponse = app_state.server.wait_for_message_id(&message_id).await?;

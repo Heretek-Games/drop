@@ -7,7 +7,7 @@ use droplet_rs::manifest::ManifestWriterFactory;
 use log::info;
 use protobuf::Message;
 use serde_json::json;
-use tokio::{io::{BufWriter, SimplexStream}, spawn, sync::Semaphore};
+use tokio::{io::SimplexStream, spawn, sync::Semaphore};
 
 use crate::{
     proto::{
@@ -27,6 +27,13 @@ static READER_SEMAPHORE: LazyLock<Arc<Semaphore>> = LazyLock::new(|| {
     Arc::new(Semaphore::new(cores))
 });
 
+/// Generates a droplet manifest for the requested version directory, reporting
+/// progress/logs back to the Drop server.
+///
+/// # Errors
+///
+/// Returns an error when the query cannot be parsed, manifest generation fails,
+/// or a response cannot be sent.
 pub async fn generate_manifest_rpc(
     server: Arc<DropServer>,
     message: TorrentialBound,

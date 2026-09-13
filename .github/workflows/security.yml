@@ -55,6 +55,23 @@ jobs:
           cargo audit --file Cargo.lock
         working-directory: ${{ matrix.crate }}
 
+  cargo-deny:
+    name: Rust dependency policy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@7c8d7d138f5c09cef361f8214cf96882cd029cdb # dtolnay/rust-toolchain@nightly
+      - uses: taiki-e/install-action@4b8992af23a2be34fd58f8d9b50d3f4939ad1891 # taiki-e/install-action@cargo-audit
+        with:
+          tool: cargo-deny
+      - name: Check advisories, licenses, bans and sources
+        # Uses the repository-level deny.toml. Extend the working directory (or
+        # matrix) once other crates have been triaged.
+        run: |
+          if [ ! -f Cargo.lock ]; then cargo generate-lockfile; fi
+          cargo deny check
+        working-directory: torrential
+
   golangci:
     name: Go lint (backend)
     runs-on: ubuntu-latest
