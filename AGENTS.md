@@ -144,9 +144,13 @@ Sources: `desktop/src-tauri/gse-engine/`, `process/src/gse_interceptor.rs`,
 - `GseLaunchInterceptor` is **opt-in per launch**: it activates only when
   `steam_settings/custom_broadcasts.txt` exists (written by
   `gse_write_room_config`) or `DROP_GSE_ENABLE` is set, so ordinary launches are
-  untouched. It applies a staged payload from `<dataDir>/tools/gse/<flavor>/`
-  (populated by `gse_fetch_release`) and restores originals on exit;
-  `recover_interrupted_sessions` repairs stale backups at startup.
+  untouched. It reads the room flavor from
+  `steam_settings/drop_gse_flavor.txt` and applies a staged payload from
+  `<dataDir>/tools/gse/<flavor>/` (populated by `gse_fetch_release`) and
+  restores originals on exit; `recover_interrupted_sessions` repairs stale
+  backups at startup. `gse_fetch_release` only trusts HTTPS manifest origins
+  named in `DROP_GSE_RELEASE_ALLOWLIST` (loopback excepted), so a manifest and
+  its payloads cannot both be attacker-chosen.
 - `gse_write_room_config` writes peer addresses and pins the Steam AppID to
   `steam_appid.txt`; the client derives it from `metadataSource === "Steam"` /
   `metadataId`. A compatibility registry (`GSE_BLOCKED_APP_IDS`,

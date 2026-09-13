@@ -319,6 +319,7 @@ export const useGseMultiplayer = (gameId: string) => {
       installDir,
       peerIps: activeRoom.peers,
       appId: activeRoom.appId,
+      flavor: room.emulator.flavor,
     });
   }
 

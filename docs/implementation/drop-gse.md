@@ -123,16 +123,19 @@ Owner: TBD · Depends on: M0
 
 - [x] **A1** Scanner for `steam_api*.dll` / `libsteam_api.so` / `steamclient*.dll`
       (depth-limited, prefix-aware) — `gse-engine/src/scanner.rs`
-- [x] **A2** `process/src/gse_interceptor.rs` delegates to `gse-engine` and now
+- [x] **A2** `process/src/gse_interceptor.rs` delegates to `gse-engine` and
       **applies a staged emulator payload** (backup → replace → config) when
-      `<dataDir>/tools/gse/gbe_fork` exists, falling back to backup-only. The
-      payload dir is injectable for tests; a release manager populates it.
+      `<dataDir>/tools/gse/<flavor>` exists, falling back to backup-only. The
+      flavor is read from `steam_settings/drop_gse_flavor.txt` (default
+      `gbe_fork`), so `gse_fork` rooms stage the right payload. The payload dir
+      is injectable for tests; a release manager populates it.
 - [x] **A3** Interface extractor → `steam_interfaces.txt` (`interfaces.rs`)
 - [x] **A4** Patcher/replacer + digest verify + rollback (`patch.rs`/`dll.rs`)
 - [x] **A5** Per-flavor config generation (`config.rs`)
 - [x] **A6** Emulator release manager: `release.json` + SHA-256 verify/stage
-      (`dist.rs`, 19 engine tests) and the desktop `gse_fetch_release` command
-      that downloads a release into `<dataDir>/tools/gse/<flavor>`.
+      (`dist.rs`, 20 engine tests) and the desktop `gse_fetch_release` command
+      that downloads a release into `<dataDir>/tools/gse/<flavor>`. Only HTTPS
+      origins in `DROP_GSE_RELEASE_ALLOWLIST` are trusted (loopback excepted).
 - [x] **P5/P7/P9** Bundle integrity: `checksum`/`signature` verified before an
       external bundle is imported (`DROP_PLUGIN_SIGNING_KEY`,
       `DROP_PLUGIN_REQUIRE_SIGNATURE`); P9 via the `hello-world` reference plugin;

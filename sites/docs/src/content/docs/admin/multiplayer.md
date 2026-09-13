@@ -142,6 +142,10 @@ migrated to another member automatically.
 - **Integrity:** originals are backed up (`*.orig` + a SHA-256 manifest) before
   patching and restored on exit; a crash-recovery sweep repairs interrupted
   sessions at startup.
+- **Release trust:** `gse_fetch_release` only downloads an emulator release from
+  an HTTPS origin listed in `DROP_GSE_RELEASE_ALLOWLIST` (comma-separated hosts;
+  localhost always allowed for development). An empty allowlist rejects remote
+  manifests, so a tampered manifest cannot substitute its own payloads.
 - **Optional by design:** ordinary launches are untouched — the interceptor only
   runs when a room config exists (or `DROP_GSE_ENABLE` is set).
 

@@ -44,15 +44,9 @@ pub fn recover_interrupted_sessions(install_dirs: &[PathBuf]) -> usize {
         match restore_originals(dir, &targets) {
             Ok(()) => {
                 recovered += 1;
-                info!(
-                    "GSE crash recovery restored originals in {}",
-                    dir.display()
-                );
+                info!("GSE crash recovery restored originals in {}", dir.display());
             }
-            Err(err) => warn!(
-                "GSE crash recovery failed for {}: {err}",
-                dir.display()
-            ),
+            Err(err) => warn!("GSE crash recovery failed for {}: {err}", dir.display()),
         }
     }
     recovered
@@ -80,9 +74,26 @@ fn read_broadcast_peers(install_dir: &Path) -> Vec<String> {
         .unwrap_or_default()
 }
 
-/// Default staged emulator payload location under Drop's data directory.
-fn default_payload_dir() -> Option<PathBuf> {
-    let dir = database::db::DATA_ROOT_DIR.join("tools/gse/gbe_fork");
+/// Read the room's emulator flavor written by `gse_write_room_config`,
+/// defaulting to the Goldberg fork.
+fn read_flavor(install_dir: &Path) -> EmulatorFlavor {
+    match std::fs::read_to_string(install_dir.join("steam_settings/drop_gse_flavor.txt"))
+        .ok()
+        .map(|value| value.trim().to_string())
+        .as_deref()
+    {
+        Some("gse_fork") => EmulatorFlavor::GseFork,
+        _ => EmulatorFlavor::GbeFork,
+    }
+}
+
+/// Staged emulator payload location for a flavor under Drop's data directory.
+fn default_payload_dir(flavor: EmulatorFlavor) -> Option<PathBuf> {
+    let name = match flavor {
+        EmulatorFlavor::GbeFork => "gbe_fork",
+        EmulatorFlavor::GseFork => "gse_fork",
+    };
+    let dir = database::db::DATA_ROOT_DIR.join("tools/gse").join(name);
     dir.is_dir().then_some(dir)
 }
 
@@ -90,8 +101,9 @@ fn default_payload_dir() -> Option<PathBuf> {
 /// a launch. Patching, backup/restore and anti-cheat detection are delegated to
 /// the tested `gse-engine` crate.
 pub struct GseLaunchInterceptor {
-    /// Staged emulator payload (replacement Steam API binaries), if any.
-    payload_dir: Option<PathBuf>,
+    /// Explicit payload override (tests / release manager). When `None`, the
+    /// payload directory is resolved per launch from the room's emulator flavor.
+    payload_override: Option<PathBuf>,
 }
 
 impl Default for GseLaunchInterceptor {
@@ -101,16 +113,18 @@ impl Default for GseLaunchInterceptor {
 }
 
 impl GseLaunchInterceptor {
-    /// Use the default staged payload location under Drop's data directory.
+    /// Resolve the staged payload from the room's flavor at launch time.
     pub fn new() -> Self {
         Self {
-            payload_dir: default_payload_dir(),
+            payload_override: None,
         }
     }
 
     /// Construct with an explicit payload directory (tests / release manager).
     pub fn with_payload_dir(payload_dir: Option<PathBuf>) -> Self {
-        Self { payload_dir }
+        Self {
+            payload_override: payload_dir,
+        }
     }
 }
 
@@ -129,10 +143,7 @@ impl LaunchInterceptor for GseLaunchInterceptor {
 
         // 0. Opt-in gate: ordinary launches are completely untouched.
         if !gse_requested(install_dir) {
-            info!(
-                "GSE not requested for {}; skipping emulator setup",
-                game_id
-            );
+            info!("GSE not requested for {}; skipping emulator setup", game_id);
             return Ok(());
         }
 
@@ -168,10 +179,15 @@ impl LaunchInterceptor for GseLaunchInterceptor {
 
         // 3. Apply the staged emulator payload when present; otherwise only back
         //    up originals and seed a LAN broadcast file (offline/no-payload mode).
-        match &self.payload_dir {
+        let flavor = read_flavor(install_dir);
+        let payload_dir = self
+            .payload_override
+            .clone()
+            .or_else(|| default_payload_dir(flavor));
+        match &payload_dir {
             Some(payload) => {
                 let plan = PatchPlan {
-                    flavor: EmulatorFlavor::GbeFork,
+                    flavor,
                     app_id: read_app_id(install_dir),
                     targets,
                     broadcast_peers: read_broadcast_peers(install_dir),
@@ -187,8 +203,7 @@ impl LaunchInterceptor for GseLaunchInterceptor {
                 std::fs::create_dir_all(&settings_dir).map_err(ProcessError::from)?;
                 let broadcasts = settings_dir.join("custom_broadcasts.txt");
                 if !broadcasts.exists() {
-                    std::fs::write(&broadcasts, DEFAULT_BROADCAST)
-                        .map_err(ProcessError::from)?;
+                    std::fs::write(&broadcasts, DEFAULT_BROADCAST).map_err(ProcessError::from)?;
                 }
             }
         }
@@ -258,6 +273,25 @@ mod tests {
     }
 
     #[test]
+    fn reads_the_room_emulator_flavor() {
+        let dir = create_test_dir("flavor");
+        let settings = dir.join("steam_settings");
+        std::fs::create_dir_all(&settings).unwrap();
+
+        // Missing file defaults to the Goldberg fork.
+        assert_eq!(read_flavor(&dir), EmulatorFlavor::GbeFork);
+
+        std::fs::write(settings.join("drop_gse_flavor.txt"), "gse_fork\n").unwrap();
+        assert_eq!(read_flavor(&dir), EmulatorFlavor::GseFork);
+
+        // Unknown values must not select a payload directory.
+        std::fs::write(settings.join("drop_gse_flavor.txt"), "garbage").unwrap();
+        assert_eq!(read_flavor(&dir), EmulatorFlavor::GbeFork);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn ordinary_launch_is_untouched_without_a_room() {
         let dir = create_test_dir("not-opted-in");
         std::fs::write(dir.join("steam_api64.dll"), b"original-steam-api").unwrap();
@@ -311,11 +345,7 @@ mod tests {
 
         let interceptor = GseLaunchInterceptor::new();
         let mut cmd = Command::new("echo");
-        assert!(
-            interceptor
-                .pre_launch("game-test", &dir, &mut cmd)
-                .is_err()
-        );
+        assert!(interceptor.pre_launch("game-test", &dir, &mut cmd).is_err());
 
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -340,10 +370,7 @@ mod tests {
 
         assert!(interceptor.post_exit("game-test", &dir, Some(0)).is_ok());
 
-        assert_eq!(
-            std::fs::read(&dll_path).unwrap(),
-            b"original-steam-api"
-        );
+        assert_eq!(std::fs::read(&dll_path).unwrap(), b"original-steam-api");
         assert!(!dir.join("steam_api64.dll.orig").exists());
 
         let _ = std::fs::remove_dir_all(&dir);

@@ -26,6 +26,57 @@ pub fn sha256_file(path: &Path) -> Result<String, EngineError> {
     Ok(to_hex(&Sha256::digest(&data)))
 }
 
+/// Split a URL into `(scheme, host)`, both lowercased, ignoring userinfo and
+/// port. Returns `None` for relative or malformed URLs. Deliberately does not
+/// pull in a full URL parser.
+fn split_url(url: &str) -> Option<(String, String)> {
+    let (scheme, rest) = url.split_once("://")?;
+    if scheme.is_empty() {
+        return None;
+    }
+    let authority = rest.split(['/', '?', '#']).next()?;
+    if authority.is_empty() {
+        return None;
+    }
+    let authority = authority
+        .rsplit_once('@')
+        .map_or(authority, |(_, host)| host);
+    let host = if authority.starts_with('[') {
+        // Bracketed IPv6 literal (e.g. `[::1]:8080`).
+        authority
+            .split_once(']')
+            .map_or(authority, |(inner, _)| inner.trim_start_matches('['))
+    } else {
+        authority.split(':').next().unwrap_or(authority)
+    };
+    if host.is_empty() {
+        return None;
+    }
+    Some((scheme.to_ascii_lowercase(), host.to_ascii_lowercase()))
+}
+
+/// Whether a release manifest URL may be fetched.
+///
+/// Only `https` origins are trusted, except loopback hosts (development), which
+/// may also use `http`. Non-loopback hosts must appear in `allowlist`; an empty
+/// allowlist therefore rejects every remote manifest (fail closed).
+pub fn is_trusted_manifest_url(url: &str, allowlist: &[&str]) -> bool {
+    let Some((scheme, host)) = split_url(url) else {
+        return false;
+    };
+    let loopback = host == "localhost" || host == "127.0.0.1" || host == "::1";
+    if loopback {
+        return scheme == "http" || scheme == "https";
+    }
+    if scheme != "https" {
+        return false;
+    }
+    allowlist.iter().any(|entry| {
+        let entry = entry.trim().to_ascii_lowercase();
+        !entry.is_empty() && entry == host
+    })
+}
+
 /// Pinned release descriptor.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReleaseSpec {
@@ -76,11 +127,7 @@ pub fn stage_release(release_dir: &Path, dest: &Path) -> Result<(), EngineError>
 /// `fetch` is supplied by the caller (e.g. a reqwest-backed closure) so the
 /// engine stays transport-agnostic. Each file must match its pinned SHA-256
 /// before it is written; a mismatch aborts without writing it.
-pub fn fetch_release<F>(
-    spec: &ReleaseSpec,
-    fetch: F,
-    dest_dir: &Path,
-) -> Result<(), EngineError>
+pub fn fetch_release<F>(spec: &ReleaseSpec, fetch: F, dest_dir: &Path) -> Result<(), EngineError>
 where
     F: Fn(&str) -> Result<Vec<u8>, EngineError>,
 {
@@ -215,6 +262,43 @@ mod tests {
             fetch_release(&bad, |_| Ok(b"tampered".to_vec()), dest2.path()),
             Err(EngineError::ManifestMismatch { .. })
         ));
+    }
+
+    #[test]
+    fn manifest_url_trust_is_fail_closed() {
+        // Allow-listed HTTPS origin.
+        assert!(is_trusted_manifest_url(
+            "https://cdn.example.com/r/release.json",
+            &["cdn.example.com"]
+        ));
+        // Loopback over http is allowed for local development.
+        assert!(is_trusted_manifest_url(
+            "http://localhost:8080/release.json",
+            &[]
+        ));
+        assert!(is_trusted_manifest_url("http://127.0.0.1/r.json", &[]));
+        assert!(is_trusted_manifest_url("http://[::1]:9000/r.json", &[]));
+        // HTTPS but not allow-listed.
+        assert!(!is_trusted_manifest_url(
+            "https://evil.example.com/release.json",
+            &["cdn.example.com"]
+        ));
+        // Remote plaintext is never trusted.
+        assert!(!is_trusted_manifest_url(
+            "http://cdn.example.com/release.json",
+            &["cdn.example.com"]
+        ));
+        // Empty allowlist rejects every remote manifest.
+        assert!(!is_trusted_manifest_url(
+            "https://cdn.example.com/release.json",
+            &[]
+        ));
+        // Userinfo/port are stripped; host match is case-insensitive.
+        assert!(is_trusted_manifest_url(
+            "https://user:pass@CDN.example.com:8443/r.json",
+            &["cdn.example.com"]
+        ));
+        assert!(!is_trusted_manifest_url("not a url", &["cdn.example.com"]));
     }
 
     #[test]

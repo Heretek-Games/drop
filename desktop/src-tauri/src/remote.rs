@@ -226,33 +226,44 @@ pub async fn plugin_request(
 
     let request_builder = match method.to_uppercase().as_str() {
         "POST" => {
-            let mut req = client.post(endpoint.to_string()).header("Authorization", auth_header);
+            let mut req = client
+                .post(endpoint.to_string())
+                .header("Authorization", auth_header);
             if let Some(b) = body {
                 req = req.json(&b);
             }
             req
         }
         "DELETE" => {
-            let mut req = client.delete(endpoint.to_string()).header("Authorization", auth_header);
+            let mut req = client
+                .delete(endpoint.to_string())
+                .header("Authorization", auth_header);
             if let Some(b) = body {
                 req = req.json(&b);
             }
             req
         }
         "PATCH" => {
-            let mut req = client.patch(endpoint.to_string()).header("Authorization", auth_header);
+            let mut req = client
+                .patch(endpoint.to_string())
+                .header("Authorization", auth_header);
             if let Some(b) = body {
                 req = req.json(&b);
             }
             req
         }
-        _ => client.get(endpoint.to_string()).header("Authorization", auth_header),
+        _ => client
+            .get(endpoint.to_string())
+            .header("Authorization", auth_header),
     };
 
     let response = request_builder.send().await?;
     let status = response.status();
     if !status.is_success() {
-        let err_text = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+        let err_text = response
+            .text()
+            .await
+            .unwrap_or_else(|_| "Unknown error".to_string());
         return Err(RemoteAccessError::UnparseableResponse(format!(
             "Plugin API error ({status}): {err_text}"
         )));
@@ -355,7 +366,24 @@ pub async fn plugin_request_ws(
 /// the same directory and each SHA-256 is verified before writing.
 #[tauri::command]
 pub async fn gse_fetch_release(manifest_url: String) -> Result<(), String> {
-    use gse_engine::dist::{ReleaseSpec, fetch_release};
+    use gse_engine::dist::{ReleaseSpec, fetch_release, is_trusted_manifest_url};
+
+    // Root of trust: only HTTPS origins named in DROP_GSE_RELEASE_ALLOWLIST may
+    // supply a release manifest (loopback is allowed for development). Without
+    // this, a manifest and its matching payloads could both be attacker-chosen.
+    let allowlist_env = std::env::var("DROP_GSE_RELEASE_ALLOWLIST").unwrap_or_default();
+    let allowlist: Vec<&str> = allowlist_env
+        .split(',')
+        .map(str::trim)
+        .filter(|entry| !entry.is_empty())
+        .collect();
+    if !is_trusted_manifest_url(&manifest_url, &allowlist) {
+        return Err(format!(
+            "refusing to fetch emulator release from '{manifest_url}': set \
+             DROP_GSE_RELEASE_ALLOWLIST to the trusted host(s); only HTTPS origins \
+             are accepted (localhost is always allowed)"
+        ));
+    }
 
     let client = DROP_CLIENT_WS_CLIENT.clone();
     let manifest_bytes = client
@@ -366,8 +394,7 @@ pub async fn gse_fetch_release(manifest_url: String) -> Result<(), String> {
         .bytes()
         .await
         .map_err(|e| e.to_string())?;
-    let spec: ReleaseSpec =
-        serde_json::from_slice(&manifest_bytes).map_err(|e| e.to_string())?;
+    let spec: ReleaseSpec = serde_json::from_slice(&manifest_bytes).map_err(|e| e.to_string())?;
 
     let base = Url::parse(&manifest_url)
         .map_err(|e| e.to_string())?
@@ -415,6 +442,7 @@ pub fn gse_write_room_config(
     install_dir: String,
     peer_ips: Vec<String>,
     app_id: Option<u32>,
+    flavor: Option<String>,
 ) -> Result<(), String> {
     let path = std::path::Path::new(&install_dir);
     if !path.is_dir() {
@@ -431,6 +459,16 @@ pub fn gse_write_room_config(
         std::fs::write(settings_dir.join("steam_appid.txt"), app_id.to_string())
             .map_err(|e| format!("Failed to write steam_appid.txt: {e}"))?;
     }
+
+    // Record the emulator flavor so the launch interceptor stages the matching
+    // payload (`tools/gse/<flavor>`) and PatchPlan. Unknown values default to
+    // gbe_fork rather than being written verbatim.
+    let flavor = match flavor.as_deref() {
+        Some("gse_fork") => "gse_fork",
+        _ => "gbe_fork",
+    };
+    std::fs::write(settings_dir.join("drop_gse_flavor.txt"), flavor)
+        .map_err(|e| format!("Failed to write drop_gse_flavor.txt: {e}"))?;
 
     let broadcasts_file = settings_dir.join("custom_broadcasts.txt");
     let content = if peer_ips.is_empty() {
@@ -454,4 +492,3 @@ pub fn gse_write_room_config(
         .map_err(|e| format!("Failed to write custom_broadcasts.txt: {e}"))?;
     Ok(())
 }
-
