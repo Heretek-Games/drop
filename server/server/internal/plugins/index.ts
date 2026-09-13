@@ -2,6 +2,7 @@ import { pluginManager } from "./manager";
 import { dropGseServerPlugin } from "./builtin/drop-gse";
 
 export * from "./types";
+export * from "./errors";
 export * from "./storage";
 export * from "./manager";
 export { dropGseServerPlugin } from "./builtin/drop-gse";

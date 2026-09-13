@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { readBody, createError } from "h3";
+import { PLUGIN_API_VERSION } from "../types";
 import type { PluginContext, ServerPlugin, PluginMetadata } from "../types";
 
 export interface EmulatorBinding {
@@ -50,7 +51,9 @@ export class DropGseServerPlugin implements ServerPlugin {
       "Peer-to-peer multiplayer rooms over virtual mesh networks using Goldberg Steam emulator",
     author: "Heretek Games",
     builtin: true,
-    capabilities: ["routes", "storage", "websocket", "events"],
+    apiVersion: PLUGIN_API_VERSION,
+    trust: "trusted",
+    capabilities: ["routes", "events"],
     enabled: true,
   };
 

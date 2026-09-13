@@ -1,10 +1,25 @@
 import type { H3Event } from "h3";
 import type { Logger } from "pino";
 
+/**
+ * Current plugin API version. Bump this when `PluginContext` or the manifest
+ * contract changes incompatibly. Plugins declare the version they were built
+ * against in `metadata.apiVersion`; mismatches are rejected at registration.
+ */
+export const PLUGIN_API_VERSION = 1;
+
 export type HttpMethod = "GET" | "POST" | "PUT" | "DELETE" | "PATCH" | "ALL";
 
 export type PluginCapability =
   "routes" | "storage" | "websocket" | "events" | "network";
+
+/**
+ * Trust tier. Only `"trusted"` is supported today: plugins run in-process with
+ * the server's own privileges. `"sandboxed"` is reserved for a future isolated
+ * runtime (see docs/implementation/drop-gse.md, M4/P6) and must be rejected
+ * until that runtime exists.
+ */
+export type PluginTrust = "trusted" | "sandboxed";
 
 export type PluginStatus = "active" | "disabled" | "error" | "registered";
 
@@ -15,6 +30,12 @@ export interface PluginMetadata {
   description?: string;
   author?: string;
   builtin?: boolean;
+  /** Plugin API version the plugin was built against. */
+  apiVersion?: number;
+  /** Trust tier. Defaults to "trusted". */
+  trust?: PluginTrust;
+  /** Declared storage schema version; drives `migrateStorage`. */
+  storageVersion?: number;
   capabilities?: PluginCapability[];
   enabled?: boolean;
 }
@@ -45,6 +66,9 @@ export interface PluginStorage {
   set<T>(key: string, value: T): Promise<void>;
   delete(key: string): Promise<void>;
   listKeys(): Promise<string[]>;
+  /** Declared/recorded schema version for `migrateStorage`. */
+  getSchemaVersion(): Promise<number>;
+  setSchemaVersion(version: number): Promise<void>;
 }
 
 export interface PluginContext {
@@ -58,10 +82,21 @@ export interface PluginContext {
   ): void;
   broadcast(channel: string, event: unknown): void;
   subscribe(channel: string, listener: (event: unknown) => void): () => void;
+  /** Network egress. Requires the `network` capability. */
+  fetch(input: string | URL, init?: RequestInit): Promise<Response>;
 }
 
 export interface ServerPlugin {
   metadata: PluginMetadata;
   init(ctx: PluginContext): Promise<void> | void;
   teardown?(): Promise<void> | void;
+  /**
+   * Apply storage migrations when the recorded schema version is older than
+   * `metadata.storageVersion`. `from` is exclusive, `to` inclusive.
+   */
+  migrateStorage?(
+    from: number,
+    to: number,
+    storage: PluginStorage,
+  ): Promise<void>;
 }

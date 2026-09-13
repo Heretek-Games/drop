@@ -5,6 +5,7 @@ import type { PluginStorage } from "./types";
 
 export class FilePluginStorage implements PluginStorage {
   private readonly filePath: string;
+  private readonly schemaPath: string;
   private readonly dirPath: string;
   private cache: Record<string, unknown> | null = null;
   private writeLock: Promise<void> = Promise.resolve();
@@ -12,6 +13,24 @@ export class FilePluginStorage implements PluginStorage {
   constructor(pluginId: string) {
     this.dirPath = path.join(systemConfig.getDataFolder(), "plugins", pluginId);
     this.filePath = path.join(this.dirPath, "state.json");
+    this.schemaPath = path.join(this.dirPath, "schema.json");
+  }
+
+  async getSchemaVersion(): Promise<number> {
+    try {
+      const raw = await fs.readFile(this.schemaPath, "utf-8");
+      const parsed = JSON.parse(raw) as { version?: unknown };
+      return typeof parsed.version === "number" ? parsed.version : 0;
+    } catch {
+      return 0;
+    }
+  }
+
+  async setSchemaVersion(version: number): Promise<void> {
+    await fs.mkdir(this.dirPath, { recursive: true });
+    const tempPath = `${this.schemaPath}.tmp.${Date.now()}`;
+    await fs.writeFile(tempPath, JSON.stringify({ version }, null, 2), "utf-8");
+    await fs.rename(tempPath, this.schemaPath);
   }
 
   private async load(): Promise<Record<string, unknown>> {

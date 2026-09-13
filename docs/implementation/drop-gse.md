@@ -37,6 +37,23 @@ tracks:
 6. License review required: GPL-3.0-or-later (drop-gse) + LGPL-3.0 (emulator
    binaries) combined into AGPL-3.0-or-later (Drop).
 
+## Plugin platform contract (M0)
+
+- **API version** — `PLUGIN_API_VERSION` (`server/internal/plugins/types.ts`).
+  Plugins declare `metadata.apiVersion`; a mismatch is rejected at registration
+  with `PluginApiVersionError`. Manifest files should always set it.
+- **Capabilities** — `routes`, `storage`, `events`, `network` are enforced
+  fail-closed: using an undeclared capability throws `PluginCapabilityError`
+  (routes/events are checked at call time; storage is a guarded wrapper; network
+  gates `ctx.fetch`). `websocket` is reserved until a plugin WS API exists.
+- **Trust** — only `trust: "trusted"` is supported: external plugins run
+  in-process with server privileges. `trust: "sandboxed"` is rejected with
+  `PluginTrustError` until an isolated runtime exists (M4/P6). Treat third-party
+  plugins as trusted code for now.
+- **Storage** — per-plugin directory under `<dataDir>/plugins/<id>/` (writes
+  never touch the code dir). `metadata.storageVersion` + `ServerPlugin.migrateStorage`
+  drive forward migrations; the recorded version lives in `schema.json`.
+
 ## Frozen A↔B contract
 
 Track B produces an `ActiveRoom`; Track A consumes `peers` as the contents of
@@ -53,13 +70,13 @@ Track B produces an `ActiveRoom`; Track A consumes `peers` as the contents of
 
 Owner: TBD · Depends on: none · Blocks: M1–M5
 
-- [ ] **P1** Versioned plugin contract (`PLUGIN_API_VERSION`, manifest schema,
+- [x] **P1** Versioned plugin contract (`PLUGIN_API_VERSION`, manifest schema,
       deprecation policy)
-- [ ] **P2** Real capability enforcement for `routes` / `storage` / `events` /
-      `websocket` / `network` (today only `routes` + `events` are checked; others
-      warn-and-no-op in `server/internal/plugins/manager.ts`)
-- [ ] **P3** Decide + document the trust/isolation model
-- [ ] **P4** Namespaced storage with migrations; state outside the code dir
+- [x] **P2** Real capability enforcement for `routes` / `storage` / `events` /
+      `network` (fail-closed; `websocket` reserved until the ws plugin API lands)
+- [x] **P3** Trust/isolation model documented (`trust: "trusted"` only; in-process)
+- [x] **P4** Namespaced storage with schema-version migrations; state outside the
+      code dir
 - [x] **P8** Test harness — plugin tests run without a Nuxt runtime (`server/dev-tools/run-tests.mjs`,
       `pnpm --filter drop run test`)
 - [x] Fix `remote.rs::plugin_request` PATCH branch
@@ -164,5 +181,9 @@ Delivered in the working tree:
   `useGseMultiplayer.syncRoomConfigToDisk`.
 - Removed the undeclared `uuid` dependency in `drop-gse.ts` (`node:crypto`
   `randomUUID`); declared `jiti` for the server test script.
+- P1–P4: `PLUGIN_API_VERSION` + `apiVersion`/`trust`/`storageVersion` manifest
+  fields; fail-closed capabilities (`PluginCapabilityError`), guarded storage,
+  `ctx.fetch`; storage schema migrations; version/trust validation. Tests cover
+  each (10 plugin tests + 7 pipeline tests pass).
 
-Still open in M0: P1–P4, and the CI test step.
+M0 complete once accumulated in CI. Next: M1 (Part A GSE engine).

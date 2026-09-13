@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { PluginManager } from "../manager";
 import { DropGseServerPlugin } from "../builtin/drop-gse";
+import { PLUGIN_API_VERSION } from "../types";
 import type { PluginContext, PluginStorage, ServerPlugin } from "../types";
 
 /**
@@ -12,6 +13,7 @@ import type { PluginContext, PluginStorage, ServerPlugin } from "../types";
  */
 class MemoryStorage implements PluginStorage {
   private readonly data = new Map<string, unknown>();
+  private schemaVersion = 0;
 
   async get<T>(key: string): Promise<T | null> {
     return this.data.has(key) ? (this.data.get(key) as T) : null;
@@ -28,19 +30,31 @@ class MemoryStorage implements PluginStorage {
   async listKeys(): Promise<string[]> {
     return [...this.data.keys()];
   }
+
+  async getSchemaVersion(): Promise<number> {
+    return this.schemaVersion;
+  }
+
+  async setSchemaVersion(version: number): Promise<void> {
+    this.schemaVersion = version;
+  }
 }
 
 let managerCounter = 0;
 
-/** Build a manager isolated from the Nuxt runtime and the shared plugin dir. */
-function createTestManager(): PluginManager {
+function tmpDataDir(): string {
   managerCounter += 1;
+  return path.join(
+    os.tmpdir(),
+    `drop-plugin-test-${process.pid}-${managerCounter}-${Date.now()}`,
+  );
+}
+
+/** Build a manager isolated from the Nuxt runtime and the shared plugin dir. */
+function createTestManager(storage?: PluginStorage): PluginManager {
   return new PluginManager({
-    dataDir: path.join(
-      os.tmpdir(),
-      `drop-plugin-test-${process.pid}-${managerCounter}-${Date.now()}`,
-    ),
-    storageFactory: () => new MemoryStorage(),
+    dataDir: tmpDataDir(),
+    storageFactory: () => storage ?? new MemoryStorage(),
     authResolver: async () => ({ userId: undefined }),
   });
 }
@@ -245,7 +259,7 @@ test("PluginManager togglePlugin enables and disables plugin lifecycle", async (
   assert.equal(resAfter.pong, true);
 });
 
-test("PluginManager capability sandboxing restricts undeclared capabilities", async () => {
+test("PluginManager fails closed when using an undeclared capability", async () => {
   const manager = createTestManager();
 
   const noRoutesPlugin: ServerPlugin = {
@@ -256,28 +270,125 @@ test("PluginManager capability sandboxing restricts undeclared capabilities", as
       capabilities: ["storage"], // explicitly lacks "routes"
     },
     init: (ctx: PluginContext) => {
-      ctx.registerRoute("GET", "/should-not-exist", () => {
-        return { allowed: false };
+      ctx.registerRoute("GET", "/should-not-exist", () => ({
+        allowed: false,
+      }));
+    },
+  };
+
+  await assert.rejects(() => manager.registerPlugin(noRoutesPlugin), {
+    name: "PluginCapabilityError",
+  });
+  assert.equal(
+    manager.listPlugins().find((p) => p.id === "no-routes-plugin")?.status,
+    "error",
+  );
+});
+
+test("PluginManager denies storage and network without capabilities", async () => {
+  const manager = createTestManager();
+
+  const plugin: ServerPlugin = {
+    metadata: {
+      id: "no-io-plugin",
+      name: "No IO Plugin",
+      version: "1.0.0",
+      capabilities: ["routes"],
+    },
+    async init(ctx: PluginContext) {
+      await assert.rejects(() => ctx.storage.get("x"), {
+        name: "PluginCapabilityError",
+      });
+      await assert.rejects(() => ctx.fetch("https://example.com"), {
+        name: "PluginCapabilityError",
       });
     },
   };
 
-  await manager.registerPlugin(noRoutesPlugin);
-
-  const mockEvent = {
-    method: "GET",
-    headers: new Headers(),
-  } as unknown as import("h3").H3Event;
-
-  await assert.rejects(
-    async () => {
-      await manager.dispatch(
-        "no-routes-plugin",
-        "GET",
-        "/should-not-exist",
-        mockEvent,
-      );
-    },
-    { statusCode: 404 },
+  await manager.registerPlugin(plugin);
+  assert.equal(
+    manager.listPlugins().find((p) => p.id === "no-io-plugin")?.status,
+    "active",
   );
+});
+
+test("PluginManager rejects incompatible plugin API versions", async () => {
+  const manager = createTestManager();
+
+  const plugin: ServerPlugin = {
+    metadata: {
+      id: "old-plugin",
+      name: "Old",
+      version: "1.0.0",
+      apiVersion: 0,
+    },
+    init: () => {},
+  };
+
+  await assert.rejects(() => manager.registerPlugin(plugin), {
+    name: "PluginApiVersionError",
+  });
+
+  const current: ServerPlugin = {
+    metadata: {
+      id: "current-plugin",
+      name: "Current",
+      version: "1.0.0",
+      apiVersion: PLUGIN_API_VERSION,
+    },
+    init: () => {},
+  };
+
+  await manager.registerPlugin(current);
+  assert.equal(
+    manager.listPlugins().find((p) => p.id === "current-plugin")?.status,
+    "active",
+  );
+});
+
+test("PluginManager rejects unsupported trust tiers", async () => {
+  const manager = createTestManager();
+
+  const plugin: ServerPlugin = {
+    metadata: {
+      id: "sandboxed-plugin",
+      name: "Sandboxed",
+      version: "1.0.0",
+      trust: "sandboxed",
+    },
+    init: () => {},
+  };
+
+  await assert.rejects(() => manager.registerPlugin(plugin), {
+    name: "PluginTrustError",
+  });
+});
+
+test("PluginManager runs storage migrations to the declared version", async () => {
+  const storage = new MemoryStorage();
+  const manager = createTestManager(storage);
+  const migrations: Array<[number, number]> = [];
+
+  const plugin: ServerPlugin = {
+    metadata: {
+      id: "migrating-plugin",
+      name: "Migrating",
+      version: "1.0.0",
+      capabilities: ["storage"],
+      storageVersion: 2,
+    },
+    init: () => {},
+    migrateStorage: async (from, to, target) => {
+      migrations.push([from, to]);
+      await target.set("migrated", true);
+    },
+  };
+
+  await manager.registerPlugin(plugin);
+  assert.deepEqual(migrations, [[0, 2]]);
+  assert.equal(await storage.getSchemaVersion(), 2);
+
+  // Re-registering must not re-run migrations.
+  await manager.registerPlugin(plugin);
+  assert.deepEqual(migrations, [[0, 2]]);
 });

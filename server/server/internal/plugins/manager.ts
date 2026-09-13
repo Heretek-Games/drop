@@ -6,6 +6,12 @@ import type { H3Event } from "h3";
 import { getQuery, createError } from "h3";
 import type { Logger } from "pino";
 import { logger } from "../logging";
+import { PLUGIN_API_VERSION } from "./types";
+import {
+  PluginApiVersionError,
+  PluginCapabilityError,
+  PluginTrustError,
+} from "./errors";
 import type {
   HttpMethod,
   PluginCapability,
@@ -136,12 +142,43 @@ export class PluginManager {
     return new FilePluginStorage(pluginId);
   }
 
+  /**
+   * Restrict storage access to plugins that declared the `storage` capability.
+   * Missing capability is fail-closed: every method throws rather than
+   * silently reading/writing.
+   */
+  private guardStorage(
+    pluginId: string,
+    capabilities: PluginCapability[] | undefined,
+    storage: PluginStorage,
+  ): PluginStorage {
+    if (this.hasCapability(capabilities, "storage")) {
+      return storage;
+    }
+    const deny = (operation: string): never => {
+      throw new PluginCapabilityError(pluginId, "storage", operation);
+    };
+    return {
+      get: async () => deny("storage.get"),
+      set: async () => deny("storage.set"),
+      delete: async () => deny("storage.delete"),
+      listKeys: async () => deny("storage.listKeys"),
+      getSchemaVersion: async () => deny("storage.getSchemaVersion"),
+      setSchemaVersion: async () => deny("storage.setSchemaVersion"),
+    };
+  }
+
   private async createPluginContext(
     plugin: ServerPlugin,
   ): Promise<PluginContext> {
     const id = plugin.metadata.id;
+    const capabilities = plugin.metadata.capabilities;
     const pluginLogger = this.log.child({ plugin: id });
-    const storage = await this.createStorage(id);
+    const storage = this.guardStorage(
+      id,
+      capabilities,
+      await this.createStorage(id),
+    );
     const pluginRoutes: RegisteredRoute[] = [];
     this.routes.set(id, pluginRoutes);
 
@@ -154,11 +191,12 @@ export class PluginManager {
         pattern: string,
         handler: RouteHandler,
       ) => {
-        if (!this.hasCapability(plugin.metadata.capabilities, "routes")) {
-          pluginLogger.warn(
-            `Plugin '${id}' attempted to register route '${pattern}' without 'routes' capability.`,
+        if (!this.hasCapability(capabilities, "routes")) {
+          throw new PluginCapabilityError(
+            id,
+            "routes",
+            `registerRoute(${pattern})`,
           );
-          return;
         }
 
         const { regex, paramNames } = this.patternToRegex(pattern);
@@ -172,31 +210,69 @@ export class PluginManager {
         pluginLogger.debug(`Registered route [${method}] ${pattern}`);
       },
       broadcast: (channel: string, event: unknown) => {
-        if (!this.hasCapability(plugin.metadata.capabilities, "events")) {
-          pluginLogger.warn(
-            `Plugin '${id}' attempted to broadcast on '${channel}' without 'events' capability.`,
+        if (!this.hasCapability(capabilities, "events")) {
+          throw new PluginCapabilityError(
+            id,
+            "events",
+            `broadcast(${channel})`,
           );
-          return;
         }
         this.eventBus.emit(channel, event);
       },
       subscribe: (channel: string, listener: (event: unknown) => void) => {
-        if (!this.hasCapability(plugin.metadata.capabilities, "events")) {
-          pluginLogger.warn(
-            `Plugin '${id}' attempted to subscribe to '${channel}' without 'events' capability.`,
+        if (!this.hasCapability(capabilities, "events")) {
+          throw new PluginCapabilityError(
+            id,
+            "events",
+            `subscribe(${channel})`,
           );
-          return () => {};
         }
         this.eventBus.on(channel, listener);
         return () => {
           this.eventBus.off(channel, listener);
         };
       },
+      fetch: async (input: string | URL, init?: RequestInit) => {
+        if (!this.hasCapability(capabilities, "network")) {
+          throw new PluginCapabilityError(id, "network", "fetch");
+        }
+        return fetch(input, init);
+      },
     };
+  }
+
+  /**
+   * Run a plugin's storage migrations when its recorded schema version is
+   * behind the version it declares. No-op for plugins that do not set
+   * `storageVersion`.
+   */
+  private async runStorageMigrations(
+    plugin: ServerPlugin,
+    storage: PluginStorage,
+  ): Promise<void> {
+    const target = plugin.metadata.storageVersion ?? 0;
+    if (target <= 0) return;
+    const current = await storage.getSchemaVersion();
+    if (current >= target) return;
+    if (plugin.migrateStorage) {
+      await plugin.migrateStorage(current, target, storage);
+    }
+    await storage.setSchemaVersion(target);
+  }
+
+  private assertPluginCompatible(plugin: ServerPlugin): void {
+    const { id, apiVersion, trust } = plugin.metadata;
+    if (apiVersion !== undefined && apiVersion !== PLUGIN_API_VERSION) {
+      throw new PluginApiVersionError(id, PLUGIN_API_VERSION, apiVersion);
+    }
+    if (trust !== undefined && trust !== "trusted") {
+      throw new PluginTrustError(id, trust);
+    }
   }
 
   async registerPlugin(plugin: ServerPlugin): Promise<void> {
     const id = plugin.metadata.id;
+    this.assertPluginCompatible(plugin);
     if (this.plugins.has(id)) {
       this.log.warn(`Plugin ${id} is already registered, replacing`);
       await this.unregisterPlugin(id);
@@ -219,6 +295,8 @@ export class PluginManager {
       );
       return;
     }
+
+    await this.runStorageMigrations(plugin, context.storage);
 
     try {
       await plugin.init(context);
@@ -282,6 +360,7 @@ export class PluginManager {
       if (loaded.status !== "active") {
         const context = await this.createPluginContext(loaded.plugin);
         loaded.context = context;
+        await this.runStorageMigrations(loaded.plugin, context.storage);
         try {
           await loaded.plugin.init(context);
           loaded.status = "active";
