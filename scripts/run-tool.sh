@@ -17,7 +17,7 @@ if command -v "$tool" >/dev/null 2>&1; then
   exec "$tool" "$@"
 fi
 for dir in "$HOME/.local/share/mise/shims" "$HOME/.local/bin"; do
-  if [ -x "$dir/$tool" ]; then
+  if [[ -x "$dir/$tool" ]]; then
     exec "$dir/$tool" "$@"
   fi
 done

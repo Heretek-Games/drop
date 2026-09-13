@@ -14,7 +14,7 @@
         <slot />
         <div class="mt-10">
           <div>
-            <div v-if="loading" role="status">
+            <output v-if="loading" aria-label="Loading">
               <svg
                 aria-hidden="true"
                 class="w-5 h-5 text-transparent animate-spin fill-white"
@@ -32,7 +32,7 @@
                 />
               </svg>
               <span class="sr-only">Loading...</span>
-            </div>
+            </output>
             <span v-else class="inline-flex gap-x-8 items-center">
               <button
                 type="button"

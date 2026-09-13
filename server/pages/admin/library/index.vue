@@ -460,7 +460,7 @@
         v-if="gamesLoading"
         class="absolute inset-0 bg-zinc-900/50 flex items-start p-4 justify-center"
       >
-        <div role="status">
+        <output aria-label="Loading">
           <svg
             aria-hidden="true"
             class="size-8 text-transparent animate-spin fill-white"
@@ -478,7 +478,7 @@
             />
           </svg>
           <span class="sr-only">{{ $t("common.srLoading") }}</span>
-        </div>
+        </output>
       </div>
     </ul>
     <nav

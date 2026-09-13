@@ -263,9 +263,9 @@
             </transition>
           </div>
         </Listbox>
-        <div
+        <output
           v-else-if="gameSearchResultsLoading"
-          role="status"
+          aria-label="Loading"
           class="inline-flex text-zinc-100 font-display font-semibold items-center gap-x-4"
         >
           {{ $t("library.admin.import.loading") }}
@@ -285,7 +285,7 @@
               fill="currentFill"
             />
           </svg>
-        </div>
+        </output>
 
         <div
           v-if="gameSearchResultsError"

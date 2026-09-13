@@ -16,11 +16,11 @@ description: Use when triaging SonarCloud findings for this repository (quality 
 
 ## Authenticate the CLI
 
-The token lives in `~/.config/sonar/env` (sourced by `~/.bashrc`):
+Ensure the `sonar` CLI is on your `PATH` (Homebrew, `mise`, or your package
+manager), then source your token and confirm it works:
 
 ```sh
-export PATH="/home/linuxbrew/.linuxbrew/bin:$PATH"
-. "$HOME/.config/sonar/env"
+. "$HOME/.config/sonar/env" # personal token; often sourced by ~/.bashrc
 sonar auth status
 ```
 

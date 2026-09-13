@@ -217,8 +217,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # actions/checkout@v7
         with:
           persist-credentials: false
-      - uses: taiki-e/install-action@4b8992af23a2be34fd58f8d9b50d3f4939ad1891 # taiki-e/install-action@cargo-audit
+      - uses: taiki-e/install-action@4b8992af23a2be34fd58f8d9b50d3f4939ad1891 # taiki-e/install-action@typos
         with:
-          tool: typos
+          tool: typos@1.50.1
       - name: Check spelling
         run: typos

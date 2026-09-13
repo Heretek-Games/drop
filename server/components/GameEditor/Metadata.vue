@@ -226,9 +226,9 @@
               >
                 <PencilIcon class="animate-pulse size-5 text-zinc-100" />
               </div>
-              <div
+              <output
                 v-else-if="descriptionSaving == DescriptionSavingState.Loading"
-                role="status"
+                aria-label="Loading"
               >
                 <svg
                   aria-hidden="true"
@@ -247,7 +247,7 @@
                   />
                 </svg>
                 <span class="sr-only">{{ $t("common.srLoading") }}</span>
-              </div>
+              </output>
             </div>
 
             <button

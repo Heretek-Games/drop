@@ -117,7 +117,7 @@
       v-if="loading"
       class="h-full grow flex p-8 justify-center text-zinc-100"
     >
-      <div role="status">
+      <output aria-label="Loading">
         <svg
           aria-hidden="true"
           class="w-6 h-6 text-transparent animate-spin fill-zinc-600"
@@ -135,7 +135,7 @@
           />
         </svg>
         <span class="sr-only">Loading...</span>
-      </div>
+      </output>
     </div>
   </div>
 </template>

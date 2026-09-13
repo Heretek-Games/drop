@@ -6,11 +6,12 @@
   "scripts": {
     "build": "nuxt generate",
     "dev": "nuxt dev",
+    "dev:prepare": "nuxt prepare",
     "postinstall": "nuxt prepare",
     "tauri": "tauri",
     "typecheck": "nuxt typecheck",
-    "lint": "eslint .",
-    "lint:fix": "eslint . --fix"
+    "lint": "pnpm run dev:prepare && eslint .",
+    "lint:fix": "pnpm run dev:prepare && eslint . --fix"
   },
   "dependencies": {
     "@headlessui/vue": "^1.7.23",

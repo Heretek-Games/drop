@@ -408,7 +408,7 @@
           </div>
         </div>
         <div v-else class="w-full flex items-center justify-center p-4">
-          <div role="status">
+          <output aria-label="Loading">
             <svg
               aria-hidden="true"
               class="w-7 h-7 text-transparent animate-spin fill-white"
@@ -426,7 +426,7 @@
               />
             </svg>
             <span class="sr-only">Loading...</span>
-          </div>
+          </output>
         </div>
         <div v-if="installDirs">
           <InstallDirectorySelector

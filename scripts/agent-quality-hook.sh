@@ -20,7 +20,7 @@ print(tool_input.get("file_path") or "")
 '
 )"
 
-if [ -z "$file" ] || [ ! -f "$file" ]; then
+if [[ -z "$file" || ! -f "$file" ]]; then
   exit 0
 fi
 

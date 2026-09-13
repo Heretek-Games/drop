@@ -130,8 +130,8 @@ pre-push:
       glob: "**/*.{js,cjs,mjs,ts,tsx,vue,py,sh,bash,yml,yaml,go,rs}"
       run: |
         sonar_bin="$(command -v sonar || true)"
-        if [ -z "$sonar_bin" ] && [ -x "/home/linuxbrew/.linuxbrew/bin/sonar" ]; then
-          sonar_bin="/home/linuxbrew/.linuxbrew/bin/sonar"
+        if [ -z "$sonar_bin" ] && [ -x "$HOME/.local/bin/sonar" ]; then
+          sonar_bin="$HOME/.local/bin/sonar"
         fi
         if [ -z "$sonar_bin" ]; then
           echo "sonar: CLI not installed locally; remote analysis is authoritative"
