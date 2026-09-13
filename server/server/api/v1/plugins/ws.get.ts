@@ -22,6 +22,13 @@ export default defineWebSocketHandler({
       const allowedHosts = new Set<string>();
       const host = peer.request.headers.get("host");
       if (host) allowedHosts.add(host);
+      const forwardedHost = peer.request.headers.get("x-forwarded-host");
+      if (forwardedHost) {
+        for (const item of forwardedHost.split(",")) {
+          const trimmed = item.trim();
+          if (trimmed) allowedHosts.add(trimmed);
+        }
+      }
       const externalUrl = process.env.EXTERNAL_URL;
       if (externalUrl) {
         try {

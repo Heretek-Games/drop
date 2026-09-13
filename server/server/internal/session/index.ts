@@ -188,7 +188,7 @@ export class SessionHandler {
     const token = this.getSessionToken(h3);
     if (!token) return false;
     if (!this.signoutByToken(token)) return false;
-    deleteCookie(h3, dropTokenCookieName);
+    deleteCookie(h3, dropTokenCookieName, { path: "/" });
     return true;
   }
 
