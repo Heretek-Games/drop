@@ -8,7 +8,7 @@ use std::{
 use client::{app_state::AppState, app_status::AppStatus};
 use database::db::DATA_ROOT_DIR;
 use http::Extensions;
-use log::{debug, info, warn};
+use log::{debug, warn};
 use reqwest::Certificate;
 use reqwest_middleware::{
     ClientBuilder, ClientWithMiddleware, Error, Middleware, Next, Result,
@@ -128,11 +128,7 @@ fn fetch_certificates() -> Vec<Certificate> {
                                 for cert in certificates {
                                     certs.push(cert);
                                 }
-                                info!(
-                                    "added {} certificate(s) from {}",
-                                    certs.len(),
-                                    c.file_name().display()
-                                );
+                                debug!("loaded a certificate bundle");
                             }
                             Err(e) => warn!(
                                 "Invalid certificate file {} with error {}",

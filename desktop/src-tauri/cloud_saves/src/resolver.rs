@@ -113,10 +113,7 @@ pub fn extract(file: PathBuf) -> Result<(), BackupError> {
         let new_path = parse_path(file.path.into(), handler, &manifest.game_version)?;
         create_dir_all(new_path.parent().unwrap()).unwrap();
 
-        println!(
-            "Current path {:?} copying to {:?}",
-            &current_path, &new_path
-        );
+        debug!("copying extracted save file");
 
         copy_item(current_path, new_path).unwrap();
     }
