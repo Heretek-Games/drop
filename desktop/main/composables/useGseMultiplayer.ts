@@ -145,24 +145,59 @@ export const useGseMultiplayer = (gameId: string) => {
   }
 
   /**
-   * Request this member's mesh credential. This is what causes the server to
-   * assign the member a mesh address (reflected in the room member list).
-   */
-  /**
    * Join the room's ZeroTier network via the local ZeroTier One service. The
    * credential encodes the network id as `zerotier:<nwid>:<room>:<user>`.
-   * Missing ZeroTier is surfaced as an error but does not abort the room.
+   * Returns this node's ZeroTier address (needed to authorize the member), or
+   * null when the mesh is not ZeroTier or ZeroTier is unavailable.
    */
-  async function joinMesh(secret: string): Promise<void> {
-    if (!secret.startsWith("zerotier:")) return;
+  async function joinMesh(secret: string): Promise<string | null> {
+    if (!secret.startsWith("zerotier:")) return null;
     const networkId = secret.split(":")[1];
-    if (!networkId) return;
+    if (!networkId) return null;
     selfNetworkId.value = networkId;
     try {
-      await invoke("gse_mesh_join", { networkId });
+      return await invoke<string>("gse_mesh_join", { networkId });
+    } catch (e) {
+      error.value = (e as string).toString();
+      return null;
+    }
+  }
+
+  /**
+   * Report this node's ZeroTier address to the coordinator so it authorizes
+   * the member on the room's controller and assigns a deterministic address.
+   */
+  async function reportMember(roomId: string, memberId: string): Promise<void> {
+    try {
+      const res = await invoke<{ room?: GseRoom; address?: string }>(
+        "plugin_request",
+        {
+          pluginId: "drop-gse",
+          method: "POST",
+          path: `/rooms/${roomId}/member`,
+          body: { memberId },
+        },
+      );
+      if (res.address) selfAddress.value = res.address;
+      if (res.room) currentRoom.value = res.room;
     } catch (e) {
       error.value = (e as string).toString();
     }
+  }
+
+  /**
+   * Apply a server credential: record any backend-assigned address, join the
+   * ZeroTier network, then report this node so the coordinator authorizes it.
+   * The address is often only assigned at authorization time (ZTNET), so the
+   * report step is what makes `meshReady` true.
+   */
+  async function applyCredential(
+    roomId: string,
+    credential: { secret: string; address?: string },
+  ): Promise<void> {
+    if (credential.address) selfAddress.value = credential.address;
+    const nodeId = await joinMesh(credential.secret);
+    if (nodeId) await reportMember(roomId, nodeId);
   }
 
   async function requestCredential(
@@ -178,8 +213,7 @@ export const useGseMultiplayer = (gameId: string) => {
         data: { roomId },
       });
       if (res?.credential) {
-        selfAddress.value = res.credential.address ?? null;
-        await joinMesh(res.credential.secret);
+        await applyCredential(roomId, res.credential);
         return res.credential;
       }
     } catch {
@@ -195,9 +229,7 @@ export const useGseMultiplayer = (gameId: string) => {
         path: `/rooms/${roomId}/credential`,
       });
       if (res.credential) {
-        // The assigned address is this client's mesh-membership proof.
-        selfAddress.value = res.credential.address ?? null;
-        await joinMesh(res.credential.secret);
+        await applyCredential(roomId, res.credential);
         return res.credential;
       }
       return null;

@@ -6,7 +6,12 @@ import os from "node:os";
 import path from "node:path";
 import { PluginManager } from "../manager";
 import { DropGseServerPlugin } from "../builtin/drop-gse";
-import { InMemoryMeshBackend } from "../builtin/gse/mesh";
+import {
+  InMemoryMeshBackend,
+  roomCidr,
+  roomMemberAddress,
+} from "../builtin/gse/mesh";
+import { ZtnetBackend } from "../builtin/gse/ztnet";
 import { StorageRoomPersistence } from "../builtin/gse/persistence";
 import { RoomStore } from "../builtin/gse/room-store";
 import { HelloWorldPlugin } from "../builtin/hello-world";
@@ -469,6 +474,87 @@ test("drop-gse distributes credentials over the authenticated WebSocket", async 
     { userId: undefined, send: (data) => refused.push(data) },
   );
   assert.equal((refused[0] as { ok: boolean }).ok, false);
+});
+
+/** Minimal H3Event with a JSON body, enough for readBody/getQuery/dispatch. */
+function jsonEvent(method: string, url: string, body?: unknown) {
+  return {
+    method,
+    path: url,
+    headers: new Headers({ "content-type": "application/json" }),
+    node: {
+      req: { headers: { "content-type": "application/json" }, url },
+    },
+    _requestBody: body,
+  } as unknown as import("h3").H3Event;
+}
+
+test("drop-gse member report authorizes the ZeroTier node and returns its address", async () => {
+  const storage = new MemoryStorage();
+  const calls: string[] = [];
+  const backend = new ZtnetBackend({
+    baseUrl: "http://ztnet:3000",
+    apiToken: "org-token",
+    organizationId: "org-1",
+    fetchImpl: async (url, init) => {
+      calls.push(`${init?.method ?? "GET"} ${url}`);
+      if (init?.method === "POST" && url.endsWith("/network")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ nwid: "8056c2e21c000001" }),
+          text: async () => "",
+        };
+      }
+      return {
+        ok: true,
+        status: init?.method === "DELETE" ? 204 : 200,
+        json: async () => ({}),
+        text: async () => "",
+      };
+    },
+  });
+
+  // Authenticated as user-1 for every dispatched route.
+  const manager = new PluginManager({
+    dataDir: tmpDataDir(),
+    storageFactory: () => storage,
+    authResolver: async () => ({ userId: "user-1" }),
+  });
+  await manager.registerPlugin(
+    new DropGseServerPlugin(new StorageRoomPersistence(storage), backend),
+  );
+
+  const created = (await manager.dispatch(
+    "drop-gse",
+    "POST",
+    "/rooms",
+    jsonEvent("POST", "/rooms", { gameId: "game-zt", versionId: "v1" }),
+  )) as { room: { id: string; members: Array<{ meshAddress?: string }> } };
+
+  const memberId = "abcdef0123";
+  const reported = (await manager.dispatch(
+    "drop-gse",
+    "POST",
+    `/rooms/${created.room.id}/member`,
+    jsonEvent("POST", `/rooms/${created.room.id}/member`, { memberId }),
+  )) as {
+    room: { members: Array<{ userId: string; meshAddress?: string }> };
+    address?: string;
+  };
+
+  const expected = roomMemberAddress(roomCidr(created.room.id), memberId);
+  assert.ok(expected, "deterministic address should be derivable");
+  assert.equal(reported.address, expected);
+  assert.equal(
+    reported.room.members.find((member) => member.userId === "user-1")
+      ?.meshAddress,
+    expected,
+  );
+  assert.ok(
+    calls.some((call) => call.includes(`/member/${memberId}`)),
+    "the controller must be asked to authorize the node",
+  );
 });
 
 test("PluginManager routes WebSocket messages and enforces the capability", async () => {

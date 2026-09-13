@@ -62,9 +62,13 @@ export class DropGseServerPlugin implements ServerPlugin {
 
   /**
    * `persistence` defaults to Postgres (`PrismaRoomPersistence`). Tests inject
-   * a `StorageRoomPersistence` so no database is required.
+   * a `StorageRoomPersistence` so no database is required. `backend` overrides
+   * the env-selected mesh backend (also used by tests).
    */
-  constructor(private readonly persistence?: RoomPersistence) {}
+  constructor(
+    private readonly persistence?: RoomPersistence,
+    private readonly backendOverride?: MeshBackend,
+  ) {}
 
   private resolveBackend(): MeshBackend {
     const selected = (process.env.GSE_MESH_BACKEND ?? "").toLowerCase();
@@ -117,7 +121,7 @@ export class DropGseServerPlugin implements ServerPlugin {
     const compat = new CompatRegistry(compatFromEnv());
     this.store = new RoomStore(
       this.persistence ?? new PrismaRoomPersistence(),
-      this.resolveBackend(),
+      this.backendOverride ?? this.resolveBackend(),
       Date.now,
       compat,
     );
@@ -322,11 +326,16 @@ export class DropGseServerPlugin implements ServerPlugin {
           context.userId,
           body.memberId,
         );
+        // Report the address assigned to *this* member so the client can mark
+        // its mesh as ready without having to know its own user id.
+        const address = room.members.find(
+          (member) => member.userId === context.userId,
+        )?.meshAddress;
         ctx.broadcast("gse:rooms", {
           type: "room_updated",
           room: toDiscoverable(room),
         });
-        return { room };
+        return { room, address };
       } catch (err) {
         const message = String(err);
         throw createError({

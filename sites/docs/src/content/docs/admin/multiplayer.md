@@ -119,7 +119,9 @@ GSE_TAILSCALE_TAG=tag:dropgse
 1. Open a game's page and choose **Multiplayer**.
 2. Tick the consent box and **Create & Host Room**, or **Join** an existing one.
 3. Drop asks the server for this member's credential, joins the room network
-   with `zerotier-cli`, and writes the peer list into `custom_broadcasts.txt`.
+   with `zerotier-cli`, then reports its ZeroTier node address so the controller
+   authorizes it and assigns a room address. The peer list is written into
+   `custom_broadcasts.txt`.
 4. **Launch With Room** starts the patched game; leaving the room tears the
    network membership down.
 

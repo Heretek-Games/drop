@@ -186,12 +186,14 @@ Owner: TBD · Depends on: M0, M2
       ship with the deploy template; `dev-tools/gse-ztnet-check.ts` verifies a
       live stack. ZTNET's update API does not expose `enableBroadcast` (unicast
       `custom_broadcasts.txt` covers discovery).
-- [x] **B6** Client requests its credential after host/join, refreshes the room
+- [x] **B6** Client requests its credential after host/join, joins the network
+      through `zerotier-cli` (`gse_mesh_join` returns the local 10-hex node id),
+      reports that node id to `POST /rooms/:id/member` so the controller
+      authorizes it and assigns a deterministic address, then refreshes the room
       so assigned mesh addresses reach `custom_broadcasts.txt` via the A↔B
-      contract, tracks `selfAddress`/`meshReady`, and joins/leaves the network
-      through `zerotier-cli` (`gse_mesh_join`/`gse_mesh_leave`) with an
-      actionable error when ZeroTier is missing. OS-level VPN status checks
-      remain a future enhancement.
+      contract and tracks `selfAddress`/`meshReady`. Leaving calls
+      `gse_mesh_leave`; a missing ZeroTier install surfaces an actionable error.
+      OS-level VPN status checks remain a future enhancement.
 - [x] **B7** TTL sweeper (60s, unref'd), per-host + global caps, auth on room
       reads (member view vs discovery), credential/join/heartbeat auth
 
