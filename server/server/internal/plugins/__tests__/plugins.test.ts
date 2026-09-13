@@ -1,9 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
+import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { PluginManager } from "../manager";
 import { DropGseServerPlugin } from "../builtin/drop-gse";
+import { HelloWorldPlugin } from "../builtin/hello-world";
 import { PLUGIN_API_VERSION } from "../types";
 import type { PluginContext, PluginStorage, ServerPlugin } from "../types";
 
@@ -391,4 +394,72 @@ test("PluginManager runs storage migrations to the declared version", async () =
   // Re-registering must not re-run migrations.
   await manager.registerPlugin(plugin);
   assert.deepEqual(migrations, [[0, 2]]);
+});
+
+test("HelloWorldPlugin proves the platform is not GSE-shaped", async () => {
+  const manager = createTestManager();
+  await manager.registerPlugin(new HelloWorldPlugin());
+
+  const mockEvent = {
+    method: "GET",
+    headers: new Headers(),
+  } as unknown as import("h3").H3Event;
+
+  const res = (await manager.dispatch(
+    "hello-world",
+    "GET",
+    "/ping",
+    mockEvent,
+  )) as { pong: boolean };
+  assert.equal(res.pong, true);
+});
+
+test("discovery verifies external bundle checksums", async () => {
+  const dataDir = tmpDataDir();
+  const pluginDir = path.join(dataDir, "plugins", "external-demo");
+  await fs.mkdir(pluginDir, { recursive: true });
+
+  const entry =
+    "export default { metadata: { id: 'external-demo', name: 'External Demo'," +
+    " version: '1.0.0', apiVersion: 1, capabilities: ['routes'] }," +
+    " init(ctx) { ctx.registerRoute('GET', '/hello', () => ({ ok: true })); } };\n";
+  const entryPath = path.join(pluginDir, "index.mjs");
+  await fs.writeFile(entryPath, entry);
+  const checksum = createHash("sha256").update(entry).digest("hex");
+  await fs.writeFile(
+    path.join(pluginDir, "drop-plugin.json"),
+    JSON.stringify({
+      id: "external-demo",
+      name: "External Demo",
+      version: "1.0.0",
+      apiVersion: PLUGIN_API_VERSION,
+      capabilities: ["routes"],
+      entry: "index.mjs",
+      checksum,
+    }),
+  );
+
+  const manager = new PluginManager({
+    dataDir,
+    storageFactory: () => new MemoryStorage(),
+    authResolver: async () => ({}),
+  });
+  await manager.discoverAndLoadExternalPlugins();
+  assert.equal(
+    manager.listPlugins().find((p) => p.id === "external-demo")?.status,
+    "active",
+  );
+
+  // Tamper with the entry: the checksum mismatch must skip the bundle.
+  await fs.writeFile(entryPath, `${entry}// tampered\n`);
+  const manager2 = new PluginManager({
+    dataDir,
+    storageFactory: () => new MemoryStorage(),
+    authResolver: async () => ({}),
+  });
+  await manager2.discoverAndLoadExternalPlugins();
+  assert.equal(
+    manager2.listPlugins().find((p) => p.id === "external-demo"),
+    undefined,
+  );
 });

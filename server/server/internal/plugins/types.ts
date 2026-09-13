@@ -42,6 +42,13 @@ export interface PluginMetadata {
 
 export interface PluginManifest extends PluginMetadata {
   entry?: string;
+  /** SHA-256 of the entry file, hex. Verified before the bundle is imported. */
+  checksum?: string | undefined;
+  /**
+   * HMAC-SHA256 (hex) of `checksum`, keyed by `DROP_PLUGIN_SIGNING_KEY`.
+   * Set `DROP_PLUGIN_REQUIRE_SIGNATURE=true` to reject unsigned bundles.
+   */
+  signature?: string | undefined;
 }
 
 export interface PluginStateRecord {

@@ -1,3 +1,4 @@
+import { createHash, createHmac } from "node:crypto";
 import { EventEmitter } from "node:events";
 import * as path from "node:path";
 import * as fs from "node:fs/promises";
@@ -260,6 +261,45 @@ export class PluginManager {
     await storage.setSchemaVersion(target);
   }
 
+  /**
+   * Verify an external bundle's entry file before importing it.
+   *
+   * - `checksum` (if present) must match the entry file's SHA-256.
+   * - `signature` (if present) must be an HMAC-SHA256 of the checksum under
+   *   `DROP_PLUGIN_SIGNING_KEY`.
+   * - When `DROP_PLUGIN_REQUIRE_SIGNATURE=true`, an unsigned bundle is refused.
+   */
+  private async verifyBundleIntegrity(
+    entryPath: string,
+    manifest: PluginManifest,
+  ): Promise<void> {
+    const bytes = await fs.readFile(entryPath);
+    const digest = createHash("sha256").update(bytes).digest("hex");
+
+    if (manifest.checksum && manifest.checksum !== digest) {
+      throw new Error(
+        `bundle checksum mismatch for ${manifest.id}: expected ${manifest.checksum}, found ${digest}`,
+      );
+    }
+
+    const signingKey = process.env.DROP_PLUGIN_SIGNING_KEY;
+    if (manifest.signature) {
+      if (!signingKey) {
+        throw new Error(
+          `bundle ${manifest.id} is signed but DROP_PLUGIN_SIGNING_KEY is not set`,
+        );
+      }
+      const expected = createHmac("sha256", signingKey)
+        .update(digest)
+        .digest("hex");
+      if (expected !== manifest.signature) {
+        throw new Error(`bundle signature mismatch for ${manifest.id}`);
+      }
+    } else if (process.env.DROP_PLUGIN_REQUIRE_SIGNATURE === "true") {
+      throw new Error(`bundle ${manifest.id} is unsigned`);
+    }
+  }
+
   private assertPluginCompatible(plugin: ServerPlugin): void {
     const { id, apiVersion, trust } = plugin.metadata;
     if (apiVersion !== undefined && apiVersion !== PLUGIN_API_VERSION) {
@@ -418,6 +458,8 @@ export class PluginManager {
 
           const entryRel = manifest.entry || "index.js";
           const entryPath = path.resolve(pluginDir, entryRel);
+
+          await this.verifyBundleIntegrity(entryPath, manifest);
 
           const mod = await import(pathToFileURL(entryPath).href);
           const pluginInstance: ServerPlugin =

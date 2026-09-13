@@ -99,8 +99,10 @@ Owner: TBD · Depends on: M0
 - [x] **A5** Per-flavor config generation (`config.rs`)
 - [x] **A6** Emulator release manager: release.json + SHA-256 verify/stage (`dist.rs`).
       Runtime HTTP fetch still to be wired to a cache directory.
-- [ ] **P5/P7/P9** Bundle format + install/update UI + a second trivial plugin to
-      prove generality
+- [~] **P5/P7/P9** Bundle integrity: `checksum`/`signature` verified before an
+  external bundle is imported (`DROP_PLUGIN_SIGNING_KEY`,
+  `DROP_PLUGIN_REQUIRE_SIGNATURE`), tested. P9 done via the `hello-world`
+  reference plugin. Install/update/remove UI + registry (P7/P5) pending.
 
 **Acceptance:** engine patches/configures/restores a real game offline on
 Windows and Linux; idempotent; interrupted runs recover; digest mismatch refuses
