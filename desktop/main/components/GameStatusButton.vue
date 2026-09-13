@@ -3,12 +3,12 @@
   <div class="inline-flex divide-x divide-zinc-900">
     <button
       type="button"
-      @click="() => fetchStatusStyleData($props.status).action()"
       :class="[
         fetchStatusStyleData($props.status).style,
         showDropdown ? 'rounded-l-md' : 'rounded-md',
         'inline-flex uppercase font-display items-center gap-x-2 px-4 py-3 text-md font-semibold shadow-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2',
       ]"
+      @click="() => fetchStatusStyleData($props.status).action()"
     >
       <component
         :is="fetchStatusStyleData($props.status).icon"
@@ -49,13 +49,13 @@
             <MenuItem v-slot="{ active }">
               <button
                 type="button"
-                @click="() => emit('install')"
                 :class="[
                   active
                     ? 'bg-zinc-800 text-zinc-100 outline-none'
                     : 'text-zinc-400',
                   'w-full px-4 py-2 text-sm inline-flex justify-between',
                 ]"
+                @click="() => emit('install')"
               >
                 Install
                 <ArrowDownTrayIcon class="size-5" />
@@ -65,13 +65,13 @@
             <MenuItem v-if="showOptions" v-slot="{ active }">
               <button
                 type="button"
-                @click="() => emit('options')"
                 :class="[
                   active
                     ? 'bg-zinc-800 text-zinc-100 outline-none'
                     : 'text-zinc-400',
                   'w-full px-4 py-2 text-sm inline-flex justify-between',
                 ]"
+                @click="() => emit('options')"
               >
                 Options
                 <Cog6ToothIcon class="size-5" />
@@ -80,13 +80,13 @@
             <MenuItem v-slot="{ active }">
               <button
                 type="button"
-                @click="() => emit('uninstall')"
                 :class="[
                   active
                     ? 'bg-zinc-800 text-zinc-100 outline-none'
                     : 'text-zinc-400',
                   'w-full inline-flex px-4 py-2 text-sm justify-between',
                 ]"
+                @click="() => emit('uninstall')"
               >
                 Uninstall
                 <TrashIcon class="size-5" />
@@ -121,13 +121,13 @@ import { Cog6ToothIcon, TrashIcon } from "@heroicons/vue/24/outline";
 
 const props = defineProps<{ status: GameStatus }>();
 const emit = defineEmits<{
-  (e: "install"): void;
-  (e: "launch"): void;
-  (e: "queue"): void;
-  (e: "uninstall"): void;
-  (e: "kill"): void;
-  (e: "options"): void;
-  (e: "resume"): void;
+  install: [];
+  launch: [];
+  queue: [];
+  uninstall: [];
+  kill: [];
+  options: [];
+  resume: [];
 }>();
 
 interface StatusStyleData {

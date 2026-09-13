@@ -8,7 +8,9 @@
     "dev": "nuxt dev",
     "postinstall": "nuxt prepare",
     "tauri": "tauri",
-    "typecheck": "nuxt typecheck"
+    "typecheck": "nuxt typecheck",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix"
   },
   "dependencies": {
     "@headlessui/vue": "^1.7.23",
@@ -23,9 +25,11 @@
     "vuedraggable": "^4.1.0"
   },
   "devDependencies": {
+    "@nuxt/eslint": "^1.17.0",
     "@tailwindcss/forms": "^0.5.9",
     "@tailwindcss/typography": "^0.5.15",
     "autoprefixer": "^10.4.20",
+    "eslint": "^9.39.5",
     "postcss": "^8.5.18",
     "sass-embedded": "^1.103.1",
     "tailwindcss": "^3.4.13",

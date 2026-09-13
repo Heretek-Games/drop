@@ -17,7 +17,8 @@
         class="absolute inset-0 h-full flex flex-row items-end justify-end space-x-[1px]"
       >
         <div
-          v-for="bar in speedHistory"
+          v-for="(bar, i) in speedHistory"
+          :key="i"
           :style="{ height: `${(bar / speedMax) * 100}%` }"
           class="w-[3px] bg-blue-600 rounded-t-full"
         />
@@ -101,8 +102,8 @@
             </div>
             <button
               type="button"
-              @click="() => cancelGame(element.meta)"
               class="group"
+              @click="() => cancelGame(element.meta)"
             >
               <XMarkIcon
                 class="transition size-8 flex-none text-zinc-600 group-hover:text-zinc-300"
@@ -115,8 +116,8 @@
       </template>
     </draggable>
     <div
-      class="text-zinc-600 uppercase font-semibold font-display w-full text-center"
       v-if="queue.queue.length == 0"
+      class="text-zinc-600 uppercase font-semibold font-display w-full text-center"
     >
       No items in the queue
     </div>
@@ -126,7 +127,7 @@
 <script setup lang="ts">
 import { ServerIcon, XMarkIcon, CloudIcon } from "@heroicons/vue/20/solid";
 import { invoke } from "@tauri-apps/api/core";
-import { type DownloadableMetadata, type Game, type GameStatus } from "~/types";
+import type { DownloadableMetadata, Game, GameStatus } from "~/types";
 
 // const actionNames = {
 //   [GameStatusEnum.Downloading]: "downloading",
@@ -134,7 +135,7 @@ import { type DownloadableMetadata, type Game, type GameStatus } from "~/types";
 // }
 
 const windowWidth = ref(window.innerWidth);
-window.addEventListener("resize", (event) => {
+window.addEventListener("resize", () => {
   windowWidth.value = window.innerWidth;
 });
 

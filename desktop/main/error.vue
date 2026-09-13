@@ -80,7 +80,6 @@ const props = defineProps({
   error: Object as () => NuxtError,
 });
 
-const statusCode = props.error?.statusCode;
 const message =
   props.error?.statusMessage ||
   props.error?.message ||

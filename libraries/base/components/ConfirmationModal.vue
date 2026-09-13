@@ -28,17 +28,17 @@
           >
             <LoadingButton
               :loading="props.loading"
-              @click="emit('event', 'confirm')"
               type="submit"
               class="w-full sm:w-fit"
+              @click="emit('event', 'confirm')"
             >
               {{ props.data.buttonText ?? "Confirm" }}
             </LoadingButton>
             <button
+              ref="cancelButtonRef"
               type="button"
               class="mt-3 inline-flex w-full justify-center rounded-md bg-zinc-800 px-3 py-2 text-sm font-semibold text-zinc-100 shadow-sm ring-1 ring-inset ring-zinc-700 hover:bg-zinc-900 sm:mt-0 sm:w-auto"
               @click="emit('event', 'cancel')"
-              ref="cancelButtonRef"
             >
               Cancel
             </button>
@@ -51,7 +51,7 @@
 
 <script setup lang="ts">
 import type {
-  ModalDatas,
+  ModalDataMap,
   ModalEvents,
   ModalType,
 } from "../composables/modal-stack";
@@ -59,7 +59,7 @@ import type {
 const props = defineProps<{
   zHeight: number;
   loading: boolean;
-  data: ModalDatas[ModalType.Confirmation];
+  data: ModalDataMap[ModalType.Confirmation];
 }>();
 const emit = defineEmits<{
   (e: "event", v: ModalEvents[ModalType.Confirmation]): void;

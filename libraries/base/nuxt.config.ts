@@ -1,4 +1,6 @@
-// https://nuxt.com/docs/api/configuration/nuxt-config
+// @ts-check
 import type { NuxtConfig } from "nuxt/schema";
 
-export default {} satisfies NuxtConfig;
+export default {
+  modules: ["@nuxt/eslint"],
+} satisfies NuxtConfig;

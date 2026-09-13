@@ -1,7 +1,7 @@
 <template>
   <div class="min-h-full w-full flex items-center justify-center">
     <div class="flex flex-col items-center">
-      <output>
+      <div role="status">
         <svg
           aria-hidden="true"
           class="w-12 h-12 text-transparent animate-spin fill-blue-600"
@@ -19,7 +19,7 @@
           />
         </svg>
         <span class="sr-only">Loading...</span>
-      </output>
+      </div>
       <div class="mt-4 text-center sm:mt-5">
         <h1 class="text-3xl font-semibold font-display leading-6 text-zinc-100">
           Connecting to instance...

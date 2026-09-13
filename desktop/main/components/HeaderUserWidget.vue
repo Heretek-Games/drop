@@ -60,17 +60,18 @@
               </a>
             </MenuItem>
             <MenuItem
-              v-for="(nav, navIdx) in navigation"
+              v-for="nav in navigation"
+              :key="nav.route"
               v-slot="{ active, close }"
             >
               <button
                 type="button"
-                @click="() => navigate(close, nav)"
                 :href="nav.route"
                 :class="[
                   active ? 'bg-zinc-800 text-zinc-100' : 'text-zinc-400',
                   'transition text-left block px-4 py-2 text-sm',
                 ]"
+                @click="() => navigate(close, nav)"
               >
                 {{ nav.label }}
               </button>
@@ -104,7 +105,7 @@ const adminUrl: string = await invoke("gen_drop_url", {
   path: "/admin",
 });
 
-function navigate(close: () => any, to: NavigationItem) {
+function navigate(close: () => void, to: NavigationItem) {
   close();
   router.push(to.route);
 }

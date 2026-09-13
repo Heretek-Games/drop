@@ -1,5 +1,5 @@
 <template>
-  <Listbox as="div" v-model="model.overrideProtonPath" class="mt-6">
+  <Listbox v-model="model.overrideProtonPath" as="div" class="mt-6">
     <ListboxLabel class="block text-sm/6 font-medium text-white"
       >Proton override</ListboxLabel
     >
@@ -32,9 +32,9 @@
           class="absolute z-10 mt-1 max-h-60 w-full overflow-auto rounded-md bg-zinc-800 py-1 text-base outline-1 -outline-offset-1 outline-white/10 sm:text-sm"
         >
           <ListboxOption
+            v-slot="{ active, selected }"
             as="template"
             :value="undefined"
-            v-slot="{ active, selected }"
           >
             <li
               :class="[
@@ -65,12 +65,11 @@
             Auto-discovered
           </h1>
           <ListboxOption
-            as="template"
-            v-if="protonPaths.autodiscovered.length > 0"
             v-for="proton in protonPaths.autodiscovered"
             :key="proton.path"
-            :value="proton.path"
             v-slot="{ active, selected }"
+            as="template"
+            :value="proton.path"
           >
             <li
               :class="[
@@ -97,19 +96,21 @@
               </span>
             </li>
           </ListboxOption>
-          <li v-else class="italic text-zinc-400 py-2 pr-9 pl-3">
+          <li
+            v-if="protonPaths.autodiscovered.length === 0"
+            class="italic text-zinc-400 py-2 pr-9 pl-3"
+          >
             No auto-discovered layers.
           </li>
           <h1 class="text-white text-sm font-semibold bg-zinc-900 py-2 px-2">
             Manually added
           </h1>
           <ListboxOption
-            as="template"
-            v-if="protonPaths.custom.length > 0"
             v-for="proton in protonPaths.custom"
             :key="proton.path"
-            :value="proton.path"
             v-slot="{ active, selected }"
+            as="template"
+            :value="proton.path"
           >
             <li
               :class="[
@@ -136,13 +137,16 @@
               </span>
             </li>
           </ListboxOption>
-          <li v-else class="italic text-zinc-400 py-2 pr-9 pl-3">
+          <li
+            v-if="protonPaths.custom.length === 0"
+            class="italic text-zinc-400 py-2 pr-9 pl-3"
+          >
             No manually added layers.
           </li>
         </ListboxOptions>
       </transition>
     </div>
-    <p class="mt-2 text-sm text-zinc-400" id="launch-description">
+    <p id="launch-description" class="mt-2 text-sm text-zinc-400">
       Override the Proton layer used to launch this game. You can add or remove
       your custom Proton layer paths in
       <PageWidget to="/settings/compat">

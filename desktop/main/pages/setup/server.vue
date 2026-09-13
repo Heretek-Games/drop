@@ -29,10 +29,10 @@
                 >https://</span
               >
               <input
-                type="text"
-                name="company-website"
                 id="company-website"
                 v-model="url"
+                type="text"
+                name="company-website"
                 class="block flex-1 border-0 bg-transparent py-1.5 text-zinc-100 placeholder:text-zinc-400 focus:ring-0 sm:text-sm sm:leading-6"
                 placeholder="www.example.com"
               />

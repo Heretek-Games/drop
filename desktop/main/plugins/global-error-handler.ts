@@ -1,4 +1,4 @@
-export default defineNuxtPlugin((nuxtApp) => {
+export default defineNuxtPlugin(() => {
   // Also possible
   /*
   nuxtApp.hook("vue:error", (error, instance, info) => {

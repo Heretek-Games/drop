@@ -22,8 +22,8 @@
         </div>
       </div>
       <InstallDirectorySelector
-        :install-dirs="installDirs"
         v-model="installDir"
+        :install-dirs="installDirs"
       />
 
       <div v-if="installError" class="mt-1 rounded-md bg-red-600/10 p-4">
@@ -41,19 +41,19 @@
     </template>
     <template #buttons>
       <LoadingButton
-        @click="() => install()"
         :loading="installLoading"
         :disabled="installLoading"
         type="submit"
         class="ml-2 w-full sm:w-fit"
+        @click="() => install()"
       >
         Install
       </LoadingButton>
       <button
+        ref="cancelButtonRef"
         type="button"
         class="mt-3 inline-flex w-full justify-center rounded-md bg-zinc-800 px-3 py-2 text-sm font-semibold text-zinc-100 shadow-sm ring-1 ring-inset ring-zinc-700 hover:bg-zinc-900 sm:mt-0 sm:w-auto"
         @click="cancel"
-        ref="cancelButtonRef"
       >
         Cancel
       </button>
@@ -69,7 +69,7 @@ const model = defineModel<{ gameId: string; versionId: string }>({
   required: true,
 });
 
-const { game, status } = await useGame(model.value.gameId);
+const { game } = await useGame(model.value.gameId);
 
 const versionOptions = await invoke<Array<VersionOption>>(
   "fetch_game_version_options",
@@ -85,7 +85,7 @@ const installDirs = await invoke<string[]>("fetch_download_dir_stats");
 const installDir = ref(0);
 
 function cancel() {
-  // @ts-expect-error
+  // @ts-expect-error: clearing a required model is intentional here.
   model.value = undefined;
 }
 

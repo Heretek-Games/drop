@@ -6,7 +6,7 @@ export function setupHooks() {
   const router = useRouter();
   const state = useAppState();
 
-  listen("auth/processing", (event) => {
+  listen("auth/processing", () => {
     router.push("/auth/processing");
   });
 
@@ -16,7 +16,7 @@ export function setupHooks() {
     );
   });
 
-  listen("auth/finished", async (event) => {
+  listen("auth/finished", async () => {
     router.push("/library");
     state.value = JSON.parse(await invoke("fetch_state"));
   });

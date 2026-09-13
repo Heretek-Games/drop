@@ -13,7 +13,9 @@
           <div
             class="mt-8 flex items-center justify-center gap-x-5 text-8xl font-bold text-zinc-100"
           >
-            <span v-for="letter in code.split('')">{{ letter }}</span>
+            <span v-for="(letter, i) in code.split('')" :key="i">{{
+              letter
+            }}</span>
           </div>
         </div>
         <div class="mt-10 flex items-center justify-center gap-x-6">

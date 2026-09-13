@@ -77,6 +77,4 @@
   </div>
 </template>
 
-<script setup lang="ts">
-const queueState = useQueueState();
-</script>
+<script setup lang="ts"></script>

@@ -1,5 +1,5 @@
 <template>
-  <ModalTemplate size-class="max-w-4xl" v-model="open">
+  <ModalTemplate v-model="open" size-class="max-w-4xl">
     <template #default>
       <div class="flex flex-row gap-x-4 min-h-96">
         <nav class="flex flex-1 flex-col" aria-label="Sidebar">
@@ -7,13 +7,13 @@
             <li v-for="(tab, tabIdx) in tabs" :key="tab.name">
               <button
                 type="button"
-                @click="() => (currentTabIndex = tabIdx)"
                 :class="[
                   tabIdx == currentTabIndex
                     ? 'bg-zinc-800 text-zinc-100'
                     : 'text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100',
                   'transition w-full group flex gap-x-3 rounded-md p-2 text-sm/6 font-semibold',
                 ]"
+                @click="() => (currentTabIndex = tabIdx)"
               >
                 <component
                   :is="tab.icon"
@@ -32,8 +32,8 @@
         </nav>
         <div class="border-l-2 border-zinc-800 w-full grow pl-4">
           <component
-            v-model="configuration"
             :is="tabs[currentTabIndex]?.page"
+            v-model="configuration"
             :proton-enabled="protonEnabled"
             :game-id="props.gameId"
           />
@@ -54,18 +54,18 @@
     </template>
     <template #buttons>
       <LoadingButton
-        @click="() => save()"
         :loading="saveLoading"
         type="submit"
         class="ml-2 w-full sm:w-fit"
+        @click="() => save()"
       >
         Save
       </LoadingButton>
       <button
-        @click="() => (open = false)"
+        ref="cancelButtonRef"
         type="button"
         class="mt-3 inline-flex w-full justify-center rounded-md bg-zinc-800 px-3 py-2 text-sm font-semibold text-zinc-100 shadow-sm ring-1 ring-inset ring-zinc-700 hover:bg-zinc-900 sm:mt-0 sm:w-auto"
-        ref="cancelButtonRef"
+        @click="() => (open = false)"
       >
         Cancel
       </button>

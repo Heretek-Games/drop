@@ -56,7 +56,9 @@ function SponsorCard({
     }
   }, [ref, bounds.width, bounds.left, bounds.right])
 
-  let opacity = useSpring(computeOpacity(), {
+  // Initialised to 1; the layout effect below applies the measured value before
+  // paint without reading the ref during render (react-hooks/refs).
+  let opacity = useSpring(1, {
     stiffness: 154,
     damping: 23,
   })

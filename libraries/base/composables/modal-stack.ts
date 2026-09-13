@@ -6,7 +6,7 @@ import TextInputModal from "../components/TextInputModal.vue";
 export type ModalCallbackType<T extends ModalType> = (
   event: ModalEvents[T],
   close: () => void,
-  ...args: any[]
+  ...args: unknown[]
 ) => Promise<void> | void;
 
 export interface ModalStackElement<T extends ModalType> {
@@ -14,7 +14,7 @@ export interface ModalStackElement<T extends ModalType> {
   type: T;
   callback: ModalCallbackType<T>;
   loading: Ref<boolean>;
-  data: ModalDatas[T];
+  data: ModalDataMap[T];
 }
 
 export enum ModalType {
@@ -29,7 +29,7 @@ export type ModalEvents = {
   [ModalType.TextInput]: "cancel" | "submit";
 };
 
-export type ModalDatas = {
+export type ModalDataMap = {
   [ModalType.Confirmation]: {
     title: string;
     description: string;
@@ -57,7 +57,7 @@ const modalComponents: { [key in ModalType]: Component } = {
 
 export function createModal<T extends ModalType>(
   type: T,
-  data: ModalDatas[T],
+  data: ModalDataMap[T],
   callback: ModalCallbackType<T>,
 ) {
   const modalStack = useModalStack();
@@ -71,4 +71,4 @@ export function createModal<T extends ModalType>(
 }
 
 export const useModalStack = () =>
-  useState<Array<ModalStackElement<any>>>("modal-stack", () => []);
+  useState<Array<ModalStackElement<ModalType>>>("modal-stack", () => []);

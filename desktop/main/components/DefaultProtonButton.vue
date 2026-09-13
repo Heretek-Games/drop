@@ -21,8 +21,8 @@ async function setDefault() {
   <button
     type="button"
     :class="['p-0.5 rounded-full', isDefault ? 'bg-blue-500' : 'bg-zinc-800']"
-    @click="setDefault"
     :disabled="!props.path"
+    @click="setDefault"
   >
     <StarIcon
       :class="['size-[0.7rem]', isDefault ? 'text-zinc-100' : 'text-zinc-100']"
