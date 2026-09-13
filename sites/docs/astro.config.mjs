@@ -75,6 +75,10 @@ export default defineConfig({
               label: "Authentication",
               items: [{ autogenerate: { directory: "admin/authentication" } }],
             },
+            {
+              label: "Plugins & multiplayer",
+              items: [{ slug: "admin/plugins" }, { slug: "admin/multiplayer" }],
+            },
           ],
         },
         {

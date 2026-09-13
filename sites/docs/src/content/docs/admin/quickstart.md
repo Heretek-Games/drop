@@ -74,3 +74,9 @@ failure never fails a download), and stores **plaintext game data unencrypted
 at rest** on that disk. Make sure `CHUNK_CACHE_MAX_BYTES` leaves headroom on
 the mount.
 :::
+
+:::tip Optional: peer-to-peer multiplayer
+The built-in `drop-gse` plugin adds multiplayer rooms over a per-room ZeroTier
+mesh (managed by ZTNET by default). It is optional and needs a mesh backend plus
+ZeroTier on player machines. See [**Multiplayer (drop-gse)**](/docs/admin/multiplayer/).
+:::

@@ -101,26 +101,90 @@ Source: `torrential/src/downloads/cache.rs` (wired in `serve.rs`, `state.rs`, `m
   they desynchronize physical/logical bounds on Windows 4K at 200–300% scaling.
 - Webview label `"main"` must match `desktop/src-tauri/capabilities/default.json`.
 
-### 2.6 Server Plugin SPI & GSE
+### 2.6 Plugin platform (Track P)
 
 Source: `server/server/internal/plugins/`
 
-- `PluginManager`: dynamic routing `/api/v1/plugins/[pluginId]/...`, atomic JSON
-  storage, WebSocket event bus, dynamic discovery from `${dataDir}/plugins/*/drop-plugin.json`.
-- Capability sandboxing via `manifest.capabilities` (`routes`, `storage`,
-  `websocket`, `events`, `network`); violations fail closed (warn + no-op).
-- Builtin `builtin/drop-gse.ts` coordinates multiplayer rooms and mesh metadata.
+- `PluginManager` (`manager.ts`) owns the lifecycle: dynamic routing
+  `/api/v1/plugins/[pluginId]/...`, an event bus, the WebSocket gateway
+  (`api/v1/plugins/ws.get.ts`), and discovery of external bundles from
+  `${dataDir}/plugins/*/drop-plugin.json`. It is dependency-injectable
+  (`dataDir`, `storageFactory`, `authResolver`, `registryPath`) and resolves
+  Drop's runtime config lazily, so it imports outside Nuxt and is unit-testable.
+- **Contract**: `PLUGIN_API_VERSION` (`types.ts`); a plugin declares
+  `metadata.apiVersion` and a mismatch is rejected (`PluginApiVersionError`).
+- **Capabilities** are fail-closed: `routes`, `storage`, `events`, `network`,
+  `websocket`. Undeclared use throws `PluginCapabilityError` (routes/events at
+  call time, storage via a guarded wrapper, `network` gates `ctx.fetch`,
+  `websocket` gates `ctx.registerWebSocket`). `trust: "trusted"` (in-process) is
+  the only tier; `"sandboxed"` is rejected until an isolated runtime exists.
+- **Storage**: one directory per plugin under `<dataDir>/plugins/<id>/`, with
+  `metadata.storageVersion` driving `migrateStorage` (recorded in `schema.json`).
+- **Bundles**: `<dataDir>/plugins/<id>/{drop-plugin.json,index.js}`. Optional
+  `checksum` (SHA-256 of the entry) and `signature` (HMAC-SHA256 under
+  `DROP_PLUGIN_SIGNING_KEY`); `DROP_PLUGIN_REQUIRE_SIGNATURE=true` refuses
+  unsigned bundles. A `PluginRegistry` (`DROP_PLUGIN_REGISTRY`) allow-lists ids
+  and pins version/checksum. Sign with `server/dev-tools/sign-plugin.mjs`.
+- Admin install/remove: `POST /api/v1/plugins/install`,
+  `DELETE /api/v1/plugins/<id>/bundle`, plus the Settings → Plugins UI
+  (`desktop/main/pages/settings/plugins.vue`). Builtins cannot be removed.
+- Tests run via `pnpm --filter drop run test` (`server/dev-tools/run-tests.mjs`,
+  jiti + `~` alias). `hello-world` is the minimal reference plugin.
 
-### 2.7 Client launch interceptors (Rust)
+### 2.7 drop-gse — GSE engine & launch lifecycle (Part A)
 
-Source: `desktop/src-tauri/process/src/interceptor.rs`, `gse_interceptor.rs`
+Sources: `desktop/src-tauri/gse-engine/`, `process/src/gse_interceptor.rs`,
+`process/src/zerotier.rs`, `src/remote.rs`, `desktop/main/gse-contract.ts`.
 
-- `LaunchInterceptor` exposes `pre_launch`, `on_running`, `post_exit`.
-- `GseLaunchInterceptor` fails closed on anti-cheat detection, SHA-256 backs up
-  and restores Steam API libraries, and writes
-  `steam_settings/custom_broadcasts.txt` for P2P discovery.
+- **`gse-engine`** (Rust crate): `scanner` (target discovery), `anticheat`
+  (fail-closed EAC/BattleEye gate), `dll` (SHA-256 manifest backup/restore),
+  `interfaces` (`steam_interfaces.txt`), `config` (per-flavor `steam_settings/`),
+  `dist` (release verify/stage + transport-agnostic `fetch_release`), `patch`
+  (`PatchPlan` executor). `cargo test -p gse-engine` is self-contained.
+- `GseLaunchInterceptor` is **opt-in per launch**: it activates only when
+  `steam_settings/custom_broadcasts.txt` exists (written by
+  `gse_write_room_config`) or `DROP_GSE_ENABLE` is set, so ordinary launches are
+  untouched. It applies a staged payload from `<dataDir>/tools/gse/<flavor>/`
+  (populated by `gse_fetch_release`) and restores originals on exit;
+  `recover_interrupted_sessions` repairs stale backups at startup.
+- `gse_write_room_config` writes peer addresses and pins the Steam AppID to
+  `steam_appid.txt`; the client derives it from `metadataSource === "Steam"` /
+  `metadataId`. A compatibility registry (`GSE_BLOCKED_APP_IDS`,
+  `GSE_BLOCKED_GAME_IDS`) rejects known-incompatible titles at room creation, and
+  the modal requires consent before patching.
+- **A↔B contract**: `ActiveRoom` / `PeerSource` (`desktop/main/gse-contract.ts`,
+  `process/src/peer_source.rs`). Track B supplies `peers`; empty peers = LAN /
+  offline mode.
 
-### 2.8 Desktop UI conventions
+### 2.8 drop-gse — mesh coordination (Part B)
+
+Sources: `server/server/internal/plugins/builtin/drop-gse.ts`, `builtin/gse/`.
+
+- `drop-gse` is a builtin plugin registering room routes (create / join / leave /
+  heartbeat / member / credential, `GET /compat`), events, and WebSocket
+  handlers (`gse:credential`, `gse:heartbeat`).
+- `RoomStore` (`gse/room-store.ts`) is persistence-agnostic over
+  `RoomPersistence`: `PrismaRoomPersistence` (Postgres; `GseRoom` /
+  `GseCredential` + migration `20260914000000_add_gse_rooms`) in production and
+  `StorageRoomPersistence` (plugin storage) in tests/dev. It enforces host leases
+  (15s heartbeat / 45s expiry, first-writer-wins), TTL sweeps and caps.
+- `MeshBackend` (`gse/mesh.ts`, `gse/ztnet.ts`) is pluggable; `resolveBackend()`
+  in `drop-gse.ts` selects:
+  - **`ZtnetBackend` (default)** — ZTNET org REST API (`x-ztnet-auth`): create +
+    configure a per-room `/24`, authorize members (deterministic address),
+    revoke, delete.
+  - `ZeroTierBackend` — raw self-hosted controller (advanced fallback).
+  - `TailscaleBackend` + `TailscaleApiProvisioner` — one-off ephemeral keys.
+  - `InMemoryMeshBackend` — tests/dev.
+- Credentials are membership-gated, rotate 10 min before expiry, and are
+  delivered only over the authenticated WebSocket (`plugin_request_ws`) or REST;
+  public broadcasts carry no secret. Clients join the network via
+  `gse_mesh_join` / `gse_mesh_leave` (`zerotier-cli`).
+- Local controller: `server/deploy-template/compose.ztnet.yaml` (zerotier +
+  ztnet + postgres) with `.env.ztnet.example`; bootstrap via
+  `server/dev-tools/ztnet-bootstrap.mjs`. CI: `.github/workflows/ztnet-e2e.yml`.
+
+### 2.9 Desktop UI conventions
 
 - Vue discriminated unions (`GameStatus`) must be narrowed with a typed
   computed (e.g. `installedData = computed(() => status.value?.type === "Installed" ? status.value : undefined)`)
@@ -154,6 +218,7 @@ Source: `desktop/src-tauri/process/src/interceptor.rs`, `gse_interceptor.rs`
 | lefthook pre-commit | commit     | prettier + eslint --fix (staged), ast-grep scan, gitleaks                                 |
 | lefthook pre-push   | push       | server typecheck, `clippy-changed.sh` (Rust), golangci-lint, knip report                  |
 | GitHub Actions      | PR/push    | typecheck/lint/clippy, gitleaks history, cargo-audit ×7 crates, cargo-deny, golangci-lint |
+| GitHub Actions      | PR/push    | `server-ci` test job; `ztnet-e2e` (GSE mesh, path-filtered, needs Docker)                 |
 | GitHub Actions      | weekly     | semgrep deep scan → Code Scanning                                                         |
 
 Hooks are early feedback; **CI is the authority**. If a hook fails, read the
@@ -197,6 +262,16 @@ pnpm --filter drop run lint
 pnpm --filter drop run test
 #   ^ runs every server `*.test.ts` through `server/dev-tools/run-tests.mjs`
 #     (jiti + the `~` alias). Plain `node --test` fails on the ESM/alias setup.
+
+# drop-gse — engine + integration checks
+cargo +nightly test --manifest-path desktop/src-tauri/Cargo.toml -p gse-engine
+DATABASE_URL=postgres://drop:drop@localhost:5432/drop \
+  pnpm --filter drop exec jiti dev-tools/gse-prisma-check.ts   # Prisma room store
+# ZTNET mesh E2E (needs Docker) — see .github/workflows/ztnet-e2e.yml
+(cd server/deploy-template && docker compose -f compose.yml -f compose.ztnet.yaml \
+  --env-file .env.ztnet up -d ztnet zerotier ztnet-postgres)
+node server/dev-tools/ztnet-bootstrap.mjs    # prints GSE_ZTNET_ORG / GSE_ZTNET_TOKEN
+pnpm --filter drop exec jiti dev-tools/gse-ztnet-check.ts
 
 # Desktop frontend (separate workspace; not gated)
 pnpm -C desktop/main install
@@ -247,8 +322,17 @@ Native binaries not installable via pnpm:
 - **Prisma multi-file schema**: `prisma.config.ts` sets the schema to the
   `prisma/` folder; models live in `prisma/models/*.prisma`. Add a migration
   under `prisma/migrations/<timestamp>_<name>/migration.sql`; it applies on next
-  server start via `prisma migrate deploy`.
+  server start via `prisma migrate deploy`. The GSE room store adds
+  `prisma/models/gse.prisma` (`GseRoom`, `GseCredential`) + migration
+  `20260914000000_add_gse_rooms`.
 - Do not commit `server/prisma/client/` (generated, gitignored).
+- **ZTNET mesh stack (optional)**: `server/deploy-template/compose.ztnet.yaml`
+  is an override for the default compose file and is not started by default.
+  `postgres:alpine` is now v18 and rejects a `/var/lib/postgresql/data` mount, so
+  the overlay pins `postgres:15-alpine`; it also sets `ZT_ADDR` (ZTNET reports a
+  null controller otherwise). ZTNET's first user is the admin; org/API-token
+  creation is tRPC-only, scripted for dev by `dev-tools/ztnet-bootstrap.mjs`.
+  Ports `3001` (UI) and `9993/udp` can clash with a host ZeroTier install.
 
 ---
 
