@@ -200,6 +200,7 @@ Sources: `server/server/internal/plugins/builtin/drop-gse.ts`, `builtin/gse/`.
 - Local controller: `server/deploy-template/compose.ztnet.yaml` (zerotier +
   ztnet + postgres) with `.env.ztnet.example`; bootstrap via
   `server/dev-tools/ztnet-bootstrap.mjs`. CI: `.github/workflows/ztnet-e2e.yml`.
+  Podman Quadlet systemd templates: `server/deploy-template/quadlet/`.
 
 ### 2.9 Desktop UI conventions
 

@@ -40,6 +40,8 @@ See `AGENTS.md` §2 for detail. Highlights relevant to recent work:
   `import:bulk` tasks, `pages/admin/import/bulk.vue`.
 - **Depot chunk cache** — `torrential/src/downloads/cache.rs`, opt-in via
   `CHUNK_CACHE_DIR` / `CHUNK_CACHE_MAX_BYTES`.
+- **Podman Quadlet deployment** — `server/deploy-template/quadlet/` provides
+  systemd-native units for Drop and ZTNET mesh coordination.
 
 ## Working notes for Gemini / Antigravity
 

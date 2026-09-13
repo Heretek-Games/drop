@@ -33,6 +33,8 @@ deploy-template/*
 !deploy-template/compose.yml
 !deploy-template/compose.ztnet.yaml
 !deploy-template/.env.ztnet.example
+!deploy-template/quadlet/
+!deploy-template/quadlet/**
 
 # generated prisma client
 /prisma/client
