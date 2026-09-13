@@ -230,15 +230,15 @@ Sources: `server/server/internal/plugins/builtin/drop-gse.ts`, `builtin/gse/`.
 
 ## 4. Quality gates
 
-| Layer               | When       | What                                                                                                                  |
-| :------------------ | :--------- | :-------------------------------------------------------------------------------------------------------------------- |
-| Editor hooks        | every edit | format-on-edit (advisory)                                                                                             |
-| lefthook pre-commit | commit     | prettier + eslint --fix (staged), ast-grep scan, gitleaks                                                             |
-| lefthook pre-push   | push       | server typecheck, `clippy-changed.sh` (Rust), golangci-lint, knip report                                              |
-| GitHub Actions      | PR/push    | typecheck/lint/clippy, gitleaks history, cargo-audit ×7 crates, cargo-deny, golangci-lint                             |
-| GitHub Actions      | PR/push    | `server-ci` test job; `ztnet-e2e` (GSE mesh, path-filtered, needs Docker)                                             |
-| GitHub Actions      | PR/push    | `analysis` (report-only): actionlint, zizmor, shellcheck, hadolint, pnpm audit, govulncheck, desktop typecheck + knip |
-| GitHub Actions      | weekly     | semgrep deep scan → Code Scanning                                                                                     |
+| Layer               | When       | What                                                                                                                                 |
+| :------------------ | :--------- | :----------------------------------------------------------------------------------------------------------------------------------- |
+| Editor hooks        | every edit | format-on-edit (advisory)                                                                                                            |
+| lefthook pre-commit | commit     | prettier + eslint --fix (staged), ast-grep scan, gitleaks                                                                            |
+| lefthook pre-push   | push       | server typecheck, `clippy-changed.sh` (Rust), golangci-lint, knip report                                                             |
+| GitHub Actions      | PR/push    | typecheck/lint/clippy, gitleaks history, cargo-audit ×7 crates, cargo-deny, golangci-lint                                            |
+| GitHub Actions      | PR/push    | `server-ci` test job; `ztnet-e2e` (GSE mesh, path-filtered, needs Docker)                                                            |
+| GitHub Actions      | PR/push    | `analysis` (report-only): actionlint, zizmor, shellcheck, hadolint, pnpm audit, govulncheck, cargo-machete, desktop typecheck + knip |
+| GitHub Actions      | weekly     | semgrep deep scan → Code Scanning                                                                                                    |
 
 Hooks are early feedback; **CI is the authority**. If a hook fails, read the
 output and fix the root cause. The documented escape hatches exist but must not

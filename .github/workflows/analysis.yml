@@ -95,6 +95,31 @@ jobs:
         working-directory: backend
         run: govulncheck ./core/...
 
+  cargo-machete:
+    name: cargo-machete (unused Rust deps)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        crate:
+          - cli
+          - torrential
+          - desktop/src-tauri
+          - libraries/droplet
+          - libraries/droplet_types
+          - libraries/libarchive
+          - libraries/native_model
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@7c8d7d138f5c09cef361f8214cf96882cd029cdb # dtolnay/rust-toolchain@nightly
+      - uses: taiki-e/install-action@4b8992af23a2be34fd58f8d9b50d3f4939ad1891 # taiki-e/install-action@cargo-machete
+        with:
+          tool: cargo-machete
+      - name: Find unused dependencies
+        working-directory: ${{ matrix.crate }}
+        run: cargo machete
+
   desktop:
     name: desktop frontend (typecheck + knip)
     runs-on: ubuntu-latest
