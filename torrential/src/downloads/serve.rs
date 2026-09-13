@@ -193,7 +193,8 @@ async fn fill_cache(
     context: &DownloadContext,
     chunk_data: &ChunkData,
 ) -> Option<PathBuf> {
-    let guard = cache.reserve(&chunk_data.checksum)?;
+    let expected: u64 = chunk_data.files.iter().map(|f| f.length as u64).sum();
+    let guard = cache.reserve(&chunk_data.checksum, expected)?;
 
     let file_count = u32::try_from(chunk_data.files.len()).ok()?;
     let permit = FILE_SEMAPHORE.acquire_many(file_count).await.ok()?;
@@ -219,7 +220,6 @@ async fn fill_cache(
         }
     }
 
-    let expected: u64 = chunk_data.files.iter().map(|f| f.length as u64).sum();
     let mut written: u64 = 0;
     let mut hasher = Sha256::new();
     let mut buffer = vec![0u8; 64 * 1024];

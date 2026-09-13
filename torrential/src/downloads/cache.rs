@@ -14,7 +14,10 @@
 use std::{
     collections::{HashMap, HashSet},
     path::{Path, PathBuf},
-    sync::Mutex,
+    sync::{
+        Mutex,
+        atomic::{AtomicU64, Ordering},
+    },
     time::Instant,
 };
 
@@ -56,6 +59,8 @@ pub struct ChunkCache {
     max_bytes: u64,
     inner: Mutex<Inner>,
     inflight: Mutex<HashSet<String>>,
+    /// Bytes reserved by fills that have not yet committed or been dropped.
+    reserved_bytes: AtomicU64,
 }
 
 /// A reserved cache fill. Dropping the guard without committing removes the
@@ -66,6 +71,7 @@ pub struct FillGuard<'a> {
     pub temp_path: PathBuf,
     pub final_path: PathBuf,
     committed: bool,
+    reserved: u64,
 }
 
 impl ChunkCache {
@@ -80,6 +86,7 @@ impl ChunkCache {
             max_bytes,
             inner: Mutex::new(Inner::default()),
             inflight: Mutex::new(HashSet::new()),
+            reserved_bytes: AtomicU64::new(0),
         };
         cache.initialize();
         cache
@@ -195,9 +202,10 @@ impl ChunkCache {
     }
 
     /// Reserves a single-flight fill slot for `checksum`. Returns `None` when
-    /// the chunk is already cached or another request is filling it.
+    /// the chunk is already cached, another request is filling it, or the
+    /// in-flight fills would exceed the cache budget.
     #[must_use]
-    pub fn reserve(&self, checksum: &str) -> Option<FillGuard<'_>> {
+    pub fn reserve(&self, checksum: &str, expected_bytes: u64) -> Option<FillGuard<'_>> {
         let final_path = self.path_for(checksum)?;
 
         {
@@ -210,12 +218,31 @@ impl ChunkCache {
             }
         }
 
+        // Bound the temporary space used by concurrent fills so a burst of
+        // misses cannot exceed the configured cache budget.
+        if self.max_bytes > 0 {
+            let reserved =
+                self.reserved_bytes
+                    .try_update(Ordering::AcqRel, Ordering::Acquire, |current| {
+                        current
+                            .checked_add(expected_bytes)
+                            .filter(|next| *next <= self.max_bytes)
+                    });
+            if reserved.is_err() {
+                return None;
+            }
+        }
+
         {
             let mut inflight = self
                 .inflight
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
             if !inflight.insert(checksum.to_string()) {
+                if self.max_bytes > 0 {
+                    self.reserved_bytes
+                        .fetch_sub(expected_bytes, Ordering::AcqRel);
+                }
                 return None;
             }
         }
@@ -228,6 +255,10 @@ impl ChunkCache {
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .remove(checksum);
+            if self.max_bytes > 0 {
+                self.reserved_bytes
+                    .fetch_sub(expected_bytes, Ordering::AcqRel);
+            }
             return None;
         }
 
@@ -238,6 +269,7 @@ impl ChunkCache {
             temp_path,
             final_path,
             committed: false,
+            reserved: expected_bytes,
         })
     }
 
@@ -326,6 +358,11 @@ impl Drop for FillGuard<'_> {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .remove(&self.checksum);
+        if self.cache.max_bytes > 0 && self.reserved > 0 {
+            self.cache
+                .reserved_bytes
+                .fetch_sub(self.reserved, Ordering::AcqRel);
+        }
     }
 }
 
@@ -348,7 +385,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let cache = cache(temp.path(), 1024 * 1024);
 
-        let guard = cache.reserve(key("aabbccdd").as_str()).unwrap();
+        let guard = cache.reserve(key("aabbccdd").as_str(), 11).unwrap();
         std::fs::write(&guard.temp_path, b"hello world").unwrap();
         assert!(guard.commit(11));
 
@@ -363,7 +400,7 @@ mod tests {
         let cache = cache(temp.path(), 1024 * 1024);
 
         {
-            let guard = cache.reserve(key("deadbeef").as_str()).unwrap();
+            let guard = cache.reserve(key("deadbeef").as_str(), 7).unwrap();
             std::fs::write(&guard.temp_path, b"partial").unwrap();
             // No commit: drop should clean up.
         }
@@ -371,7 +408,7 @@ mod tests {
         assert!(cache.hit(key("deadbeef").as_str()).is_none());
         assert!(!cache.temp_path_exists(key("deadbeef").as_str()));
         // The single-flight slot must be free again.
-        assert!(cache.reserve(key("deadbeef").as_str()).is_some());
+        assert!(cache.reserve(key("deadbeef").as_str(), 7).is_some());
     }
 
     #[test]
@@ -379,10 +416,29 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let cache = cache(temp.path(), 1024 * 1024);
 
-        let first = cache.reserve(key("00112233").as_str()).unwrap();
-        assert!(cache.reserve(key("00112233").as_str()).is_none());
+        let first = cache.reserve(key("00112233").as_str(), 4).unwrap();
+        assert!(cache.reserve(key("00112233").as_str(), 4).is_none());
         drop(first);
-        assert!(cache.reserve(key("00112233").as_str()).is_some());
+        assert!(cache.reserve(key("00112233").as_str(), 4).is_some());
+    }
+
+    #[test]
+    fn reserve_bounds_concurrent_inflight_bytes() {
+        let temp = tempfile::tempdir().unwrap();
+        let cache = cache(temp.path(), 10);
+
+        let first = cache.reserve(key("aaaa").as_str(), 6).unwrap();
+        // 6 reserved + 6 requested exceeds the 10-byte budget.
+        assert!(cache.reserve(key("bbbb").as_str(), 6).is_none());
+
+        drop(first);
+        let second = cache.reserve(key("bbbb").as_str(), 6);
+        assert!(second.is_some(), "dropping a fill releases its reservation");
+        drop(second);
+
+        // Committed entries no longer count as in-flight.
+        cache.insert(key("cccc"), 8);
+        assert!(cache.reserve(key("dddd").as_str(), 6).is_some());
     }
 
     #[test]
@@ -391,7 +447,7 @@ mod tests {
         let cache = cache(temp.path(), 10);
 
         for (i, checksum) in [key("aa11"), key("bb22"), key("cc33")].iter().enumerate() {
-            let guard = cache.reserve(checksum).unwrap();
+            let guard = cache.reserve(checksum, 6).unwrap();
             std::fs::write(&guard.temp_path, vec![0u8; 6]).unwrap();
             assert!(guard.commit(6));
             // Touch the earlier entries so they are newer than the oldest.
@@ -421,7 +477,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let cache = cache(temp.path(), 1024 * 1024);
 
-        let guard = cache.reserve(key("c0ffee00").as_str()).unwrap();
+        let guard = cache.reserve(key("c0ffee00").as_str(), 4).unwrap();
         std::fs::write(&guard.temp_path, b"data").unwrap();
         assert!(guard.commit(4));
 
@@ -429,7 +485,14 @@ mod tests {
         std::fs::remove_file(&path).unwrap();
 
         assert!(cache.hit(key("c0ffee00").as_str()).is_none());
-        assert!(!cache.inner.lock().unwrap().entries.contains_key(key("c0ffee00").as_str()));
+        assert!(
+            !cache
+                .inner
+                .lock()
+                .unwrap()
+                .entries
+                .contains_key(key("c0ffee00").as_str())
+        );
     }
 
     #[test]
@@ -437,9 +500,9 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let cache = cache(temp.path(), 1024 * 1024);
 
-        assert!(cache.reserve("../../escape").is_none());
+        assert!(cache.reserve("../../escape", 0).is_none());
         assert!(cache.hit("../../escape").is_none());
-        assert!(cache.reserve("aa11").is_none());
+        assert!(cache.reserve("aa11", 0).is_none());
     }
 
     #[test]
@@ -447,7 +510,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let cache = cache(temp.path(), 1024 * 1024);
 
-        let guard = cache.reserve(key("feed").as_str()).unwrap();
+        let guard = cache.reserve(key("feed").as_str(), 4).unwrap();
         std::fs::write(&guard.temp_path, b"data").unwrap();
         assert!(guard.commit(4));
 
