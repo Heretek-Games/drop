@@ -76,7 +76,7 @@ jobs:
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
           KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
         run: |
-          echo $APPLE_CERTIFICATE | base64 --decode > certificate.p12
+          echo "$APPLE_CERTIFICATE" | base64 --decode > certificate.p12
           security create-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
           security default-keychain -s build.keychain
           security unlock-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
@@ -85,6 +85,7 @@ jobs:
           # Add build.keychain to the user keychain search list so that codesign
           # (invoked later by tauri-action WITHOUT an explicit --keychain) can
           # resolve the signing identity from it.
+          # shellcheck disable=SC2046
           security list-keychains -d user -s build.keychain $(security list-keychains -d user | tr -d '"')
 
           echo "Created keychain"
@@ -112,7 +113,7 @@ jobs:
         run: |
           CERT_INFO=$(security find-identity -v -p codesigning build.keychain | grep "Drop OSS")
           CERT_ID=$(echo "$CERT_INFO" | awk -F'"' '{print $2}')
-          echo "CERT_ID=$CERT_ID" >> $GITHUB_ENV
+          echo "CERT_ID=$CERT_ID" >> "$GITHUB_ENV"
           echo "Certificate imported. Using identity: $CERT_ID"
 
       - name: install frontend dependencies
@@ -141,17 +142,17 @@ jobs:
   winget-publish:
     name: Publish to WinGet
     runs-on: windows-latest
-    needs: [build]
-    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [publish-tauri]
+    if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'release' && github.event.action == 'published')
     permissions:
       contents: read
+    env:
+      WINGET_TOKEN: ${{ secrets.WINGET_TOKEN }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # actions/checkout@v7
       - name: Submit package to Windows Package Manager Community Repository
         uses: vedantmgoyal2009/winget-releaser@4ffc7888bffd451b357355dc214d43bb9f23917e # v2
         if: env.WINGET_TOKEN != ''
-        env:
-          WINGET_TOKEN: ${{ secrets.WINGET_TOKEN }}
         with:
           identifier: HeretekGames.Drop
           token: ${{ secrets.WINGET_TOKEN }}
