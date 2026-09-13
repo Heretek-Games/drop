@@ -1,94 +1,83 @@
-import { randomUUID } from "node:crypto";
-import { readBody, createError } from "h3";
+import { createError, readBody } from "h3";
 import { PLUGIN_API_VERSION } from "../types";
-import type { PluginContext, ServerPlugin, PluginMetadata } from "../types";
+import type { PluginContext, PluginMetadata, ServerPlugin } from "../types";
+import { InMemoryMeshBackend, ZeroTierBackend } from "./gse/mesh";
+import { RoomStore } from "./gse/room-store";
+import type { EmulatorBinding, MeshBackend } from "./gse/types";
 
-export interface EmulatorBinding {
-  flavor: "gbe_fork" | "gse_fork";
-  release: string;
-  releaseDigest: string;
-}
+export type {
+  DiscoverableRoom,
+  EmulatorBinding,
+  MeshBackend,
+  MeshCredential,
+  PublicMeshInfo,
+  Room,
+  RoomMember,
+} from "./gse/types";
 
-export type PublicMeshInfo =
-  | { backend: "tailscale"; aclTag: string; expiresAt: number }
-  | { backend: "zerotier"; cidr: string; networkId: string; expiresAt: number };
+const DEFAULT_EMULATOR: EmulatorBinding = {
+  flavor: "gbe_fork",
+  release: "latest",
+  releaseDigest: "sha256-default",
+};
 
-export interface RoomMember {
-  userId: string;
-  meshAddress?: string;
-  joinedAt: number;
-}
+const PRUNE_INTERVAL_MS = 60_000;
 
-export interface Room {
-  id: string;
-  gameId: string;
-  versionId: string;
-  emulator: EmulatorBinding;
-  hostUserId: string;
-  members: RoomMember[];
-  mesh: PublicMeshInfo;
-  createdAt: number;
-  expiresAt: number;
-}
-
-export interface DiscoverableRoom {
-  id: string;
-  gameId: string;
-  versionId: string;
-  emulator: EmulatorBinding;
-  mesh: PublicMeshInfo;
-  memberCount: number;
-  createdAt: number;
-  expiresAt: number;
-}
-
+/**
+ * Drop GSE multiplayer room coordinator.
+ *
+ * Rooms are durable (plugin storage) and mesh-backed by a pluggable
+ * `MeshBackend`: ZeroTier when `GSE_ZEROTIER_URL`/`GSE_ZEROTIER_TOKEN`/
+ * `GSE_ZEROTIER_NODE` are configured, otherwise an in-memory backend.
+ */
 export class DropGseServerPlugin implements ServerPlugin {
   metadata: PluginMetadata = {
     id: "drop-gse",
     name: "Drop GSE Multiplayer",
-    version: "0.1.0",
+    version: "0.2.0",
     description:
       "Peer-to-peer multiplayer rooms over virtual mesh networks using Goldberg Steam emulator",
     author: "Heretek Games",
     builtin: true,
     apiVersion: PLUGIN_API_VERSION,
     trust: "trusted",
-    capabilities: ["routes", "events"],
+    storageVersion: 1,
+    capabilities: ["routes", "events", "storage", "network"],
     enabled: true,
   };
 
-  private rooms = new Map<string, Room>();
+  private store!: RoomStore;
   private ctx!: PluginContext;
+  private pruneTimer: ReturnType<typeof setInterval> | undefined;
+
+  private resolveBackend(): MeshBackend {
+    const baseUrl = process.env.GSE_ZEROTIER_URL;
+    const authToken = process.env.GSE_ZEROTIER_TOKEN;
+    const controllerNodeId = process.env.GSE_ZEROTIER_NODE;
+    if (baseUrl && authToken && controllerNodeId) {
+      return new ZeroTierBackend({ baseUrl, authToken, controllerNodeId });
+    }
+    return new InMemoryMeshBackend();
+  }
 
   init(ctx: PluginContext): void {
     this.ctx = ctx;
+    this.store = new RoomStore(ctx.storage, this.resolveBackend());
+
+    // B7: periodic TTL sweep. unref so tests/CLI don't hang on the timer.
+    this.pruneTimer = setInterval(() => {
+      this.store.pruneExpired().catch(() => {});
+    }, PRUNE_INTERVAL_MS);
+    this.pruneTimer.unref?.();
 
     // Route: GET /rooms
-    ctx.registerRoute("GET", "/rooms", (_event, context) => {
+    ctx.registerRoute("GET", "/rooms", async (_event, context) => {
+      await this.store.pruneExpired();
       const gameId =
         typeof context.query.gameId === "string"
           ? context.query.gameId
           : undefined;
-      const now = Date.now();
-
-      const discoverable: DiscoverableRoom[] = [];
-      for (const room of this.rooms.values()) {
-        if (room.expiresAt < now) continue;
-        if (gameId && room.gameId !== gameId) continue;
-
-        discoverable.push({
-          id: room.id,
-          gameId: room.gameId,
-          versionId: room.versionId,
-          emulator: room.emulator,
-          mesh: room.mesh,
-          memberCount: room.members.length,
-          createdAt: room.createdAt,
-          expiresAt: room.expiresAt,
-        });
-      }
-
-      return { rooms: discoverable };
+      return { rooms: await this.store.list(gameId) };
     });
 
     // Route: POST /rooms
@@ -104,7 +93,6 @@ export class DropGseServerPlugin implements ServerPlugin {
         gameId?: string;
         versionId?: string;
         emulator?: EmulatorBinding;
-        backend?: "tailscale" | "zerotier";
       }>(event);
 
       if (!body?.gameId || !body?.versionId) {
@@ -114,64 +102,39 @@ export class DropGseServerPlugin implements ServerPlugin {
         });
       }
 
-      const roomId = randomUUID();
-      const now = Date.now();
-      const expiresAt = now + 4 * 60 * 60 * 1000; // 4 hour TTL
-      const backend = body.backend ?? "zerotier";
-
-      const mesh: PublicMeshInfo =
-        backend === "tailscale"
-          ? {
-              backend: "tailscale",
-              aclTag: `tag:dropgse-room-${roomId}`,
-              expiresAt,
-            }
-          : {
-              backend: "zerotier",
-              cidr: "10.147.20.0/24",
-              networkId: `zt-${roomId.slice(0, 16)}`,
-              expiresAt,
-            };
-
-      const emulator: EmulatorBinding = body.emulator ?? {
-        flavor: "gbe_fork",
-        release: "latest",
-        releaseDigest: "sha256-default",
-      };
-
-      const room: Room = {
-        id: roomId,
-        gameId: body.gameId,
-        versionId: body.versionId,
-        emulator,
-        hostUserId: context.userId,
-        members: [{ userId: context.userId, joinedAt: now }],
-        mesh,
-        createdAt: now,
-        expiresAt,
-      };
-
-      this.rooms.set(roomId, room);
-      ctx.broadcast("gse:rooms", { type: "room_created", room });
-      ctx.logger.info(
-        `Multiplayer room ${roomId} created for game ${body.gameId} by user ${context.userId}`,
-      );
-
-      return { room };
+      try {
+        const room = await this.store.create({
+          gameId: body.gameId,
+          versionId: body.versionId,
+          emulator: body.emulator ?? DEFAULT_EMULATOR,
+          hostUserId: context.userId,
+        });
+        ctx.broadcast("gse:rooms", { type: "room_created", room });
+        ctx.logger.info(
+          `Multiplayer room ${room.id} created for game ${body.gameId} by user ${context.userId}`,
+        );
+        return { room };
+      } catch (err) {
+        throw createError({ statusCode: 429, statusMessage: String(err) });
+      }
     });
 
-    // Route: GET /rooms/:id
-    ctx.registerRoute("GET", "/rooms/:id", (_event, context) => {
-      const room = this.rooms.get(context.params.id);
+    // Route: GET /rooms/:id — full room for members, discovery view otherwise.
+    ctx.registerRoute("GET", "/rooms/:id", async (_event, context) => {
+      const room = await this.store.get(context.params.id);
       if (!room) {
         throw createError({ statusCode: 404, statusMessage: "Room not found" });
       }
-
-      return { room };
+      const isMember =
+        !!context.userId &&
+        room.members.some((member) => member.userId === context.userId);
+      if (isMember) return { room };
+      const { toDiscoverable } = await import("./gse/types");
+      return { room: toDiscoverable(room) };
     });
 
     // Route: POST /rooms/:id/join
-    ctx.registerRoute("POST", "/rooms/:id/join", (_event, context) => {
+    ctx.registerRoute("POST", "/rooms/:id/join", async (_event, context) => {
       if (!context.userId) {
         throw createError({
           statusCode: 401,
@@ -179,14 +142,11 @@ export class DropGseServerPlugin implements ServerPlugin {
         });
       }
 
-      const room = this.rooms.get(context.params.id);
-      if (!room) {
+      let room;
+      try {
+        room = await this.store.join(context.params.id, context.userId);
+      } catch {
         throw createError({ statusCode: 404, statusMessage: "Room not found" });
-      }
-
-      const existing = room.members.find((m) => m.userId === context.userId);
-      if (!existing) {
-        room.members.push({ userId: context.userId, joinedAt: Date.now() });
       }
 
       ctx.broadcast(`gse:room:${room.id}`, {
@@ -195,12 +155,37 @@ export class DropGseServerPlugin implements ServerPlugin {
         userId: context.userId,
       });
       ctx.broadcast("gse:rooms", { type: "room_updated", room });
-
       return { room };
     });
 
+    // Route: POST /rooms/:id/heartbeat — host lease renewal / migration.
+    ctx.registerRoute(
+      "POST",
+      "/rooms/:id/heartbeat",
+      async (_event, context) => {
+        if (!context.userId) {
+          throw createError({
+            statusCode: 401,
+            statusMessage: "Authentication required",
+          });
+        }
+        try {
+          const room = await this.store.heartbeat(
+            context.params.id,
+            context.userId,
+          );
+          return { ok: true, hostUserId: room.hostUserId };
+        } catch {
+          throw createError({
+            statusCode: 404,
+            statusMessage: "Room not found",
+          });
+        }
+      },
+    );
+
     // Route: DELETE /rooms/:id
-    ctx.registerRoute("DELETE", "/rooms/:id", (_event, context) => {
+    ctx.registerRoute("DELETE", "/rooms/:id", async (_event, context) => {
       if (!context.userId) {
         throw createError({
           statusCode: 401,
@@ -208,69 +193,79 @@ export class DropGseServerPlugin implements ServerPlugin {
         });
       }
 
-      const room = this.rooms.get(context.params.id);
-      if (!room) {
-        throw createError({ statusCode: 404, statusMessage: "Room not found" });
-      }
-
-      // If host leaves, close the room. If member leaves, remove them.
-      if (room.hostUserId === context.userId) {
-        this.rooms.delete(room.id);
-        ctx.broadcast(`gse:room:${room.id}`, {
+      const { closed, room } = await this.store.leave(
+        context.params.id,
+        context.userId,
+      );
+      if (closed) {
+        ctx.broadcast(`gse:room:${context.params.id}`, {
           type: "room_closed",
-          roomId: room.id,
+          roomId: context.params.id,
         });
-        ctx.broadcast("gse:rooms", { type: "room_closed", roomId: room.id });
-        ctx.logger.info(`Host ${context.userId} closed room ${room.id}`);
+        ctx.broadcast("gse:rooms", {
+          type: "room_closed",
+          roomId: context.params.id,
+        });
         return { success: true, closed: true };
       }
 
-      room.members = room.members.filter((m) => m.userId !== context.userId);
-      ctx.broadcast(`gse:room:${room.id}`, {
+      ctx.broadcast(`gse:room:${context.params.id}`, {
         type: "member_left",
-        roomId: room.id,
+        roomId: context.params.id,
         userId: context.userId,
       });
-      ctx.broadcast("gse:rooms", { type: "room_updated", room });
-
+      if (room) {
+        ctx.broadcast("gse:rooms", { type: "room_updated", room });
+      }
       return { success: true, closed: false };
     });
 
-    // Route: POST /rooms/:id/credential
-    ctx.registerRoute("POST", "/rooms/:id/credential", (_event, context) => {
-      if (!context.userId) {
-        throw createError({
-          statusCode: 401,
-          statusMessage: "Authentication required",
-        });
-      }
+    // Route: POST /rooms/:id/credential — membership-gated mesh credential.
+    ctx.registerRoute(
+      "POST",
+      "/rooms/:id/credential",
+      async (_event, context) => {
+        if (!context.userId) {
+          throw createError({
+            statusCode: 401,
+            statusMessage: "Authentication required",
+          });
+        }
 
-      const room = this.rooms.get(context.params.id);
-      if (!room) {
-        throw createError({ statusCode: 404, statusMessage: "Room not found" });
-      }
+        let credential;
+        try {
+          credential = await this.store.credential(
+            context.params.id,
+            context.userId,
+          );
+        } catch (err) {
+          const message = String(err);
+          if (message.includes("not a room member")) {
+            throw createError({ statusCode: 403, statusMessage: message });
+          }
+          throw createError({
+            statusCode: 404,
+            statusMessage: "Room not found",
+          });
+        }
 
-      const isMember = room.members.some((m) => m.userId === context.userId);
-      if (!isMember) {
-        throw createError({
-          statusCode: 403,
-          statusMessage: "Must be a member of the room to request credentials",
-        });
-      }
-
-      const ephemeralSecret = `gse-mesh-${room.id.slice(0, 8)}-${context.userId.slice(0, 6)}-${Date.now()}`;
-      return {
-        credential: {
-          mesh: room.mesh,
-          secret: ephemeralSecret,
-          expiresAt: room.expiresAt,
-        },
-      };
-    });
+        const room = await this.store.get(context.params.id);
+        return {
+          credential: {
+            mesh: room?.mesh,
+            secret: credential.secret,
+            expiresAt: credential.expiresAt,
+          },
+        };
+      },
+    );
   }
 
   teardown(): void {
-    this.rooms.clear();
+    if (this.pruneTimer) {
+      clearInterval(this.pruneTimer);
+      this.pruneTimer = undefined;
+    }
   }
 }
 

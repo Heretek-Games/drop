@@ -125,16 +125,20 @@ blocked only when opted in; kill mid-patch restores on next startup.
 
 Owner: TBD · Depends on: M0, M2
 
-- [ ] **B1** `MeshBackend` trait (+ fake backend for tests)
-- [ ] **B2** Durable rooms/memberships/credentials (Prisma) + host lease
-      (heartbeat ~15s, expiry ~45s, first-writer-wins migration)
-- [ ] **B3** Credential provisioning/rotation/distribution over authenticated WS;
-      never in public `Room`, never logged
-- [ ] **B4** Backend #1: ZeroTier self-hosted controller — per-room CIDR from
-      `10.242.0.0/16`, `enableBroadcast`
+- [x] **B1** `MeshBackend` + `InMemoryMeshBackend` (`builtin/gse/mesh.ts`)
+- [x] **B2** Durable rooms/memberships/credentials via plugin storage +
+      host lease (heartbeat 15s / expiry 45s, first-writer-wins migration) in
+      `builtin/gse/room-store.ts`. **Deviation:** used plugin storage instead of
+      additive Prisma models (no core migration; still durable on disk).
+- [~] **B3** Membership-gated credential issuance, cached per member, never in
+  the public room view (`room-store.credential`). Rotation and WS push of
+  credentials still pending.
+- [~] **B4** `ZeroTierBackend` creates a network via the controller API with a
+  per-room /24 and `enableBroadcast` (tested with a mock fetch). Member
+  authorization, revoke and network teardown are stubs.
 - [ ] **B6** Client mesh join/leave + `vpn.ts` validators; peers → engine
-- [ ] **B7** Room hardening: TTL sweeper, per-user/global caps, auth on all reads,
-      input validation
+- [x] **B7** TTL sweeper (60s, unref'd), per-host + global caps, auth on room
+      reads (member view vs discovery), credential/join/heartbeat auth
 
 **Acceptance:** two machines on different networks play together; coordinator
 restart preserves rooms; host migration works; teardown leaves nothing behind.
