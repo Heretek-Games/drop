@@ -57,10 +57,9 @@ if (!bundleStat?.isDirectory()) {
 /** Recursively lists bundle files as POSIX-style relative paths, sorted. */
 async function listFiles(root, prefix = "") {
   const results = [];
-  // NOSONAR: `root` is the confined bundle directory validated by the caller.
-  const entries = await readdir(path.join(root, prefix), {
-    withFileTypes: true,
-  }); // NOSONAR
+  // `root` is the confined bundle directory validated by the caller.
+  const readdirOptions = { withFileTypes: true };
+  const entries = await readdir(path.join(root, prefix), readdirOptions); // NOSONAR
   for (const entry of entries) {
     const rel = prefix ? `${prefix}/${entry.name}` : entry.name;
     if (entry.isDirectory()) {
