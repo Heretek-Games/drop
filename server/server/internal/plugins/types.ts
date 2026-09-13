@@ -3,12 +3,29 @@ import type { Logger } from "pino";
 
 export type HttpMethod = "GET" | "POST" | "PUT" | "DELETE" | "PATCH" | "ALL";
 
+export type PluginCapability =
+  "routes" | "storage" | "websocket" | "events" | "network";
+
+export type PluginStatus = "active" | "disabled" | "error" | "registered";
+
 export interface PluginMetadata {
   id: string;
   name: string;
   version: string;
   description?: string;
   author?: string;
+  builtin?: boolean;
+  capabilities?: PluginCapability[];
+  enabled?: boolean;
+}
+
+export interface PluginManifest extends PluginMetadata {
+  entry?: string;
+}
+
+export interface PluginStateRecord {
+  enabled: boolean;
+  updatedAt: number;
 }
 
 export interface RouteHandlerContext {

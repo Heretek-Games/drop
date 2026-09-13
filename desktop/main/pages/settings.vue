@@ -50,7 +50,7 @@ import {
 import type { Component } from "vue";
 import { platform } from "@tauri-apps/plugin-os";
 import { invoke } from "@tauri-apps/api/core";
-import { UserIcon } from "@heroicons/vue/20/solid";
+import { UserIcon, PuzzlePieceIcon } from "@heroicons/vue/20/solid";
 
 const systemData = await invoke<{
   clientId: string;
@@ -109,6 +109,12 @@ const navigation = computed(() => [
     route: "/settings/downloads",
     prefix: "/settings/downloads",
     icon: ArrowDownTrayIcon,
+  },
+  {
+    label: "Plugins",
+    route: "/settings/plugins",
+    prefix: "/settings/plugins",
+    icon: PuzzlePieceIcon,
   },
   ...(appState.value!.umuState !== "NotNeeded"
     ? [

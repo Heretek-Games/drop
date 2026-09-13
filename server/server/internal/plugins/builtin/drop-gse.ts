@@ -1,6 +1,6 @@
 import { readBody, createError } from "h3";
 import { v4 as uuidv4 } from "uuid";
-import type { PluginContext, ServerPlugin } from "../types";
+import type { PluginContext, ServerPlugin, PluginMetadata } from "../types";
 
 export interface EmulatorBinding {
   flavor: "gbe_fork" | "gse_fork";
@@ -42,13 +42,16 @@ export interface DiscoverableRoom {
 }
 
 export class DropGseServerPlugin implements ServerPlugin {
-  metadata = {
+  metadata: PluginMetadata = {
     id: "drop-gse",
     name: "Drop GSE Multiplayer",
     version: "0.1.0",
     description:
       "Peer-to-peer multiplayer rooms over virtual mesh networks using Goldberg Steam emulator",
     author: "Heretek Games",
+    builtin: true,
+    capabilities: ["routes", "storage", "websocket", "events"],
+    enabled: true,
   };
 
   private rooms = new Map<string, Room>();
