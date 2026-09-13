@@ -3,7 +3,7 @@ import { ObjectBackend, objectMetadata } from "./objectHandler";
 
 import fs from "node:fs";
 import path from "node:path";
-import { Readable } from "node:stream";
+import Stream, { Readable } from "node:stream";
 import { createHash } from "node:crypto";
 import prisma from "../db/database";
 import cacheHandler from "../cache";
@@ -50,13 +50,8 @@ export class FsObjectBackend extends ObjectBackend {
       await handle.close();
       return undefined;
     }
-    // createReadStream on the fd keeps reads tied to the opened inode.
-    return fs
-      .createReadStream(undefined as unknown as string, {
-        fd: handle.fd,
-        autoClose: true,
-      })
-      .on("close", () => void handle.close().catch(() => {}));
+    // createReadStream on the handle keeps reads tied to the opened inode and closes the handle on completion.
+    return handle.createReadStream({ autoClose: true });
   }
   async write(id: string, source: Source): Promise<boolean> {
     const objectPath = path.join(this.baseObjectPath, id);
@@ -74,9 +69,8 @@ export class FsObjectBackend extends ObjectBackend {
 
     try {
       if (source instanceof Readable) {
-        const outputStream = handle.createWriteStream();
-        source.pipe(outputStream, { end: true });
-        await new Promise((r, _j) => source.on("end", r));
+        const outputStream = handle.createWriteStream({ autoClose: true });
+        await Stream.promises.pipeline(source, outputStream);
         return true;
       }
 
@@ -207,29 +201,15 @@ export class FsObjectBackend extends ObjectBackend {
 
     // hash object
     const hash = createHash("sha256");
-    hash.setEncoding("hex");
 
-    // local variable to point to object
-    const store = this.hashStore;
-    let hashResult = "";
-
-    const objEnd = new Promise<void>((r) => {
-      obj.on("end", async function () {
-        hash.end();
-        hashResult = hash.read();
-        r();
-      });
-    });
-    // read obj into hash
-    obj.pipe(hash);
-    await objEnd;
-
-    // if hash isn't a string somehow, mark as unknown hash
-    if (typeof hashResult !== "string") {
+    try {
+      await Stream.promises.pipeline(obj, hash);
+      const hashResult = hash.digest("hex");
+      await this.hashStore.save(id, hashResult);
+      return hashResult;
+    } catch {
       return undefined;
     }
-    await store.save(id, hashResult);
-    return typeof hashResult;
   }
 
   async listAll(): Promise<string[]> {

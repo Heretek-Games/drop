@@ -11,13 +11,17 @@ export default defineEventHandler(async (h3) => {
   const userId = await aclManager.getUserIdACL(h3, ["object:read"]);
 
   const id = sanitize(unsafeId);
-  const object = await objectHandler.fetchWithPermissions(id, userId);
-  if (!object)
+  const permission = await objectHandler.checkPermission(id, userId);
+  if (!permission)
     throw createError({ statusCode: 404, statusMessage: "Object not found" });
+
+  setHeader(h3, "Content-Type", permission.mime);
 
   // https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/ETag
   const etagRequestValue = h3.headers.get("If-None-Match");
   const etagActualValue = await objectHandler.fetchHash(id);
+  setHeader(h3, "ETag", etagActualValue ?? "");
+
   if (etagRequestValue !== null && etagActualValue === etagRequestValue) {
     // would compare if etag is valid, but objects should never change
     setResponseStatus(h3, 304);

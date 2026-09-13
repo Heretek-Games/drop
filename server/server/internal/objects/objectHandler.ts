@@ -152,6 +152,33 @@ export class ObjectHandler {
   }
 
   /**
+   * Checks if user has perms to access the object without opening the file stream
+   * @param id object id
+   * @param userId user to check, or act as anon user
+   * @returns metadata summary if permitted, undefined otherwise
+   */
+  async checkPermission(
+    id: string,
+    userId?: string,
+  ): Promise<{ mime: string } | undefined> {
+    const metadata = await this.backend.fetchMetadata(id);
+    if (!metadata) return undefined;
+
+    if (!this.hasAnyPermissions(metadata.permissions, userId)) return undefined;
+
+    return { mime: metadata.mime };
+  }
+
+  /**
+   * Fetches raw object source from backend
+   * @param id object id
+   * @returns source
+   */
+  async fetch(id: string) {
+    return await this.backend.fetch(id);
+  }
+
+  /**
    * Fetches object, but also checks if user has perms to access it
    * @param id object id
    * @param userId user to check, or act as anon user

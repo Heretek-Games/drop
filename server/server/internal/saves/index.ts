@@ -46,19 +46,12 @@ class SaveManager {
         statusMessage: "Failed to create writing stream to storage backend.",
       });
 
-    let hash: string | undefined;
-    const hashPromise = Stream.promises.pipeline(
-      stream,
-      createHash("sha256").setEncoding("hex"),
-      async function (source) {
-        // @ts-expect-error Not sure how to get this to be typed
-        hash = (await source.toArray())[0];
-      },
-    );
+    const hashStream = createHash("sha256");
+    stream.on("data", (chunk: Buffer) => hashStream.update(chunk));
 
-    const uploadStream = Stream.promises.pipeline(stream, newSaveStream);
+    await Stream.promises.pipeline(stream, newSaveStream);
 
-    await Promise.all([hashPromise, uploadStream]);
+    const hash = hashStream.digest("hex");
 
     if (!hash) {
       await objectHandler.deleteAsSystem(newSaveObjectId);
