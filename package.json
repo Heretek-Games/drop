@@ -2,14 +2,18 @@
   "name": "drop",
   "private": true,
   "packageManager": "pnpm@10.33.0+sha512.10568bb4a6afb58c9eb3630da90cc9516417abebd3fabbe6739f0ae795728da1491e9db5a544c76ad8eb7570f5c4bb3d6c637b2cb41bfdcdb47fa823c8649319",
+  "scripts": {
+    "prepare": "lefthook install",
+    "lint": "pnpm -r --if-present run lint",
+    "lint:fix": "pnpm -r --if-present run lint:fix"
+  },
   "devDependencies": {
     "@ast-grep/cli": "^0.45.2",
+    "@commitlint/cli": "^21.2.2",
+    "@commitlint/config-conventional": "^21.2.2",
     "knip": "^6.32.2",
     "lefthook": "^2.1.10",
     "prettier": "^3.9.6",
     "prettier-plugin-sort-json": "^4.2.0"
-  },
-  "scripts": {
-    "prepare": "lefthook install"
   }
 }

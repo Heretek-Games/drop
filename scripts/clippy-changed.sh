@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Run `cargo clippy -D warnings` only over crates that contain changed .rs files.
-# Called by lefthook pre-push. desktop/src-tauri is intentionally excluded:
-# it needs Tauri system libraries that contributors on minimal setups won't have.
-# CI covers it in droplet-ci.yml / torrential-ci.yml.
+# Run `cargo fmt --check` and `cargo clippy -D warnings` only over crates that
+# contain changed .rs files. Called by lefthook pre-push. desktop/src-tauri is
+# intentionally excluded: it needs Tauri system libraries that contributors on
+# minimal setups won't have. CI covers it in droplet-ci.yml / torrential-ci.yml.
 set -uo pipefail
 
 # Resolve the repo root regardless of where the hook runs.
@@ -37,6 +37,8 @@ fi
 status=0
 for dir in "${crates[@]}"; do
   if printf '%s\n' "$changed_rs" | grep -q "^${dir}/"; then
+    echo "==> cargo fmt (${dir})"
+    (cd "$dir" && cargo fmt --all -- --check) || status=1
     echo "==> cargo clippy (${dir})"
     (cd "$dir" && cargo clippy --all-targets --all-features -- -D warnings) || status=1
   fi
