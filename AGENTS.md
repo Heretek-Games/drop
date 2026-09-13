@@ -66,7 +66,9 @@ Source: `desktop/src-tauri/process/src/pipeline.rs`,
   are `start_pipeline_setup`, `cancel_pipeline_setup`, `reclaim_pipeline_space`.
 - `GameSetupModal.vue` shows step progress, a live log, cancellation and
   post-setup archive reclamation. The library page falls back to the legacy
-  setup command when a version has no recipe.
+  setup command when a version has no recipe; generated setup scripts are
+  materialized from the recipe before running, and a missing script reports an
+  actionable error instead of spawning a nonexistent file.
 - Tools (`7z`, `innoextract`) are discovered on PATH / bundled
   `<data>/tools/<tool>/`; missing tools produce an actionable error.
 
@@ -76,7 +78,9 @@ Source: `desktop/src-tauri/process/src/pipeline.rs`,
   scan results and decisions (`Pending` / `Imported` / `Ignored`).
 - Task groups `import:discover` (`registry/discover-games.ts`) and `import:bulk`;
   `libraryManager.discoverUnimportedGames()` and
-  `importUnimportedVersionsForGame()` do the work.
+  `importUnimportedVersionsForGame()` do the work. Bulk import filters
+  already-imported versions (retries are idempotent) and only marks a discovery
+  `Imported` when at least one version was actually imported.
 - APIs: `GET/POST/PATCH /api/v1/admin/import/discover`,
   `POST /api/v1/admin/import/bulk`; UI at `pages/admin/import/bulk.vue`.
 
@@ -88,7 +92,10 @@ Source: `torrential/src/downloads/cache.rs` (wired in `serve.rs`, `state.rs`, `m
   (`ChunkData::checksum`). Disabled unless `CHUNK_CACHE_DIR` is set;
   `CHUNK_CACHE_MAX_BYTES` bounds the LRU (default 20 GiB).
 - Caches plaintext (pre-AES) bytes, is best-effort (a cache failure never fails
-  a request), uses single-flight fills and atomic `.partial` → rename.
+  a request), uses single-flight fills and atomic `.partial` → rename. Cache
+  keys must be 64-char SHA-256 hex; plaintext is hashed during the fill and
+  refused unless it matches the key, and in-flight fills are bounded by the
+  configured budget.
 - Documented optional volume/env in `server/deploy-template/compose.yml` and
   `sites/docs/src/content/docs/admin/quickstart.md`; the cache stores
   **unencrypted game data at rest**.
@@ -111,13 +118,19 @@ Source: `server/server/internal/plugins/`
   `${dataDir}/plugins/*/drop-plugin.json`. It is dependency-injectable
   (`dataDir`, `storageFactory`, `authResolver`, `registryPath`) and resolves
   Drop's runtime config lazily, so it imports outside Nuxt and is unit-testable.
-- **Contract**: `PLUGIN_API_VERSION` (`types.ts`); a plugin declares
-  `metadata.apiVersion` and a mismatch is rejected (`PluginApiVersionError`).
-- **Capabilities** are fail-closed: `routes`, `storage`, `events`, `network`,
-  `websocket`. Undeclared use throws `PluginCapabilityError` (routes/events at
-  call time, storage via a guarded wrapper, `network` gates `ctx.fetch`,
-  `websocket` gates `ctx.registerWebSocket`). `trust: "trusted"` (in-process) is
-  the only tier; `"sandboxed"` is rejected until an isolated runtime exists.
+- **Contract**: `PLUGIN_API_VERSION` (`types.ts`); `metadata.apiVersion` is
+  required and a missing or mismatched version is rejected
+  (`PluginApiVersionError`).
+- **Capabilities** are fail-closed (declaring none denies all): `routes`,
+  `storage`, `events`, `network`, `websocket`. Undeclared use throws
+  `PluginCapabilityError` (routes/events at call time, storage via a guarded
+  wrapper, `network` gates `ctx.fetch`, `websocket` gates
+  `ctx.registerWebSocket`). `trust: "trusted"` (in-process) is the only tier;
+  `"sandboxed"` is rejected until an isolated runtime exists.
+- **Auth**: plugin REST routes and the WS gateway resolve browser sessions,
+  `Bearer` API tokens, and the desktop client `JWT <clientId> <jwt>` scheme
+  (`internal/plugins/auth.ts`). Sensitive WS channels require an authenticated
+  peer and cross-site upgrades (Origin mismatch) are rejected.
 - **Storage**: one directory per plugin under `<dataDir>/plugins/<id>/`, with
   `metadata.storageVersion` driving `migrateStorage` (recorded in `schema.json`).
 - **Bundles**: `<dataDir>/plugins/<id>/{drop-plugin.json,index.js}`. Optional
