@@ -1,4 +1,5 @@
 import type { PluginStorage } from "../../types";
+import { parseCredential, parseRoom } from "./types";
 import type { MeshCredential, Room } from "./types";
 
 /**
@@ -47,11 +48,12 @@ export class StorageRoomPersistence implements RoomPersistence {
   }
 
   async listRooms(): Promise<Room[]> {
-    return Object.values(await this.loadRooms());
+    return Object.values(await this.loadRooms()).map(parseRoom);
   }
 
   async getRoom(id: string): Promise<Room | undefined> {
-    return (await this.loadRooms())[id];
+    const room = (await this.loadRooms())[id];
+    return room ? parseRoom(room) : undefined;
   }
 
   async saveRoom(room: Room): Promise<void> {
@@ -78,7 +80,12 @@ export class StorageRoomPersistence implements RoomPersistence {
   async getCredentials(
     roomId: string,
   ): Promise<Record<string, MeshCredential>> {
-    return (await this.loadCredentials())[roomId] ?? {};
+    const perUser = (await this.loadCredentials())[roomId] ?? {};
+    const result: Record<string, MeshCredential> = {};
+    for (const [userId, credential] of Object.entries(perUser)) {
+      result[userId] = parseCredential(credential);
+    }
+    return result;
   }
 
   async saveCredential(

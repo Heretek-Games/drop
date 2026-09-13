@@ -1,4 +1,5 @@
 import type { RoomPersistence } from "./persistence";
+import { parseCredential, parseRoom } from "./types";
 import type { MeshCredential, Room } from "./types";
 
 /**
@@ -16,13 +17,13 @@ export class PrismaRoomPersistence implements RoomPersistence {
   async listRooms(): Promise<Room[]> {
     const prisma = await this.db();
     const rows = await prisma.gseRoom.findMany();
-    return rows.map((row) => row.payload as unknown as Room);
+    return rows.map((row) => parseRoom(row.payload));
   }
 
   async getRoom(id: string): Promise<Room | undefined> {
     const prisma = await this.db();
     const row = await prisma.gseRoom.findUnique({ where: { id } });
-    return row ? (row.payload as unknown as Room) : undefined;
+    return row ? parseRoom(row.payload) : undefined;
   }
 
   async saveRoom(room: Room): Promise<void> {
@@ -61,7 +62,7 @@ export class PrismaRoomPersistence implements RoomPersistence {
     const rows = await prisma.gseCredential.findMany({ where: { roomId } });
     const result: Record<string, MeshCredential> = {};
     for (const row of rows) {
-      result[row.userId] = row.payload as unknown as MeshCredential;
+      result[row.userId] = parseCredential(row.payload);
     }
     return result;
   }

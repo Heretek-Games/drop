@@ -19,6 +19,7 @@ import {
   RoomStore,
 } from "../builtin/gse/room-store";
 import type { PluginStorage } from "../types";
+import { parseCredential, parseRoom } from "../builtin/gse/types";
 import type { EmulatorBinding } from "../builtin/gse/types";
 
 class MemoryStorage implements PluginStorage {
@@ -737,6 +738,42 @@ test("StorageRoomPersistence redacts secrets and sweeps expired credentials", as
   assert.equal(await persistence.deleteExpiredCredentials(1_500_000), 0);
   assert.equal(await persistence.deleteExpiredCredentials(2_500_000), 1);
   assert.deepEqual(await persistence.getCredentials(room.id), {});
+});
+
+test("parseRoom and parseCredential reject corrupt payloads", () => {
+  const room = {
+    id: "r",
+    gameId: "g",
+    versionId: "v",
+    hostUserId: "h",
+    hostHeartbeatAt: 1,
+    createdAt: 1,
+    expiresAt: 2,
+    members: [{ userId: "h", joinedAt: 1 }],
+    mesh: {
+      backend: "zerotier",
+      cidr: "10.242.1.0/24",
+      networkId: "n",
+      expiresAt: 2,
+    },
+    emulator: { flavor: "gbe_fork", release: "latest", releaseDigest: "d" },
+  };
+  assert.equal(parseRoom(room).id, "r");
+  assert.throws(() =>
+    parseRoom({ ...room, mesh: { backend: "bogus", expiresAt: 2 } }),
+  );
+  assert.throws(() => parseRoom({ ...room, members: "nope" }));
+  assert.throws(() => parseRoom(null));
+
+  const credential = {
+    roomId: "r",
+    userId: "u",
+    secret: "",
+    issuedAt: 1,
+    expiresAt: 2,
+  };
+  assert.equal(parseCredential(credential).userId, "u");
+  assert.throws(() => parseCredential({ roomId: "r" }));
 });
 
 test("RoomStore host close deletes the room and its credentials together", async () => {

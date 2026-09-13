@@ -566,6 +566,94 @@ test("drop-gse member report authorizes the ZeroTier node and returns its addres
   );
 });
 
+test("drop-gse route lifecycle: host, join, credential, member, leave, close", async () => {
+  const storage = new MemoryStorage();
+  let currentUser = "host";
+  const manager = new PluginManager({
+    dataDir: tmpDataDir(),
+    storageFactory: () => storage,
+    authResolver: async () => ({ userId: currentUser }),
+  });
+  await manager.registerPlugin(
+    new DropGseServerPlugin(
+      new StorageRoomPersistence(storage),
+      new InMemoryMeshBackend(),
+    ),
+  );
+
+  const created = (await manager.dispatch(
+    "drop-gse",
+    "POST",
+    "/rooms",
+    jsonEvent("POST", "/rooms", { gameId: "game-e2e", versionId: "v1" }),
+  )) as { room: { id: string } };
+  const roomId = created.room.id;
+
+  // A different authenticated user joins.
+  currentUser = "guest";
+  const joined = (await manager.dispatch(
+    "drop-gse",
+    "POST",
+    `/rooms/${roomId}/join`,
+    jsonEvent("POST", `/rooms/${roomId}/join`),
+  )) as { room: { members: Array<{ userId: string }> } };
+  assert.equal(joined.room.members.length, 2);
+
+  const credentialed = (await manager.dispatch(
+    "drop-gse",
+    "POST",
+    `/rooms/${roomId}/credential`,
+    jsonEvent("POST", `/rooms/${roomId}/credential`),
+  )) as { credential: { secret: string; address?: string } };
+  assert.ok(credentialed.credential.secret);
+
+  const reported = (await manager.dispatch(
+    "drop-gse",
+    "POST",
+    `/rooms/${roomId}/member`,
+    jsonEvent("POST", `/rooms/${roomId}/member`, { memberId: "node-guest" }),
+  )) as { address?: string };
+  assert.ok(reported.address);
+
+  // A non-member sees only the redacted discovery view.
+  currentUser = "stranger";
+  const discovery = (await manager.dispatch(
+    "drop-gse",
+    "GET",
+    `/rooms/${roomId}`,
+    jsonEvent("GET", `/rooms/${roomId}`),
+  )) as { room: { hostUserId?: string; mesh: { networkId?: string } } };
+  assert.equal(discovery.room.hostUserId, undefined);
+  assert.equal(discovery.room.mesh.networkId, "");
+
+  // Guest leaves; the host then closes the room.
+  currentUser = "guest";
+  const left = (await manager.dispatch(
+    "drop-gse",
+    "DELETE",
+    `/rooms/${roomId}`,
+    jsonEvent("DELETE", `/rooms/${roomId}`),
+  )) as { closed: boolean };
+  assert.equal(left.closed, false);
+
+  currentUser = "host";
+  const closed = (await manager.dispatch(
+    "drop-gse",
+    "DELETE",
+    `/rooms/${roomId}`,
+    jsonEvent("DELETE", `/rooms/${roomId}`),
+  )) as { closed: boolean };
+  assert.equal(closed.closed, true);
+
+  const listed = (await manager.dispatch(
+    "drop-gse",
+    "GET",
+    "/rooms",
+    jsonEvent("GET", "/rooms"),
+  )) as { rooms: unknown[] };
+  assert.equal(listed.rooms.length, 0);
+});
+
 test("drop-gse backend selection honors GSE_MESH_BACKEND", async () => {
   const saved = {
     GSE_MESH_BACKEND: process.env.GSE_MESH_BACKEND,

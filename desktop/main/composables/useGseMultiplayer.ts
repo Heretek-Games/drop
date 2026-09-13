@@ -314,7 +314,7 @@ export const useGseMultiplayer = (gameId: string) => {
     installDir: string,
     room: GseRoom,
   ): Promise<void> {
-    const activeRoom = roomToActiveRoom(room);
+    const activeRoom = roomToActiveRoom(room, selfAddress.value ?? undefined);
     await invoke("gse_write_room_config", {
       installDir,
       peerIps: activeRoom.peers,

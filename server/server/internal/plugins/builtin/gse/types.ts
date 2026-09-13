@@ -114,6 +114,61 @@ export interface MeshBackend {
   teardown(roomId: string, mesh?: PublicMeshInfo): Promise<void>;
 }
 
+function isMeshInfo(value: unknown): value is PublicMeshInfo {
+  if (!value || typeof value !== "object") return false;
+  const mesh = value as { backend?: unknown };
+  return mesh.backend === "zerotier" || mesh.backend === "tailscale";
+}
+
+/** Runtime shape check for a persisted `Room` payload. */
+export function isRoom(value: unknown): value is Room {
+  if (!value || typeof value !== "object") return false;
+  const room = value as Partial<Room>;
+  return (
+    typeof room.id === "string" &&
+    typeof room.gameId === "string" &&
+    typeof room.versionId === "string" &&
+    typeof room.hostUserId === "string" &&
+    typeof room.hostHeartbeatAt === "number" &&
+    typeof room.createdAt === "number" &&
+    typeof room.expiresAt === "number" &&
+    Array.isArray(room.members) &&
+    room.members.every(
+      (member) => !!member && typeof member.userId === "string",
+    ) &&
+    isMeshInfo(room.mesh) &&
+    !!room.emulator &&
+    (room.emulator.flavor === "gbe_fork" || room.emulator.flavor === "gse_fork")
+  );
+}
+
+export function parseRoom(value: unknown): Room {
+  if (!isRoom(value)) {
+    throw new Error("corrupt persisted GseRoom payload");
+  }
+  return value;
+}
+
+/** Runtime shape check for a persisted `MeshCredential` payload. */
+export function isMeshCredential(value: unknown): value is MeshCredential {
+  if (!value || typeof value !== "object") return false;
+  const credential = value as Partial<MeshCredential>;
+  return (
+    typeof credential.roomId === "string" &&
+    typeof credential.userId === "string" &&
+    typeof credential.secret === "string" &&
+    typeof credential.issuedAt === "number" &&
+    typeof credential.expiresAt === "number"
+  );
+}
+
+export function parseCredential(value: unknown): MeshCredential {
+  if (!isMeshCredential(value)) {
+    throw new Error("corrupt persisted GseCredential payload");
+  }
+  return value;
+}
+
 /**
  * Drop the network identifiers from mesh info for non-member discovery: only
  * authenticated members receive them via their credential/room view.

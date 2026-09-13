@@ -32,8 +32,14 @@ export interface PeerSource {
 /**
  * Map a server room view onto the contract. Rooms whose members have no
  * assigned mesh address yield empty `peers` (LAN/offline mode).
+ *
+ * `selfAddress` is this client's assigned address when known, so the engine can
+ * distinguish peers from itself.
  */
-export function roomToActiveRoom(room: GseRoom): ActiveRoom {
+export function roomToActiveRoom(
+  room: GseRoom,
+  selfAddress?: string,
+): ActiveRoom {
   const peers = (room.members ?? [])
     .map((member) => member.meshAddress)
     .filter((address): address is string => Boolean(address));
@@ -43,7 +49,7 @@ export function roomToActiveRoom(room: GseRoom): ActiveRoom {
     backend: room.mesh.backend,
     appId: room.appId,
     peers,
-    selfAddress: undefined,
+    selfAddress,
     credentialExpiresAt: room.expiresAt,
   };
 }
