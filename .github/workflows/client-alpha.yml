@@ -1,0 +1,107 @@
+name: "Build and publish desktop (Alpha)"
+
+on:
+  push:
+    branches:
+      - develop
+    paths:
+      - "desktop/**"
+      - "distribution/flatpak/**"
+      - ".github/workflows/client-alpha.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-publish-alpha:
+    name: Build and publish Alpha .deb
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # actions/checkout@v7
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+
+      - name: setup pnpm
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # pnpm/action-setup@v6
+        with:
+          run_install: false
+
+      - name: setup node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # actions/setup-node@v7
+        with:
+          node-version: lts/*
+          cache: pnpm
+
+      - name: install Rust nightly
+        uses: dtolnay/rust-toolchain@7c8d7d138f5c09cef361f8214cf96882cd029cdb # dtolnay/rust-toolchain@nightly
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # swatinem/rust-cache@v2
+        with:
+          workspaces: "./desktop/src-tauri -> target"
+
+      - name: install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf xdg-utils
+
+      - name: compute alpha version
+        id: version
+        run: |
+          BASE_VERSION=$(jq -r .version desktop/src-tauri/tauri.conf.json)
+          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+          ALPHA_VERSION="${BASE_VERSION}-alpha.${{ github.run_number }}.${SHORT_SHA}"
+          echo "alpha_version=${ALPHA_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "Building Alpha version: ${ALPHA_VERSION}"
+
+          # Update version in tauri.conf.json so the binary and deb are stamped with the alpha version
+          jq --arg v "$ALPHA_VERSION" '.version = $v' desktop/src-tauri/tauri.conf.json > desktop/src-tauri/tauri.conf.json.tmp
+          mv desktop/src-tauri/tauri.conf.json.tmp desktop/src-tauri/tauri.conf.json
+
+      - name: install frontend dependencies
+        run: pnpm install
+
+      - name: build Tauri debian bundle
+        run: |
+          pnpm --filter drop-app exec tauri build --bundles deb
+
+      - name: stage deb asset
+        id: deb
+        run: |
+          DEB_PATH=$(find desktop/src-tauri/target/release/bundle/deb -name "*.deb" | head -n1)
+          [ -f "$DEB_PATH" ] || { echo "Debian package not found" >&2; exit 1; }
+          TARGET_NAME="Drop.Desktop.Client_${{ steps.version.outputs.alpha_version }}_amd64.deb"
+          cp "$DEB_PATH" "$TARGET_NAME"
+          echo "deb_path=${TARGET_NAME}" >> "$GITHUB_OUTPUT"
+          echo "deb_name=${TARGET_NAME}" >> "$GITHUB_OUTPUT"
+          ls -la "$TARGET_NAME"
+
+      - name: publish to rolling 'alpha' GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          tag="alpha"
+          title="Drop Alpha (${{ steps.version.outputs.alpha_version }})"
+          notes="Automated alpha build from commit ${{ github.sha }} on develop."
+
+          if ! gh release view "$tag" >/dev/null 2>&1; then
+            echo "Creating new release $tag"
+            gh release create "$tag" "${{ steps.deb.outputs.deb_path }}" \
+              --title "$title" --notes "$notes" --prerelease --target "${{ github.sha }}"
+          else
+            echo "Updating existing release $tag"
+            gh release edit "$tag" --title "$title" --notes "$notes" --prerelease --target "${{ github.sha }}"
+            gh release upload "$tag" "${{ steps.deb.outputs.deb_path }}" --clobber
+          fi
+
+      - name: Trigger FlatPark Alpha Release Webhook
+        uses: flatpark/publish-action@v1
+        with:
+          app-id: org.heretek_games.Drop.Alpha
+          tag: alpha
