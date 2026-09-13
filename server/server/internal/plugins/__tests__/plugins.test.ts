@@ -514,3 +514,64 @@ test("discovery verifies external bundle checksums", async () => {
     undefined,
   );
 });
+
+test("PluginManager installs and removes external bundles", async () => {
+  const dataDir = tmpDataDir();
+  const manager = new PluginManager({
+    dataDir,
+    storageFactory: () => new MemoryStorage(),
+    authResolver: async () => ({}),
+  });
+
+  const entry =
+    "export default { metadata: { id: 'installed-demo', name: 'Installed'," +
+    " version: '1.0.0', apiVersion: 1, capabilities: ['routes'] }," +
+    " init(ctx) { ctx.registerRoute('GET', '/x', () => ({ x: 1 })); } };\n";
+  const entryBase64 = Buffer.from(entry).toString("base64");
+  const checksum = createHash("sha256").update(entry).digest("hex");
+
+  await manager.installBundle(
+    {
+      id: "installed-demo",
+      name: "Installed",
+      version: "1.0.0",
+      apiVersion: PLUGIN_API_VERSION,
+      capabilities: ["routes"],
+      entry: "index.js",
+      checksum,
+    },
+    entryBase64,
+  );
+  assert.equal(
+    manager.listPlugins().find((p) => p.id === "installed-demo")?.status,
+    "active",
+  );
+
+  // A tampered/incorrect checksum is rejected before anything is written.
+  await assert.rejects(
+    () =>
+      manager.installBundle(
+        {
+          id: "bad-demo",
+          name: "Bad",
+          version: "1.0.0",
+          apiVersion: PLUGIN_API_VERSION,
+          capabilities: ["routes"],
+          entry: "index.js",
+          checksum: "deadbeef",
+        },
+        entryBase64,
+      ),
+    /checksum/,
+  );
+
+  await manager.removeBundle("installed-demo");
+  assert.equal(
+    manager.listPlugins().find((p) => p.id === "installed-demo"),
+    undefined,
+  );
+
+  // Builtin plugins cannot be removed.
+  await manager.registerPlugin(new HelloWorldPlugin());
+  await assert.rejects(() => manager.removeBundle("hello-world"), /builtin/);
+});

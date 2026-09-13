@@ -291,11 +291,7 @@ export class PluginManager {
    *   `DROP_PLUGIN_SIGNING_KEY`.
    * - When `DROP_PLUGIN_REQUIRE_SIGNATURE=true`, an unsigned bundle is refused.
    */
-  private async verifyBundleIntegrity(
-    entryPath: string,
-    manifest: PluginManifest,
-  ): Promise<void> {
-    const bytes = await fs.readFile(entryPath);
+  private verifyBundleBytes(bytes: Buffer, manifest: PluginManifest): string {
     const digest = createHash("sha256").update(bytes).digest("hex");
 
     if (manifest.checksum && manifest.checksum !== digest) {
@@ -320,6 +316,48 @@ export class PluginManager {
     } else if (process.env.DROP_PLUGIN_REQUIRE_SIGNATURE === "true") {
       throw new Error(`bundle ${manifest.id} is unsigned`);
     }
+    return digest;
+  }
+
+  private async verifyBundleIntegrity(
+    entryPath: string,
+    manifest: PluginManifest,
+  ): Promise<void> {
+    this.verifyBundleBytes(await fs.readFile(entryPath), manifest);
+  }
+
+  /** Verify, import and register a bundle directory. */
+  private async loadExternalPluginFromDir(
+    pluginDir: string,
+    manifest: PluginManifest,
+  ): Promise<void> {
+    const entryRel = manifest.entry || "index.js";
+    const entryPath = path.resolve(pluginDir, entryRel);
+
+    this.verifyBundleBytes(await fs.readFile(entryPath), manifest);
+
+    const mod = await import(pathToFileURL(entryPath).href);
+    const pluginInstance: ServerPlugin =
+      mod.default && typeof mod.default.init === "function"
+        ? mod.default
+        : mod.plugin && typeof mod.plugin.init === "function"
+          ? mod.plugin
+          : typeof mod.default === "function"
+            ? new mod.default()
+            : null;
+
+    if (!pluginInstance) {
+      throw new Error(
+        `Plugin module at ${entryPath} does not export a valid ServerPlugin`,
+      );
+    }
+
+    pluginInstance.metadata = {
+      ...manifest,
+      builtin: false,
+    };
+
+    await this.registerPlugin(pluginInstance);
   }
 
   private assertPluginCompatible(plugin: ServerPlugin): void {
@@ -483,34 +521,7 @@ export class PluginManager {
             continue;
           }
 
-          const entryRel = manifest.entry || "index.js";
-          const entryPath = path.resolve(pluginDir, entryRel);
-
-          await this.verifyBundleIntegrity(entryPath, manifest);
-
-          const mod = await import(pathToFileURL(entryPath).href);
-          const pluginInstance: ServerPlugin =
-            mod.default && typeof mod.default.init === "function"
-              ? mod.default
-              : mod.plugin && typeof mod.plugin.init === "function"
-                ? mod.plugin
-                : typeof mod.default === "function"
-                  ? new mod.default()
-                  : null;
-
-          if (!pluginInstance) {
-            this.log.error(
-              `Plugin module at ${entryPath} does not export a valid ServerPlugin`,
-            );
-            continue;
-          }
-
-          pluginInstance.metadata = {
-            ...manifest,
-            builtin: false,
-          };
-
-          await this.registerPlugin(pluginInstance);
+          await this.loadExternalPluginFromDir(pluginDir, manifest);
         } catch (err) {
           this.log.error(
             `Failed to load external plugin from ${pluginDir}: ${err}`,
@@ -520,6 +531,62 @@ export class PluginManager {
     } catch (err) {
       this.log.debug(`External plugins directory check: ${err}`);
     }
+  }
+
+  /**
+   * Install (or update) a signed plugin bundle from its manifest and entry
+   * source, verifying the checksum/signature before writing or loading.
+   */
+  async installBundle(
+    manifest: PluginManifest,
+    entryBase64: string,
+  ): Promise<void> {
+    if (!manifest.id || !manifest.name || !manifest.version) {
+      throw new Error("manifest requires id, name and version");
+    }
+    if (!/^[A-Za-z0-9._-]+$/.test(manifest.id)) {
+      throw new Error("invalid plugin id");
+    }
+    const entryRel = manifest.entry || "index.js";
+    if (entryRel.startsWith("/") || entryRel.split("/").includes("..")) {
+      throw new Error("invalid entry path");
+    }
+
+    const bytes = Buffer.from(entryBase64, "base64");
+    const digest = this.verifyBundleBytes(bytes, manifest);
+
+    const pluginsDir = await this.getPluginsDirectory();
+    const bundleDir = path.join(pluginsDir, manifest.id);
+    await fs.mkdir(bundleDir, { recursive: true });
+
+    const storedManifest: PluginManifest = {
+      ...manifest,
+      checksum: manifest.checksum ?? digest,
+    };
+    await fs.writeFile(
+      path.join(bundleDir, "drop-plugin.json"),
+      JSON.stringify(storedManifest, null, 2),
+    );
+    await fs.writeFile(path.join(bundleDir, entryRel), bytes);
+
+    await this.loadExternalPluginFromDir(bundleDir, storedManifest);
+  }
+
+  /** Remove an external plugin bundle and unregister it. */
+  async removeBundle(id: string): Promise<boolean> {
+    if (!/^[A-Za-z0-9._-]+$/.test(id)) {
+      throw new Error("invalid plugin id");
+    }
+    const loaded = this.plugins.get(id);
+    if (loaded?.plugin.metadata.builtin) {
+      throw new Error("cannot remove a builtin plugin");
+    }
+
+    await this.unregisterPlugin(id);
+
+    const pluginsDir = await this.getPluginsDirectory();
+    await fs.rm(path.join(pluginsDir, id), { recursive: true, force: true });
+    return true;
   }
 
   async reloadPlugins(): Promise<void> {

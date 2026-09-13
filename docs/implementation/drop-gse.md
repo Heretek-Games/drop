@@ -78,6 +78,22 @@ Track B produces an `ActiveRoom`; Track A consumes `peers` as the contents of
 - Rust: `desktop/src-tauri/process/src/peer_source.rs` (`ActiveRoom`,
   `PeerSource`, `MeshBackend`).
 
+## Licensing
+
+- **drop-gse** plugin code is GPL-3.0-or-later; Drop is AGPL-3.0-or-later.
+  AGPLv3 §13 permits combining with GPLv3, so shipping the plugin with Drop is
+  allowed provided the combined distribution offers corresponding source under
+  the AGPL and honours the GPL terms.
+- **Emulator binaries** (gbe_fork / gse_fork) are LGPL-3.0. They are fetched at
+  runtime and never vendored; keep them as dynamically replaced libraries and
+  ship their license notices.
+- Distributing the plugin bundle counts as distribution: publish the bundle's
+  corresponding source plus a third-party NOTICE. The engine's emulator payload
+  is not part of the Drop source tree.
+- **ReFix is a non-goal** (inconsistent license).
+- This is an engineering summary, **not legal advice**; a maintainer legal
+  review is required before a stable release.
+
 ---
 
 ## M0 — Plugin platform MVP + test harness (foundation)
@@ -193,9 +209,12 @@ Owner: TBD · Depends on: M0–M4
 - [x] Bundle format + `drop-plugin.json` schema (see platform contract above)
 - [x] Checksum + optional signature verification on load, with the
       `dev-tools/sign-plugin.mjs` signer and a `sample-plugin/` bundle
-- [ ] Install/update/remove UI; registry/version pinning
-- [ ] Docs: admin install guide, `AGENTS.md` plugin section
-- [ ] License review + corresponding-source obligations
+- [x] Install/update/remove: `PluginManager.installBundle` /
+      `removeBundle` with checksum/signature verification and admin routes
+      (`POST /api/v1/plugins/install`, `DELETE /api/v1/plugins/<id>/bundle`),
+      tested. Registry/version pinning beyond `apiVersion` still pending.
+- [x] Docs: admin guide at `sites/docs/src/content/docs/admin/plugins.md`
+- [x] License review recorded (see **Licensing** below)
 
 **Acceptance:** fresh Drop + bundle → host/join/launch with no server rebuild;
 removing the plugin leaves no dangling routes/data/backups.
