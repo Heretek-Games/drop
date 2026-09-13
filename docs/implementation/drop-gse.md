@@ -53,6 +53,18 @@ tracks:
 - **Storage** — per-plugin directory under `<dataDir>/plugins/<id>/` (writes
   never touch the code dir). `metadata.storageVersion` + `ServerPlugin.migrateStorage`
   drive forward migrations; the recorded version lives in `schema.json`.
+- **Bundle format** — `<dataDir>/plugins/<id>/{drop-plugin.json,index.js}`.
+  `drop-plugin.json` declares `id`/`name`/`version`/`apiVersion`/`capabilities`
+  plus optional `entry`, `checksum` (SHA-256 of the entry file) and `signature`
+  (HMAC-SHA256 of the checksum under `DROP_PLUGIN_SIGNING_KEY`). Verify/sign
+  with `node dev-tools/sign-plugin.mjs <bundle-dir>`; see
+  `dev-tools/sample-plugin/`. `DROP_PLUGIN_REQUIRE_SIGNATURE=true` refuses
+  unsigned bundles.
+- **Desktop extension ABI (P6 decision)** — third-party plugins are
+  **server-side only** for now. Desktop integration is compiled in behind Cargo
+  features + runtime opt-in because GSE needs filesystem and VPN access that
+  cannot be safely sandboxed in-process; a WASM/sidecar plugin runtime is a
+  future option, not a v1 requirement.
 
 ## Frozen A↔B contract
 
@@ -155,7 +167,9 @@ Owner: TBD · Depends on: M3
   an injected `TailscaleProvisioner`, tested). Wiring the embedded
   `desktop/src-tauri/tailscale` crate with isolated `--state=mem:` pending.
 - [ ] **B8** UI: host/join/leave/teardown + live WebSocket updates
-- [ ] **P6** Desktop extension ABI decision + implementation (privileged tier)
+- [x] **P6** Desktop extension ABI decision recorded: third-party plugins are
+      server-side only; desktop work is a compiled-in first-party privileged
+      tier (WASM/sidecar runtime deferred)
 - [ ] Client-side WS consumption of `gse:rooms`
 
 **Acceptance:** both backends selectable; documented/enforced plugin tiering.
@@ -164,9 +178,10 @@ Owner: TBD · Depends on: M3
 
 Owner: TBD · Depends on: M0–M4
 
-- [ ] Bundle format + `drop-plugin.json` schema finalized
-- [ ] Install/update/remove with checksum + signature verification
-- [ ] Registry/version pinning; UI hidden unless server advertises capability
+- [x] Bundle format + `drop-plugin.json` schema (see platform contract above)
+- [x] Checksum + optional signature verification on load, with the
+      `dev-tools/sign-plugin.mjs` signer and a `sample-plugin/` bundle
+- [ ] Install/update/remove UI; registry/version pinning
 - [ ] Docs: admin install guide, `AGENTS.md` plugin section
 - [ ] License review + corresponding-source obligations
 
