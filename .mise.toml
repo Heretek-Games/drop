@@ -10,7 +10,8 @@ node = "22"
 pnpm = "10.33.0"
 python = "3.14"
 go = "1.26.6"
-rust = "nightly"
+# rustfmt/clippy are required by scripts/clippy-changed.sh.
+rust = { version = "nightly", components = "rustfmt,clippy" }
 
 shellcheck = "0.11.0" # hooks + analysis CI (shellcheck)
 shfmt = "3.14.1"
