@@ -1,6 +1,6 @@
 <template>
   <NuxtLoadingIndicator color="#2563eb" />
-  <NuxtLayout class="select-none w-screen h-screen">
+  <NuxtLayout class="select-none w-full h-full min-h-screen overflow-hidden">
     <NuxtPage />
     <ModalStack />
   </NuxtLayout>

@@ -5,7 +5,7 @@
 
 use std::{
     ops::Deref,
-    sync::{OnceLock, nonpoison::Mutex},
+    sync::{Arc, OnceLock, nonpoison::Mutex},
 };
 
 use tauri::AppHandle;
@@ -18,6 +18,7 @@ pub static PROCESS_MANAGER: ProcessManagerWrapper = ProcessManagerWrapper::new()
 pub mod compat;
 pub mod error;
 pub mod format;
+pub mod interceptor;
 mod parser;
 pub mod process_handlers;
 pub mod process_manager;
@@ -32,6 +33,12 @@ impl ProcessManagerWrapper {
             .0
             .set(Mutex::new(ProcessManager::new(app_handle)))
             .unwrap_or_else(|_| panic!("Failed to initialise Process Manager")); // Using panic! here because we can't implement Debug
+    }
+    pub fn register_interceptor(&self, interceptor: Arc<dyn crate::interceptor::LaunchInterceptor>) {
+        self.lock().register_interceptor(interceptor);
+    }
+    pub fn unregister_interceptor(&self, id: &str) {
+        self.lock().unregister_interceptor(id);
     }
 }
 impl Deref for ProcessManagerWrapper {

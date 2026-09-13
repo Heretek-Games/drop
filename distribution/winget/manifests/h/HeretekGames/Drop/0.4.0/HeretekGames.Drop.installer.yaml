@@ -1,0 +1,25 @@
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.installer.1.6.0.schema.json
+PackageIdentifier: HeretekGames.Drop
+PackageVersion: 0.4.0
+MinimumOSVersion: 10.0.17763.0
+InstallerType: nullsoft
+InstallModes:
+  - interactive
+  - silent
+Installers:
+  - Architecture: x64
+    InstallerUrl: https://github.com/Heretek-Games/drop/releases/download/v0.4.0/drop-desktop-client_0.4.0_x64-setup.exe
+    InstallerSha256: 0000000000000000000000000000000000000000000000000000000000000000
+    Scope: user
+    InstallerSwitches:
+      Silent: /S
+      SilentWithProgress: /S
+  - Architecture: x64
+    InstallerUrl: https://github.com/Heretek-Games/drop/releases/download/v0.4.0/drop-desktop-client_0.4.0_x64-setup.exe
+    InstallerSha256: 0000000000000000000000000000000000000000000000000000000000000000
+    Scope: machine
+    InstallerSwitches:
+      Silent: /S
+      SilentWithProgress: /S
+ManifestType: installer
+ManifestVersion: 1.6.0

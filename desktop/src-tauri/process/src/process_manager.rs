@@ -26,6 +26,7 @@ use crate::{
     PROCESS_MANAGER,
     error::ProcessError,
     format::DropFormatArgs,
+    interceptor::LaunchInterceptor,
     parser::{LaunchParameters, ParsedCommand},
     process_handlers::{
         AsahiMuvmLauncher, LinuxNativeLauncher, MacLauncher, UMUCompatLauncher, UMUNativeLauncher,
@@ -37,6 +38,7 @@ pub struct RunningProcess {
     handle: Arc<SharedChild>,
     start: SystemTime,
     manually_killed: bool,
+    install_dir: PathBuf,
 }
 
 pub struct ProcessManager<'a> {
@@ -47,6 +49,7 @@ pub struct ProcessManager<'a> {
         (Platform, Platform),
         &'a (dyn ProcessHandler + Sync + Send + 'static),
     )>,
+    interceptors: Vec<Arc<dyn LaunchInterceptor>>,
     app_handle: AppHandle,
 }
 
@@ -117,8 +120,17 @@ impl ProcessManager<'_> {
                     &UMUCompatLauncher {} as &(dyn ProcessHandler + Sync + Send + 'static),
                 ),
             ],
+            interceptors: Vec::new(),
             app_handle,
         }
+    }
+
+    pub fn register_interceptor(&mut self, interceptor: Arc<dyn LaunchInterceptor>) {
+        self.interceptors.push(interceptor);
+    }
+
+    pub fn unregister_interceptor(&mut self, id: &str) {
+        self.interceptors.retain(|i| i.id() != id);
     }
 
     pub fn kill_game(&mut self, game_id: String) -> Result<(), io::Error> {
@@ -162,6 +174,21 @@ impl ProcessManager<'_> {
                 return Ok(());
             }
         };
+
+        let exit_code = match &result {
+            Ok(status) => status.code(),
+            Err(_) => None,
+        };
+        for interceptor in &self.interceptors {
+            if let Err(e) = interceptor.post_exit(&game_id, &process.install_dir, exit_code) {
+                warn!(
+                    "Interceptor {} post_exit failed for {}: {:?}",
+                    interceptor.id(),
+                    game_id,
+                    e
+                );
+            }
+        }
 
         let mut db_handle = borrow_db_mut_checked();
         let meta = db_handle
@@ -558,13 +585,29 @@ impl ProcessManager<'_> {
             .stderr(error_file)
             .stdout(log_file)
             .env_remove("RUST_LOG")
-            .current_dir(launch_parameters.1);
+            .current_dir(&launch_parameters.1);
 
         process_handler.modify_command(&mut command);
+
+        for interceptor in &self.interceptors {
+            interceptor.pre_launch(&meta.id, &launch_parameters.1, &mut command)?;
+        }
 
         let child = command.spawn()?;
 
         let launch_process_handle = Arc::new(SharedChild::new(child)?);
+
+        let pid = launch_process_handle.id();
+        for interceptor in &self.interceptors {
+            if let Err(e) = interceptor.on_running(&meta.id, pid) {
+                warn!(
+                    "Interceptor {} on_running failed for {}: {:?}",
+                    interceptor.id(),
+                    meta.id,
+                    e
+                );
+            }
+        }
 
         db_lock
             .applications
@@ -587,6 +630,7 @@ impl ProcessManager<'_> {
                 handle: wait_thread_handle,
                 start: SystemTime::now(),
                 manually_killed: false,
+                install_dir: launch_parameters.1,
             },
         );
         spawn(move || {

@@ -137,3 +137,23 @@ jobs:
           prerelease: true
           args: ${{ matrix.args }}
           projectPath: "./desktop"
+
+  winget-publish:
+    name: Publish to WinGet
+    runs-on: windows-latest
+    needs: [build]
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # actions/checkout@v7
+      - name: Submit package to Windows Package Manager Community Repository
+        uses: vedantmgoyal2009/winget-releaser@4ffc7888bffd451b357355dc214d43bb9f23917e # v2
+        if: env.WINGET_TOKEN != ''
+        env:
+          WINGET_TOKEN: ${{ secrets.WINGET_TOKEN }}
+        with:
+          identifier: HeretekGames.Drop
+          token: ${{ secrets.WINGET_TOKEN }}
+          installers-regex: '.*-setup\.exe$'
+          max-retries: 3

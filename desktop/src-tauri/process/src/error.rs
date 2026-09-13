@@ -6,7 +6,7 @@ use std::{
 
 use serde_with::SerializeDisplay;
 
-#[derive(SerializeDisplay, Clone)]
+#[derive(SerializeDisplay, Clone, Debug)]
 pub enum ProcessError {
     NotInstalled,
     AlreadyRunning,

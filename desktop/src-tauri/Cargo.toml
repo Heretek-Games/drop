@@ -146,6 +146,9 @@ codegen-units = 1
 # Set the default for dependencies in Development mode.
 opt-level = 3
 
+[profile.dev.package.tokio]
+opt-level = 1
+
 [profile.dev]
 # Turn on a small amount of optimisation in Development mode.
 opt-level = 1

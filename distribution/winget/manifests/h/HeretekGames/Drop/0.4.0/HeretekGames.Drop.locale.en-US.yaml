@@ -1,0 +1,23 @@
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.defaultLocale.1.6.0.schema.json
+PackageIdentifier: HeretekGames.Drop
+PackageVersion: 0.4.0
+PackageLocale: en-US
+Publisher: Heretek Games
+PublisherUrl: https://github.com/Heretek-Games
+PublisherSupportUrl: https://github.com/Heretek-Games/drop/issues
+PackageName: Drop Desktop Client
+PackageUrl: https://github.com/Heretek-Games/drop
+License: GPL-3.0
+LicenseUrl: https://github.com/Heretek-Games/drop/blob/develop/LICENSE.md
+ShortDescription: Client for Drop, an open-source, self-hosted game library and distribution platform.
+Description: |-
+  Drop is a self-hosted game distribution platform that connects players with their own gaming libraries.
+  The desktop client provides lightning-fast downloads, cloud save synchronization, and seamless game launching.
+Tags:
+  - game-launcher
+  - gaming
+  - self-hosted
+  - library
+ReleaseNotesUrl: https://github.com/Heretek-Games/drop/releases/tag/v0.4.0
+ManifestType: defaultLocale
+ManifestVersion: 1.6.0
