@@ -1,6 +1,6 @@
 #![allow(clippy::unwrap_used)]
 
-use criterion::{criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, criterion_group, criterion_main};
 use torrential::downloads::cache::ChunkCache;
 
 // Exercises the content-addressed chunk cache hot path (index lookup + LRU

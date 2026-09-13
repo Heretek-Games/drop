@@ -187,7 +187,7 @@ export class SessionHandler {
   async signout(h3: H3Event) {
     const token = this.getSessionToken(h3);
     if (!token) return false;
-    if (!this.signoutByToken(token)) return false;
+    if (!(await this.signoutByToken(token))) return false;
     deleteCookie(h3, dropTokenCookieName, { path: "/" });
     return true;
   }

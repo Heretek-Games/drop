@@ -32,7 +32,7 @@ do
 done
 
 
-cd "$DIR/"
+cd "$DIR/" || exit
 
 # Commit
 git commit --all --message "chore: update version to $NEW_VERSION"

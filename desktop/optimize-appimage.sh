@@ -1,3 +1,5 @@
+#!/usr/bin/env bash
+
 ## This script is largely useless, because there's not much we can do about AppImage size
 
 ARCH=$(uname -m)
@@ -11,12 +13,12 @@ APPIMAGE=$(ls ./src-tauri/target/release/bundle/appimage/*.AppImage)
 
 # strip binary
 APPIMAGE_UNPACK="./squashfs-root"
-find $APPIMAGE_UNPACK -type f -exec strip -s {} \;
+find "$APPIMAGE_UNPACK" -type f -exec strip -s {} \;
 
-APPIMAGETOOL=$(echo "obsolete-appimagetool-$ARCH.AppImage")
-wget --max-redirect=5 -O $APPIMAGETOOL "https://github.com/AppImage/AppImageKit/releases/download/13/$APPIMAGETOOL"
-chmod +x $APPIMAGETOOL
+APPIMAGETOOL="obsolete-appimagetool-$ARCH.AppImage"
+curl -fsSL --proto '=https' --tlsv1.2 --max-redirs 5 -o "$APPIMAGETOOL" "https://github.com/AppImage/AppImageKit/releases/download/13/$APPIMAGETOOL"
+chmod +x "$APPIMAGETOOL"
 
-APPIMAGE_OUTPUT=$(./$APPIMAGETOOL $APPIMAGE_UNPACK | grep ".AppImage" | grep squashfs-root | awk '{ print $6 }')
+APPIMAGE_OUTPUT=$(./"$APPIMAGETOOL" "$APPIMAGE_UNPACK" | grep ".AppImage" | grep squashfs-root | awk '{ print $6 }')
 
-mv $APPIMAGE_OUTPUT "$APPIMAGE"
+mv "$APPIMAGE_OUTPUT" "$APPIMAGE"

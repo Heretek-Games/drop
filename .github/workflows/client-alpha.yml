@@ -26,6 +26,7 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           fetch-depth: 0
+          persist-credentials: false
 
       - name: setup pnpm
         uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # pnpm/action-setup@v6
@@ -73,10 +74,12 @@ jobs:
 
       - name: stage deb asset
         id: deb
+        env:
+          ALPHA_VERSION: ${{ steps.version.outputs.alpha_version }}
         run: |
           DEB_PATH=$(find desktop/src-tauri/target/release/bundle/deb -name "*.deb" | head -n1)
           [ -f "$DEB_PATH" ] || { echo "Debian package not found" >&2; exit 1; }
-          TARGET_NAME="Drop.Desktop.Client_${{ steps.version.outputs.alpha_version }}_amd64.deb"
+          TARGET_NAME="Drop.Desktop.Client_${ALPHA_VERSION}_amd64.deb"
           cp "$DEB_PATH" "$TARGET_NAME"
           echo "deb_path=${TARGET_NAME}" >> "$GITHUB_OUTPUT"
           echo "deb_name=${TARGET_NAME}" >> "$GITHUB_OUTPUT"
@@ -85,23 +88,25 @@ jobs:
       - name: publish to rolling 'alpha' GitHub release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ALPHA_VERSION: ${{ steps.version.outputs.alpha_version }}
+          DEB_PATH: ${{ steps.deb.outputs.deb_path }}
         run: |
           tag="alpha"
-          title="Drop Alpha (${{ steps.version.outputs.alpha_version }})"
+          title="Drop Alpha (${ALPHA_VERSION})"
           notes="Automated alpha build from commit ${{ github.sha }} on develop."
 
           if ! gh release view "$tag" >/dev/null 2>&1; then
             echo "Creating new release $tag"
-            gh release create "$tag" "${{ steps.deb.outputs.deb_path }}" \
+            gh release create "$tag" "$DEB_PATH" \
               --title "$title" --notes "$notes" --prerelease --target "${{ github.sha }}"
           else
             echo "Updating existing release $tag"
             gh release edit "$tag" --title "$title" --notes "$notes" --prerelease --target "${{ github.sha }}"
-            gh release upload "$tag" "${{ steps.deb.outputs.deb_path }}" --clobber
+            gh release upload "$tag" "$DEB_PATH" --clobber
           fi
 
       - name: Trigger FlatPark Alpha Release Webhook
-        uses: flatpark/publish-action@v1
+        uses: flatpark/publish-action@b67fca1b80b095541bc011967e0a35292bed14d8 # v1
         continue-on-error: true # Non-blocking until PR #344 is merged on FlatPark
         with:
           app-id: org.heretek_games.Drop.Alpha

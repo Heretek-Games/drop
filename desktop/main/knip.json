@@ -1,0 +1,7 @@
+{
+  "$schema": "../node_modules/knip/schema.json",
+  "ignore": [".nuxt/**", ".output/**", ".data/**", "node_modules/**"],
+  "ignoreBinaries": ["tauri"],
+  "ignoreDependencies": ["autoprefixer", "postcss", "vue-tsc"],
+  "project": ["**/*.{ts,js,vue}"]
+}

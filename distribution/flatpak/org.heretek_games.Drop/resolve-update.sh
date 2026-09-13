@@ -23,7 +23,7 @@ release="$(jq -c '
 [ -n "$release" ] || { echo "no matching stable release found" >&2; exit 1; }
 
 tag="$(jq -r '.tag_name' <<<"$release")"
-version="$(echo "$tag" | sed 's/^v//')"
+version="${tag#v}"
 date="$(jq -r '.published_at | split("T")[0]' <<<"$release")"
 
 url="$(jq -r '
@@ -31,7 +31,10 @@ url="$(jq -r '
   | select(.name | test("Drop\\.Desktop\\.Client_.*_amd64\\.deb$"))
   | .browser_download_url' <<<"$release" | head -n1)"
 
-[ -n "$version" ] && [ -n "$url" ] || { echo "failed to resolve drop release asset" >&2; exit 1; }
+if [ -z "$version" ] || [ -z "$url" ]; then
+  echo "failed to resolve drop release asset" >&2
+  exit 1
+fi
 echo "resolved drop $version ($date): $url" >&2
 
 jq -n --arg v "$version" --arg d "$date" --arg u "$url" \

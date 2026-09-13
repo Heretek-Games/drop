@@ -21,5 +21,10 @@ export type V2FileEntry = {
 };
 
 export function castManifest(manifest: JsonValue): V2Manifest {
-  return JSON.parse(manifest as string) as V2Manifest;
+  // Local manifests were historically stored as JSON strings, while depot
+  // manifests (and anything written after the recipe was embedded) are JSONB
+  // objects returned by Prisma. Accept both shapes.
+  return (
+    typeof manifest === "string" ? JSON.parse(manifest) : manifest
+  ) as V2Manifest;
 }

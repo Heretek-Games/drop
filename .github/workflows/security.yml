@@ -21,6 +21,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # actions/checkout@v4
         with:
           fetch-depth: 0 # full history for leak detection
+          persist-credentials: false
       # Direct CLI invocation instead of gitleaks/gitleaks-action, which
       # requires a paid license key for organization repos.
       - name: Install gitleaks
@@ -48,6 +49,8 @@ jobs:
           - libraries/native_model
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: dtolnay/rust-toolchain@7c8d7d138f5c09cef361f8214cf96882cd029cdb # dtolnay/rust-toolchain@nightly
       - uses: taiki-e/install-action@4b8992af23a2be34fd58f8d9b50d3f4939ad1891 # taiki-e/install-action@cargo-audit
       - name: Audit ${{ matrix.crate }}
@@ -63,6 +66,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: dtolnay/rust-toolchain@7c8d7d138f5c09cef361f8214cf96882cd029cdb # dtolnay/rust-toolchain@nightly
       - uses: taiki-e/install-action@4b8992af23a2be34fd58f8d9b50d3f4939ad1891 # taiki-e/install-action@cargo-audit
         with:
@@ -82,6 +87,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # actions/checkout@v4
         with:
           fetch-depth: 0 # needed for --new-from-rev against origin/develop
+          persist-credentials: false
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # actions/setup-go@v5
         with:
           go-version-file: backend/go.work

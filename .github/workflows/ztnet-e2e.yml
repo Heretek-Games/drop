@@ -35,6 +35,8 @@ jobs:
     steps:
       - name: Check out the repo
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - name: Install pnpm
         uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # pnpm/action-setup@v6
@@ -56,7 +58,7 @@ jobs:
 
       - name: Wait for ZTNET
         run: |
-          for i in $(seq 1 60); do
+          for _ in $(seq 1 60); do
             if curl -fsS http://localhost:3001/api/auth/ok >/dev/null 2>&1; then
               echo "ZTNET is ready"
               exit 0
