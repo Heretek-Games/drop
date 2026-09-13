@@ -156,17 +156,19 @@ export class RoomStore {
       throw new Error("not a room member");
     }
 
+    // Persist the node id even when authorization cannot assign an address, so
+    // revocation still works after a coordinator restart.
+    member.meshNodeId = memberId;
     if (this.backend.authorizeMember) {
       const address = await this.backend.authorizeMember(
         roomId,
         userId,
         memberId,
+        room.mesh,
       );
-      if (address) {
-        member.meshAddress = address;
-        await this.persistence.saveRoom(room);
-      }
+      if (address) member.meshAddress = address;
     }
+    await this.persistence.saveRoom(room);
     return room;
   }
 
@@ -197,8 +199,14 @@ export class RoomStore {
       return { closed: true };
     }
 
+    const leaving = room.members.find((member) => member.userId === userId);
     room.members = room.members.filter((member) => member.userId !== userId);
-    await this.backend.revokeMember(roomId, userId);
+    await this.backend.revokeMember(
+      roomId,
+      userId,
+      room.mesh,
+      leaving?.meshNodeId,
+    );
     await this.persistence.saveRoom(room);
     return { closed: false, room };
   }

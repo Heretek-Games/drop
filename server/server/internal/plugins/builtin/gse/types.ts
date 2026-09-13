@@ -15,6 +15,8 @@ export type PublicMeshInfo =
 export interface RoomMember {
   userId: string;
   meshAddress?: string;
+  /** Backend node id (e.g. ZeroTier member address) for revocation. */
+  meshNodeId?: string;
   joinedAt: number;
 }
 
@@ -79,17 +81,28 @@ export interface MeshBackend {
     userId: string,
     mesh: PublicMeshInfo,
   ): Promise<IssuedCredential>;
-  /** Revoke a member's access. No-op if already gone. */
-  revokeMember(roomId: string, userId: string): Promise<void>;
+  /**
+   * Revoke a member's access. No-op if already gone. `mesh`/`memberId` are
+   * supplied from persisted room state so revocation works after a coordinator
+   * restart (the backend's in-memory maps may be empty).
+   */
+  revokeMember(
+    roomId: string,
+    userId: string,
+    mesh?: PublicMeshInfo,
+    memberId?: string,
+  ): Promise<void>;
   /**
    * Authorize a member's node after it has joined the mesh. Returns the address
    * assigned by the backend, when it can report one. `userId` lets the backend
-   * remember the node id for later revocation.
+   * remember the node id for later revocation; `mesh` lets it recover the
+   * network after a restart.
    */
   authorizeMember?(
     roomId: string,
     userId: string,
     memberId: string,
+    mesh?: PublicMeshInfo,
   ): Promise<string | undefined>;
   /**
    * Remove every node/network for the room. `mesh` is supplied when available

@@ -55,13 +55,13 @@ export class ZtnetBackend implements MeshBackend {
     return `${this.baseUrl}/api/v1/org/${this.options.organizationId}/network${suffix}`;
   }
 
-  private async json<T>(
+  private async send(
     url: string,
     init?: {
       method?: string;
       body?: string;
     },
-  ): Promise<T> {
+  ): Promise<Awaited<ReturnType<FetchLike>>> {
     const response = await this.fetchImpl(url, {
       method: init?.method ?? "GET",
       headers: this.headers(),
@@ -72,7 +72,43 @@ export class ZtnetBackend implements MeshBackend {
         `ZTNET request failed (${response.status}) ${url}: ${await response.text()}`,
       );
     }
+    return response;
+  }
+
+  /** Send a request and discard any body (used for DELETE). */
+  private async request(
+    url: string,
+    init?: {
+      method?: string;
+      body?: string;
+    },
+  ): Promise<void> {
+    await this.send(url, init);
+  }
+
+  private async json<T>(
+    url: string,
+    init?: {
+      method?: string;
+      body?: string;
+    },
+  ): Promise<T> {
+    const response = await this.send(url, init);
     return (await response.json()) as T;
+  }
+
+  /**
+   * Resolve a room's network id from live state or persisted mesh info, caching
+   * it so a restarted coordinator can still authorize/revoke/tear down.
+   */
+  private networkIdFor(
+    roomId: string,
+    mesh?: PublicMeshInfo,
+  ): string | undefined {
+    const persisted = mesh?.backend === "zerotier" ? mesh.networkId : undefined;
+    const networkId = this.networks.get(roomId) ?? persisted;
+    if (networkId) this.networks.set(roomId, networkId);
+    return networkId;
   }
 
   async provision(roomId: string, expiresAt: number): Promise<PublicMeshInfo> {
@@ -128,8 +164,9 @@ export class ZtnetBackend implements MeshBackend {
     roomId: string,
     userId: string,
     memberId: string,
+    mesh?: PublicMeshInfo,
   ): Promise<string | undefined> {
-    const networkId = this.networks.get(roomId);
+    const networkId = this.networkIdFor(roomId, mesh);
     if (!networkId) return undefined;
 
     // Assign a deterministic address from the room pool at authorization time;
@@ -156,27 +193,27 @@ export class ZtnetBackend implements MeshBackend {
     return member.ipAssignments?.[0] ?? assigned;
   }
 
-  async revokeMember(roomId: string, userId: string): Promise<void> {
-    const networkId = this.networks.get(roomId);
-    const memberId = this.memberIds.get(roomId)?.get(userId);
-    if (!networkId || !memberId) return;
+  async revokeMember(
+    roomId: string,
+    userId: string,
+    mesh?: PublicMeshInfo,
+    memberId?: string,
+  ): Promise<void> {
+    const networkId = this.networkIdFor(roomId, mesh);
+    // Prefer the persisted node id so revocation survives a coordinator restart.
+    const nodeId = memberId ?? this.memberIds.get(roomId)?.get(userId);
     this.memberIds.get(roomId)?.delete(userId);
-    await this.fetchImpl(this.orgUrl(`/${networkId}/member/${memberId}`), {
+    if (!networkId || !nodeId) return;
+    await this.request(this.orgUrl(`/${networkId}/member/${nodeId}`), {
       method: "DELETE",
-      headers: this.headers(),
     });
   }
 
   async teardown(roomId: string, mesh?: PublicMeshInfo): Promise<void> {
-    const networkId =
-      (mesh?.backend === "zerotier" ? mesh.networkId : undefined) ??
-      this.networks.get(roomId);
+    const networkId = this.networkIdFor(roomId, mesh);
     this.memberIds.delete(roomId);
     if (!networkId) return;
     this.networks.delete(roomId);
-    await this.fetchImpl(this.orgUrl(`/${networkId}`), {
-      method: "DELETE",
-      headers: this.headers(),
-    });
+    await this.request(this.orgUrl(`/${networkId}`), { method: "DELETE" });
   }
 }

@@ -185,12 +185,23 @@ export class ZeroTierBackend implements MeshBackend {
     return { secret: `zerotier:${mesh.networkId}:${roomId}:${userId}` };
   }
 
+  private networkIdFor(
+    roomId: string,
+    mesh?: PublicMeshInfo,
+  ): string | undefined {
+    const persisted = mesh?.backend === "zerotier" ? mesh.networkId : undefined;
+    const networkId = this.networks.get(roomId) ?? persisted;
+    if (networkId) this.networks.set(roomId, networkId);
+    return networkId;
+  }
+
   async authorizeMember(
     roomId: string,
     userId: string,
     memberId: string,
+    mesh?: PublicMeshInfo,
   ): Promise<string | undefined> {
-    const networkId = this.networks.get(roomId);
+    const networkId = this.networkIdFor(roomId, mesh);
     if (!networkId) return undefined;
     const response = await this.fetchImpl(
       `${this.options.baseUrl}/network/${networkId}/member/${memberId}`,
@@ -217,32 +228,41 @@ export class ZeroTierBackend implements MeshBackend {
     return address ? address.split("/")[0] : undefined;
   }
 
-  async revokeMember(roomId: string, userId: string): Promise<void> {
-    const networkId = this.networks.get(roomId);
-    const memberId = this.memberIds.get(roomId)?.get(userId);
-    if (!networkId || !memberId) return;
+  async revokeMember(
+    roomId: string,
+    userId: string,
+    mesh?: PublicMeshInfo,
+    memberId?: string,
+  ): Promise<void> {
+    const networkId = this.networkIdFor(roomId, mesh);
+    const nodeId = memberId ?? this.memberIds.get(roomId)?.get(userId);
+    if (!networkId || !nodeId) return;
     this.memberIds.get(roomId)?.delete(userId);
-    await this.fetchImpl(
-      `${this.options.baseUrl}/network/${networkId}/member/${memberId}`,
+    const response = await this.fetchImpl(
+      `${this.options.baseUrl}/network/${networkId}/member/${nodeId}`,
       {
         method: "POST",
         headers: this.headers(),
         body: JSON.stringify({ authorized: false }),
       },
     );
+    if (!response.ok) {
+      throw new Error(`ZeroTier member revocation failed (${response.status})`);
+    }
   }
 
   async teardown(roomId: string, mesh?: PublicMeshInfo): Promise<void> {
-    const networkId =
-      (mesh?.backend === "zerotier" ? mesh.networkId : undefined) ??
-      this.networks.get(roomId);
+    const networkId = this.networkIdFor(roomId, mesh);
     this.memberIds.delete(roomId);
     if (!networkId) return;
     this.networks.delete(roomId);
-    await this.fetchImpl(
+    const response = await this.fetchImpl(
       `${this.options.baseUrl}/controller/network/${networkId}`,
       { method: "DELETE", headers: this.headers() },
     );
+    if (!response.ok) {
+      throw new Error(`ZeroTier network deletion failed (${response.status})`);
+    }
   }
 }
 

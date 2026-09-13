@@ -181,7 +181,10 @@ Owner: TBD · Depends on: M0, M2
 - [x] **B4** Default controller path is **ZTNET** (`ZtnetBackend` org REST API:
       create + configure per-room /24 and routes, authorize members via
       `ipAssignments`, revoke, delete), selected by `GSE_ZTNET_*` or
-      `GSE_MESH_BACKEND=ztnet`. Raw `ZeroTierBackend` remains as an advanced
+      `GSE_MESH_BACKEND=ztnet`. Authorize/revoke resolve the network from the
+      persisted `room.mesh` and the member's stored node id, so they keep
+      working after a coordinator restart (the in-memory maps are empty).
+      Raw `ZeroTierBackend` remains as an advanced
       fallback (now also revokes). `compose.ztnet.yaml` + `.env.ztnet.example`
       ship with the deploy template; `dev-tools/gse-ztnet-check.ts` verifies a
       live stack. ZTNET's update API does not expose `enableBroadcast` (unicast

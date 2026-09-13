@@ -399,6 +399,132 @@ test("ZtnetBackend teardown works from a persisted mesh after restart", async ()
   ]);
 });
 
+test("ZtnetBackend authorizes and revokes from persisted mesh after restart", async () => {
+  const calls: Array<{ url: string; method?: string }> = [];
+  // No prior provision(): simulates a coordinator that restarted with an empty
+  // in-memory state but persisted room.mesh.
+  const backend = new ZtnetBackend({
+    baseUrl: "http://ztnet:3000",
+    apiToken: "t",
+    organizationId: "org-1",
+    fetchImpl: async (url, init) => {
+      calls.push({ url, method: init?.method });
+      return {
+        ok: true,
+        status: init?.method === "DELETE" ? 204 : 200,
+        json: async () => ({}),
+        text: async () => "",
+      };
+    },
+  });
+  const persisted = {
+    backend: "zerotier" as const,
+    cidr: "10.242.1.0/24",
+    networkId: "nw-persisted",
+    expiresAt: 1,
+  };
+
+  const address = await backend.authorizeMember(
+    "room-x",
+    "user-1",
+    "abcdef0123",
+    persisted,
+  );
+  assert.ok(address, "address should be assigned from the persisted pool");
+  assert.ok(
+    calls.some(
+      (call) =>
+        call.url.endsWith("/network/nw-persisted/member/abcdef0123") &&
+        call.method === "POST",
+    ),
+  );
+
+  await backend.revokeMember("room-x", "user-1", persisted, "abcdef0123");
+  assert.ok(
+    calls.some(
+      (call) =>
+        call.method === "DELETE" &&
+        call.url.endsWith("/network/nw-persisted/member/abcdef0123"),
+    ),
+  );
+});
+
+test("ZtnetBackend surfaces revocation failures", async () => {
+  const backend = new ZtnetBackend({
+    baseUrl: "http://ztnet:3000",
+    apiToken: "t",
+    organizationId: "org-1",
+    fetchImpl: async () => ({
+      ok: false,
+      status: 500,
+      json: async () => ({}),
+      text: async () => "boom",
+    }),
+  });
+  await assert.rejects(
+    () =>
+      backend.revokeMember(
+        "room-x",
+        "user-1",
+        {
+          backend: "zerotier",
+          cidr: "10.242.1.0/24",
+          networkId: "nw-1",
+          expiresAt: 1,
+        },
+        "abcdef0123",
+      ),
+    /500/,
+  );
+});
+
+test("RoomStore revokes using persisted node id after a restart", async () => {
+  const storage = new MemoryStorage();
+  const room = await new RoomStore(
+    new StorageRoomPersistence(storage),
+    new InMemoryMeshBackend(),
+    () => 1_000_000,
+  ).create(createInput("host"));
+
+  // A later store instance (fresh process) registers the guest's node id.
+  const store1 = new RoomStore(
+    new StorageRoomPersistence(storage),
+    new InMemoryMeshBackend(),
+    () => 1_000_000,
+  );
+  await store1.join(room.id, "guest");
+  await store1.registerMember(room.id, "guest", "node-guest");
+
+  // Restart again with a brand-new backend whose in-memory maps are empty.
+  const deletes: string[] = [];
+  const restarted = new ZtnetBackend({
+    baseUrl: "http://ztnet:3000",
+    apiToken: "t",
+    organizationId: "org-1",
+    fetchImpl: async (url, init) => {
+      if (init?.method === "DELETE") deletes.push(url);
+      return {
+        ok: true,
+        status: init?.method === "DELETE" ? 204 : 200,
+        json: async () => ({}),
+        text: async () => "",
+      };
+    },
+  });
+  const store2 = new RoomStore(
+    new StorageRoomPersistence(storage),
+    restarted,
+    () => 1_000_000,
+  );
+
+  const left = await store2.leave(room.id, "guest");
+  assert.equal(left.closed, false);
+  assert.ok(
+    deletes.some((url) => url.endsWith("/member/node-guest")),
+    "the restarted backend should revoke the persisted node id",
+  );
+});
+
 test("TailscaleApiProvisioner issues one-off keys and revokes them", async () => {
   const calls: Array<{ url: string; method?: string; body?: string }> = [];
   const provisioner = new TailscaleApiProvisioner({
