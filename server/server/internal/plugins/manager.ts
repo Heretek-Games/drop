@@ -1,4 +1,4 @@
-import { createHash, createHmac } from "node:crypto";
+import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import { EventEmitter } from "node:events";
 import * as path from "node:path";
 import * as fs from "node:fs/promises";
@@ -63,6 +63,29 @@ interface RegisteredRoute {
   handler: RouteHandler;
 }
 
+const PLUGIN_ID_PATTERN = /^[a-z0-9][a-z0-9._-]*$/i;
+const SHA256_HEX_PATTERN = /^[0-9a-f]{64}$/i;
+
+function isValidPluginId(id: string): boolean {
+  return id.length > 0 && id.length <= 64 && PLUGIN_ID_PATTERN.test(id);
+}
+
+/** True when `child` resolves inside (or equals) `parent`. */
+function isInsideDirectory(parent: string, child: string): boolean {
+  const relative = path.relative(parent, child);
+  return (
+    relative === "" ||
+    (!relative.startsWith("..") && !path.isAbsolute(relative))
+  );
+}
+
+function constantTimeEqual(left: string, right: string): boolean {
+  const a = Buffer.from(left, "utf8");
+  const b = Buffer.from(right, "utf8");
+  if (a.length !== b.length) return false;
+  return timingSafeEqual(a, b);
+}
+
 interface LoadedPlugin {
   plugin: ServerPlugin;
   context: PluginContext;
@@ -78,8 +101,11 @@ export class PluginManager {
     { pluginId: string; handler: WebSocketHandler }
   >();
   private readonly eventBus = new EventEmitter();
+  private readonly pluginEventSubscriptions = new Map<
+    string,
+    Array<() => void>
+  >();
   private readonly log: Logger = logger.child({ name: "plugin-manager" });
-  private registryPromise: Promise<PluginRegistry> | undefined;
 
   constructor(private readonly options: PluginManagerOptions = {}) {
     this.eventBus.setMaxListeners(200);
@@ -144,8 +170,9 @@ export class PluginManager {
     capabilities: PluginCapability[] | undefined,
     cap: PluginCapability,
   ): boolean {
-    if (!capabilities || capabilities.length === 0) return true;
-    return capabilities.includes(cap);
+    // Fail closed: a plugin that does not explicitly declare a capability
+    // cannot use it.
+    return capabilities?.includes(cap) ?? false;
   }
 
   private async createStorage(pluginId: string): Promise<PluginStorage> {
@@ -153,7 +180,7 @@ export class PluginManager {
       return this.options.storageFactory(pluginId);
     }
     const { FilePluginStorage } = await import("./storage");
-    return new FilePluginStorage(pluginId);
+    return new FilePluginStorage(pluginId, this.options.dataDir);
   }
 
   /**
@@ -195,6 +222,7 @@ export class PluginManager {
     );
     const pluginRoutes: RegisteredRoute[] = [];
     this.routes.set(id, pluginRoutes);
+    this.pluginEventSubscriptions.set(id, []);
 
     return {
       id,
@@ -242,9 +270,13 @@ export class PluginManager {
           );
         }
         this.eventBus.on(channel, listener);
-        return () => {
+        const off = () => {
           this.eventBus.off(channel, listener);
         };
+        const subscriptions = this.pluginEventSubscriptions.get(id) ?? [];
+        subscriptions.push(off);
+        this.pluginEventSubscriptions.set(id, subscriptions);
+        return off;
       },
       registerWebSocket: (channel: string, handler: WebSocketHandler) => {
         if (!this.hasCapability(capabilities, "websocket")) {
@@ -301,10 +333,15 @@ export class PluginManager {
   private verifyBundleBytes(bytes: Buffer, manifest: PluginManifest): string {
     const digest = createHash("sha256").update(bytes).digest("hex");
 
-    if (manifest.checksum && manifest.checksum !== digest) {
-      throw new Error(
-        `bundle checksum mismatch for ${manifest.id}: expected ${manifest.checksum}, found ${digest}`,
-      );
+    if (manifest.checksum) {
+      if (
+        !SHA256_HEX_PATTERN.test(manifest.checksum) ||
+        !constantTimeEqual(manifest.checksum, digest)
+      ) {
+        throw new Error(
+          `bundle checksum mismatch for ${manifest.id}: expected ${manifest.checksum}, found ${digest}`,
+        );
+      }
     }
 
     const signingKey = process.env.DROP_PLUGIN_SIGNING_KEY;
@@ -317,7 +354,10 @@ export class PluginManager {
       const expected = createHmac("sha256", signingKey)
         .update(digest)
         .digest("hex");
-      if (expected !== manifest.signature) {
+      if (
+        !SHA256_HEX_PATTERN.test(manifest.signature) ||
+        !constantTimeEqual(expected, manifest.signature)
+      ) {
         throw new Error(`bundle signature mismatch for ${manifest.id}`);
       }
     } else if (process.env.DROP_PLUGIN_REQUIRE_SIGNATURE === "true") {
@@ -327,12 +367,11 @@ export class PluginManager {
   }
 
   private async getRegistry(): Promise<PluginRegistry> {
-    if (!this.registryPromise) {
-      const registryPath =
-        this.options.registryPath ?? process.env.DROP_PLUGIN_REGISTRY;
-      this.registryPromise = PluginRegistry.load(registryPath);
-    }
-    return this.registryPromise;
+    const registryPath =
+      this.options.registryPath ?? process.env.DROP_PLUGIN_REGISTRY;
+    // Re-read on demand so provisioning or updating the registry file takes
+    // effect without a process restart.
+    return await PluginRegistry.load(registryPath);
   }
 
   /** Verify, import and register a bundle directory. */
@@ -340,8 +379,17 @@ export class PluginManager {
     pluginDir: string,
     manifest: PluginManifest,
   ): Promise<void> {
+    if (!isValidPluginId(manifest.id)) {
+      throw new Error(`invalid plugin id '${manifest.id}'`);
+    }
     const entryRel = manifest.entry || "index.js";
     const entryPath = path.resolve(pluginDir, entryRel);
+    if (
+      path.isAbsolute(entryRel) ||
+      !isInsideDirectory(path.resolve(pluginDir), entryPath)
+    ) {
+      throw new Error(`invalid entry path '${entryRel}'`);
+    }
 
     const digest = this.verifyBundleBytes(
       await fs.readFile(entryPath),
@@ -349,7 +397,9 @@ export class PluginManager {
     );
     (await this.getRegistry()).check(manifest, digest);
 
-    const mod = await import(pathToFileURL(entryPath).href);
+    // Version the import URL by content so a reload of changed code does not
+    // silently reuse Node's ESM module cache.
+    const mod = await import(`${pathToFileURL(entryPath).href}?v=${digest}`);
     const pluginInstance: ServerPlugin =
       mod.default && typeof mod.default.init === "function"
         ? mod.default
@@ -385,6 +435,9 @@ export class PluginManager {
 
   async registerPlugin(plugin: ServerPlugin): Promise<void> {
     const id = plugin.metadata.id;
+    if (!isValidPluginId(id)) {
+      throw new Error(`invalid plugin id '${id}'`);
+    }
     this.assertPluginCompatible(plugin);
     if (this.plugins.has(id)) {
       this.log.warn(`Plugin ${id} is already registered, replacing`);
@@ -437,14 +490,24 @@ export class PluginManager {
       }
     }
 
+    this.releasePluginResources(id);
     this.plugins.delete(id);
+    this.log.info(`Plugin ${id} unregistered`);
+  }
+
+  /** Drop a plugin's routes, sockets and event subscriptions. */
+  private releasePluginResources(id: string): void {
     this.routes.delete(id);
     for (const [channel, entry] of this.webSockets) {
       if (entry.pluginId === id) {
         this.webSockets.delete(channel);
       }
     }
-    this.log.info(`Plugin ${id} unregistered`);
+    const subscriptions = this.pluginEventSubscriptions.get(id) ?? [];
+    for (const off of subscriptions) {
+      off();
+    }
+    this.pluginEventSubscriptions.delete(id);
   }
 
   async togglePlugin(id: string, enabled: boolean): Promise<boolean> {
@@ -469,7 +532,7 @@ export class PluginManager {
             this.log.warn(`Error tearing down plugin ${id}: ${err}`);
           }
         }
-        this.routes.delete(id);
+        this.releasePluginResources(id);
         loaded.status = "disabled";
         this.log.info(`Plugin '${id}' disabled`);
         this.broadcast("plugins:state", { id, enabled: false });
@@ -525,7 +588,12 @@ export class PluginManager {
 
         try {
           const manifest: PluginManifest = JSON.parse(manifestContent);
-          if (!manifest.id || !manifest.name || !manifest.version) {
+          if (
+            !manifest.id ||
+            !manifest.name ||
+            !manifest.version ||
+            !isValidPluginId(manifest.id)
+          ) {
             this.log.warn(`Invalid plugin manifest in ${pluginDir}`);
             continue;
           }
@@ -557,12 +625,8 @@ export class PluginManager {
     if (!manifest.id || !manifest.name || !manifest.version) {
       throw new Error("manifest requires id, name and version");
     }
-    if (!/^[A-Za-z0-9._-]+$/.test(manifest.id)) {
+    if (!isValidPluginId(manifest.id)) {
       throw new Error("invalid plugin id");
-    }
-    const entryRel = manifest.entry || "index.js";
-    if (entryRel.startsWith("/") || entryRel.split("/").includes("..")) {
-      throw new Error("invalid entry path");
     }
 
     const bytes = Buffer.from(entryBase64, "base64");
@@ -571,6 +635,15 @@ export class PluginManager {
 
     const pluginsDir = await this.getPluginsDirectory();
     const bundleDir = path.join(pluginsDir, manifest.id);
+    const entryRel = manifest.entry || "index.js";
+    const entryPath = path.resolve(bundleDir, entryRel);
+    if (
+      path.isAbsolute(entryRel) ||
+      !isInsideDirectory(path.resolve(bundleDir), entryPath)
+    ) {
+      throw new Error("invalid entry path");
+    }
+
     await fs.mkdir(bundleDir, { recursive: true });
 
     const storedManifest: PluginManifest = {
@@ -581,14 +654,14 @@ export class PluginManager {
       path.join(bundleDir, "drop-plugin.json"),
       JSON.stringify(storedManifest, null, 2),
     );
-    await fs.writeFile(path.join(bundleDir, entryRel), bytes);
+    await fs.writeFile(entryPath, bytes);
 
     await this.loadExternalPluginFromDir(bundleDir, storedManifest);
   }
 
   /** Remove an external plugin bundle and unregister it. */
   async removeBundle(id: string): Promise<boolean> {
-    if (!/^[A-Za-z0-9._-]+$/.test(id)) {
+    if (!isValidPluginId(id)) {
       throw new Error("invalid plugin id");
     }
     const loaded = this.plugins.get(id);
@@ -649,6 +722,8 @@ export class PluginManager {
   ): Promise<boolean> {
     const entry = this.webSockets.get(channel);
     if (!entry) return false;
+    const loaded = this.plugins.get(entry.pluginId);
+    if (!loaded || loaded.status !== "active") return false;
     await entry.handler(message, context);
     return true;
   }

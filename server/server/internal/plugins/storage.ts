@@ -1,4 +1,5 @@
 import fs from "node:fs/promises";
+import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { systemConfig } from "../config/sys-conf";
 import type { PluginStorage } from "./types";
@@ -10,8 +11,9 @@ export class FilePluginStorage implements PluginStorage {
   private cache: Record<string, unknown> | null = null;
   private writeLock: Promise<void> = Promise.resolve();
 
-  constructor(pluginId: string) {
-    this.dirPath = path.join(systemConfig.getDataFolder(), "plugins", pluginId);
+  constructor(pluginId: string, dataDir?: string) {
+    const base = dataDir ?? systemConfig.getDataFolder();
+    this.dirPath = path.join(base, "plugins", pluginId);
     this.filePath = path.join(this.dirPath, "state.json");
     this.schemaPath = path.join(this.dirPath, "schema.json");
   }
@@ -28,7 +30,7 @@ export class FilePluginStorage implements PluginStorage {
 
   async setSchemaVersion(version: number): Promise<void> {
     await fs.mkdir(this.dirPath, { recursive: true });
-    const tempPath = `${this.schemaPath}.tmp.${Date.now()}`;
+    const tempPath = `${this.schemaPath}.tmp.${randomUUID()}`;
     await fs.writeFile(tempPath, JSON.stringify({ version }, null, 2), "utf-8");
     await fs.rename(tempPath, this.schemaPath);
   }
@@ -50,12 +52,15 @@ export class FilePluginStorage implements PluginStorage {
 
   private async persist(): Promise<void> {
     const dataToSave = JSON.stringify(this.cache ?? {}, null, 2);
-    this.writeLock = this.writeLock.then(async () => {
-      await fs.mkdir(this.dirPath, { recursive: true });
-      const tempPath = `${this.filePath}.tmp.${Date.now()}`;
-      await fs.writeFile(tempPath, dataToSave, "utf-8");
-      await fs.rename(tempPath, this.filePath);
-    });
+    // Recover from a failed write so the lock is not permanently poisoned.
+    this.writeLock = this.writeLock
+      .catch(() => {})
+      .then(async () => {
+        await fs.mkdir(this.dirPath, { recursive: true });
+        const tempPath = `${this.filePath}.tmp.${randomUUID()}`;
+        await fs.writeFile(tempPath, dataToSave, "utf-8");
+        await fs.rename(tempPath, this.filePath);
+      });
     await this.writeLock;
   }
 

@@ -1,5 +1,15 @@
 import fs from "node:fs/promises";
+import { timingSafeEqual } from "node:crypto";
 import type { PluginManifest } from "./types";
+
+const SHA256_HEX_PATTERN = /^[0-9a-f]{64}$/i;
+
+function constantTimeEqual(left: string, right: string): boolean {
+  const a = Buffer.from(left, "utf8");
+  const b = Buffer.from(right, "utf8");
+  if (a.length !== b.length) return false;
+  return timingSafeEqual(a, b);
+}
 
 /** A registry entry pins a plugin's version and/or entry checksum. */
 export interface PluginRegistryEntry {
@@ -22,13 +32,20 @@ export class PluginRegistry {
 
   static async load(filePath: string | undefined): Promise<PluginRegistry> {
     if (!filePath) return new PluginRegistry([]);
+    let raw: string;
     try {
-      const raw = await fs.readFile(filePath, "utf-8");
-      const data = JSON.parse(raw) as PluginRegistryData;
-      return new PluginRegistry(data.plugins ?? []);
-    } catch {
-      return new PluginRegistry([]);
+      raw = await fs.readFile(filePath, "utf-8");
+    } catch (err) {
+      // A configured registry that cannot be read must fail closed.
+      throw new Error(`failed to read plugin registry '${filePath}': ${err}`);
     }
+    let data: PluginRegistryData;
+    try {
+      data = JSON.parse(raw) as PluginRegistryData;
+    } catch (err) {
+      throw new Error(`failed to parse plugin registry '${filePath}': ${err}`);
+    }
+    return new PluginRegistry(data.plugins ?? []);
   }
 
   get enabled(): boolean {
@@ -49,10 +66,15 @@ export class PluginRegistry {
         `plugin '${manifest.id}' version ${manifest.version} does not match pinned ${entry.version}`,
       );
     }
-    if (entry.checksum && entry.checksum !== digest) {
-      throw new Error(
-        `plugin '${manifest.id}' checksum does not match the registry`,
-      );
+    if (entry.checksum) {
+      if (
+        !SHA256_HEX_PATTERN.test(entry.checksum) ||
+        !constantTimeEqual(entry.checksum, digest)
+      ) {
+        throw new Error(
+          `plugin '${manifest.id}' checksum does not match the registry`,
+        );
+      }
     }
   }
 }

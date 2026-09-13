@@ -16,7 +16,13 @@ import { StorageRoomPersistence } from "../builtin/gse/persistence";
 import { RoomStore } from "../builtin/gse/room-store";
 import { HelloWorldPlugin } from "../builtin/hello-world";
 import { PLUGIN_API_VERSION } from "../types";
-import type { PluginContext, PluginStorage, ServerPlugin } from "../types";
+import type {
+  PluginCapability,
+  PluginContext,
+  PluginMetadata,
+  PluginStorage,
+  ServerPlugin,
+} from "../types";
 
 /**
  * In-memory storage so tests never touch Drop's runtime config (which is only
@@ -102,6 +108,7 @@ test("PluginManager route registration and pattern matching", async () => {
       id: "route-plugin",
       name: "Route Plugin",
       version: "1.0.0",
+      capabilities: ["routes"],
     },
     init: (ctx: PluginContext) => {
       ctx.registerRoute("GET", "/items", () => {
@@ -322,6 +329,58 @@ test("PluginManager denies storage and network without capabilities", async () =
   assert.equal(
     manager.listPlugins().find((p) => p.id === "no-io-plugin")?.status,
     "active",
+  );
+});
+
+test("PluginManager defaults to denying capabilities when none are declared", async () => {
+  const manager = createTestManager();
+
+  for (const [id, capabilities] of [
+    ["undeclared-plugin", undefined],
+    ["empty-capabilities-plugin", [] as PluginCapability[]],
+  ] as const) {
+    const metadata: PluginMetadata = { id, name: id, version: "1.0.0" };
+    if (capabilities) metadata.capabilities = [...capabilities];
+    const plugin: ServerPlugin = {
+      metadata,
+      init: (ctx: PluginContext) => {
+        ctx.registerRoute("GET", "/denied", () => ({ allowed: false }));
+      },
+    };
+    await assert.rejects(() => manager.registerPlugin(plugin), {
+      name: "PluginCapabilityError",
+    });
+  }
+});
+
+test("PluginManager rejects plugin ids that escape the plugins directory", async () => {
+  const manager = createTestManager();
+
+  for (const id of ["..", ".", "../evil", "evil/../../x", ""]) {
+    const plugin: ServerPlugin = {
+      metadata: { id, name: "Evil", version: "1.0.0" },
+      init: () => {},
+    };
+    await assert.rejects(
+      () => manager.registerPlugin(plugin),
+      /invalid plugin id/,
+    );
+  }
+
+  await assert.rejects(() => manager.removeBundle(".."), /invalid plugin id/);
+
+  await assert.rejects(
+    () =>
+      manager.installBundle(
+        {
+          id: "..",
+          name: "Evil",
+          version: "1.0.0",
+          apiVersion: PLUGIN_API_VERSION,
+        },
+        Buffer.from("module.exports = {}").toString("base64"),
+      ),
+    /invalid plugin id/,
   );
 });
 
