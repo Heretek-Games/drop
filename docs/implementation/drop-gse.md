@@ -136,7 +136,9 @@ Owner: TBD · Depends on: M0, M2
 - [~] **B4** `ZeroTierBackend` creates a network via the controller API with a
   per-room /24 and `enableBroadcast` (tested with a mock fetch). Member
   authorization, revoke and network teardown are stubs.
-- [ ] **B6** Client mesh join/leave + `vpn.ts` validators; peers → engine
+- [~] **B6** Client requests its credential after host/join and refreshes the
+  room, so assigned mesh addresses reach `custom_broadcasts.txt` via the
+  A↔B contract. Client-side VPN status validators still pending.
 - [x] **B7** TTL sweeper (60s, unref'd), per-host + global caps, auth on room
       reads (member view vs discovery), credential/join/heartbeat auth
 
@@ -147,8 +149,9 @@ restart preserves rooms; host migration works; teardown leaves nothing behind.
 
 Owner: TBD · Depends on: M3
 
-- [ ] **B5** Backend #2: Tailscale ephemeral — transactional tag/ACL before keys,
-      one-off per-member keys, isolated `--state=mem:`
+- [~] **B5** `TailscaleBackend` (tag provisioning + one-off ephemeral keys via
+  an injected `TailscaleProvisioner`, tested). Wiring the embedded
+  `desktop/src-tauri/tailscale` crate with isolated `--state=mem:` pending.
 - [ ] **B8** UI: host/join/leave/teardown + live WebSocket updates
 - [ ] **P6** Desktop extension ABI decision + implementation (privileged tier)
 - [ ] Client-side WS consumption of `gse:rooms`

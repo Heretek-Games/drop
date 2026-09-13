@@ -96,6 +96,8 @@ export const useGseMultiplayer = (gameId: string) => {
 
       if (res.room) {
         currentRoom.value = res.room;
+        await requestCredential(res.room.id);
+        await refreshRoom(res.room.id);
         await fetchRooms();
       }
       return res.room;
@@ -119,6 +121,8 @@ export const useGseMultiplayer = (gameId: string) => {
 
       if (res.room) {
         currentRoom.value = res.room;
+        await requestCredential(res.room.id);
+        await refreshRoom(res.room.id);
         await fetchRooms();
       }
       return res.room;
@@ -127,6 +131,45 @@ export const useGseMultiplayer = (gameId: string) => {
       return null;
     } finally {
       isLoading.value = false;
+    }
+  }
+
+  /**
+   * Request this member's mesh credential. This is what causes the server to
+   * assign the member a mesh address (reflected in the room member list).
+   */
+  async function requestCredential(roomId: string): Promise<string | null> {
+    try {
+      const res = await invoke<{ credential?: { secret: string } }>(
+        "plugin_request",
+        {
+          pluginId: "drop-gse",
+          method: "POST",
+          path: `/rooms/${roomId}/credential`,
+        },
+      );
+      return res.credential?.secret ?? null;
+    } catch (e) {
+      error.value = (e as string).toString();
+      return null;
+    }
+  }
+
+  /** Re-fetch the room as a member so new peer addresses become visible. */
+  async function refreshRoom(roomId: string): Promise<GseRoom | null> {
+    try {
+      const res = await invoke<{ room: GseRoom }>("plugin_request", {
+        pluginId: "drop-gse",
+        method: "GET",
+        path: `/rooms/${roomId}`,
+      });
+      if (res.room) {
+        currentRoom.value = res.room;
+      }
+      return res.room ?? null;
+    } catch (e) {
+      error.value = (e as string).toString();
+      return null;
     }
   }
 
@@ -169,6 +212,8 @@ export const useGseMultiplayer = (gameId: string) => {
     isLoading,
     error,
     fetchRooms,
+    refreshRoom,
+    requestCredential,
     hostRoom,
     joinRoom,
     leaveRoom,

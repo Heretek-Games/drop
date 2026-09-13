@@ -197,9 +197,13 @@ export class RoomStore {
 
   /** Issue (or return the existing) server-side credential for a member. */
   async credential(roomId: string, userId: string): Promise<MeshCredential> {
-    const room = await this.get(roomId);
-    if (!room) throw new Error("room not found");
-    if (!room.members.some((member) => member.userId === userId)) {
+    const rooms = await this.loadRooms();
+    const room = rooms[roomId];
+    if (!room || room.expiresAt <= this.now()) {
+      throw new Error("room not found");
+    }
+    const member = room.members.find((entry) => entry.userId === userId);
+    if (!member) {
       throw new Error("not a room member");
     }
 
@@ -210,7 +214,7 @@ export class RoomStore {
       return existing;
     }
 
-    const secret = await this.backend.issueCredential(
+    const issued = await this.backend.issueCredential(
       roomId,
       userId,
       room.mesh,
@@ -218,10 +222,18 @@ export class RoomStore {
     const credential: MeshCredential = {
       roomId,
       userId,
-      secret,
+      secret: issued.secret,
+      address: issued.address,
       issuedAt: this.now(),
       expiresAt: room.expiresAt,
     };
+
+    // Record the assigned mesh address so peers see it in the room view.
+    if (issued.address) {
+      member.meshAddress = issued.address;
+      await this.saveRooms(rooms);
+    }
+
     roomCredentials[userId] = credential;
     credentials[roomId] = roomCredentials;
     await this.storage.set(CREDENTIALS_KEY, credentials);

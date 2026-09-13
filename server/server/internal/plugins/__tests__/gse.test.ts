@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   InMemoryMeshBackend,
+  TailscaleBackend,
   ZeroTierBackend,
   roomCidr,
 } from "../builtin/gse/mesh";
@@ -108,6 +109,42 @@ test("RoomStore credentials are membership-gated and cached", async () => {
   const second = await store.credential(room.id, "host");
   assert.equal(first.secret, second.secret);
   assert.ok(first.secret.length > 0);
+  assert.ok(first.address);
+
+  // The assigned address is reflected in the room member view.
+  const refreshed = await store.get(room.id);
+  assert.equal(
+    refreshed?.members.find((member) => member.userId === "host")?.meshAddress,
+    first.address,
+  );
+});
+
+test("TailscaleBackend provisions a tag and issues one-off keys", async () => {
+  const events: string[] = [];
+  const backend = new TailscaleBackend({
+    provisionRoom: async (roomId) => {
+      events.push(`provision:${roomId}`);
+      return `tag:dropgse-room-${roomId}`;
+    },
+    issueAuthKey: async (tag, userId) => {
+      events.push(`key:${tag}:${userId}`);
+      return `tskey-${userId}`;
+    },
+    teardownRoom: async (roomId) => {
+      events.push(`teardown:${roomId}`);
+    },
+  });
+
+  const mesh = await backend.provision("r1", 10);
+  assert.equal(mesh.backend, "tailscale");
+  const issued = await backend.issueCredential("r1", "u1", mesh);
+  assert.equal(issued.secret, "tskey-u1");
+  await backend.teardown("r1");
+  assert.deepEqual(events, [
+    "provision:r1",
+    "key:tag:dropgse-room-r1:u1",
+    "teardown:r1",
+  ]);
 });
 
 test("RoomStore prunes expired rooms and tears down their mesh", async () => {

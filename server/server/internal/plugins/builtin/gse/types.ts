@@ -50,8 +50,16 @@ export interface MeshCredential {
   userId: string;
   /** Backend-specific secret (e.g. a one-off auth key or network membership). */
   secret: string;
+  /** Mesh address assigned to the member, when the backend provides one. */
+  address?: string | undefined;
   issuedAt: number;
   expiresAt: number;
+}
+
+/** Value returned by `MeshBackend.issueCredential`. */
+export interface IssuedCredential {
+  secret: string;
+  address?: string | undefined;
 }
 
 /**
@@ -67,7 +75,7 @@ export interface MeshBackend {
     roomId: string,
     userId: string,
     mesh: PublicMeshInfo,
-  ): Promise<string>;
+  ): Promise<IssuedCredential>;
   /** Revoke a member's access. No-op if already gone. */
   revokeMember(roomId: string, userId: string): Promise<void>;
   /** Remove every node/network for the room. */

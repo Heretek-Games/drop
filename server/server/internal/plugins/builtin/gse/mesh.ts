@@ -1,16 +1,31 @@
-import type { MeshBackend, PublicMeshInfo } from "./types";
+import type { IssuedCredential, MeshBackend, PublicMeshInfo } from "./types";
+
+function hashString(value: string): number {
+  let hash = 0;
+  for (const char of value) {
+    hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
+  }
+  return hash;
+}
 
 /** Base CIDR for per-room ZeroTier networks (10.242.0.0/16, one /24 each). */
 export const ZEROTIER_BASE_CIDR = "10.242.0.0/16";
 
 /** Deterministically derive a unique /24 room CIDR from the room id. */
 export function roomCidr(roomId: string): string {
-  let hash = 0;
-  for (const char of roomId) {
-    hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
-  }
-  const thirdOctet = hash % 256;
+  const thirdOctet = hashString(roomId) % 256;
   return `10.242.${thirdOctet}.0/24`;
+}
+
+/** Deterministic host address inside a room /24 (offset 20–219). */
+export function roomMemberAddress(
+  cidr: string,
+  userId: string,
+): string | undefined {
+  if (!cidr.endsWith("/24")) return undefined;
+  const base = cidr.replace(/\.0\/24$/, "");
+  const host = 20 + (hashString(userId) % 200);
+  return `${base}.${host}`;
 }
 
 /**
@@ -34,11 +49,17 @@ export class InMemoryMeshBackend implements MeshBackend {
     roomId: string,
     userId: string,
     mesh: PublicMeshInfo,
-  ): Promise<string> {
+  ): Promise<IssuedCredential> {
     const set = this.members.get(roomId) ?? new Set<string>();
     set.add(userId);
     this.members.set(roomId, set);
-    return `zt-member:${roomId}:${userId}:${mesh.backend}`;
+    return {
+      secret: `zt-member:${roomId}:${userId}:${mesh.backend}`,
+      address:
+        mesh.backend === "zerotier"
+          ? roomMemberAddress(mesh.cidr, userId)
+          : undefined,
+    };
   }
 
   async revokeMember(roomId: string, userId: string): Promise<void> {
@@ -141,13 +162,13 @@ export class ZeroTierBackend implements MeshBackend {
     roomId: string,
     userId: string,
     mesh: PublicMeshInfo,
-  ): Promise<string> {
+  ): Promise<IssuedCredential> {
     if (mesh.backend !== "zerotier") {
       throw new Error("ZeroTierBackend received non-zerotier mesh info");
     }
-    // A member joins the network and requests authorization. The generated
-    // member identity is the credential secret; the controller authorizes it.
-    return `zerotier:${mesh.networkId}:${roomId}:${userId}`;
+    // A member joins the network and requests authorization; the assigned
+    // address is reported by the controller once the member is authorized.
+    return { secret: `zerotier:${mesh.networkId}:${roomId}:${userId}` };
   }
 
   async revokeMember(roomId: string, userId: string): Promise<void> {
@@ -161,5 +182,52 @@ export class ZeroTierBackend implements MeshBackend {
     void roomId;
     // Requires the network id; the coordinator passes it to a backend-specific
     // deletion in a later iteration.
+  }
+}
+
+/**
+ * Tailscale control-plane operations, injected so the backend is testable
+ * without a tailnet. A real implementation provisions a room tag + same-room
+ * ACL before issuing any key, and removes tagged nodes on teardown.
+ */
+export interface TailscaleProvisioner {
+  provisionRoom(roomId: string): Promise<string>;
+  issueAuthKey(aclTag: string, userId: string): Promise<string>;
+  teardownRoom(roomId: string): Promise<void>;
+}
+
+/**
+ * Tailscale ephemeral backend. Keys are one-off and tagged per room; the
+ * client joins with isolated ephemeral state so a user's own tailnet identity
+ * is never replaced.
+ */
+export class TailscaleBackend implements MeshBackend {
+  readonly id = "tailscale" as const;
+
+  constructor(private readonly provisioner: TailscaleProvisioner) {}
+
+  async provision(roomId: string, expiresAt: number): Promise<PublicMeshInfo> {
+    const aclTag = await this.provisioner.provisionRoom(roomId);
+    return { backend: "tailscale", aclTag, expiresAt };
+  }
+
+  async issueCredential(
+    roomId: string,
+    userId: string,
+    mesh: PublicMeshInfo,
+  ): Promise<IssuedCredential> {
+    if (mesh.backend !== "tailscale") {
+      throw new Error("TailscaleBackend received non-tailscale mesh info");
+    }
+    void roomId;
+    return { secret: await this.provisioner.issueAuthKey(mesh.aclTag, userId) };
+  }
+
+  async revokeMember(): Promise<void> {
+    // Ephemeral nodes purge themselves; tagged-node removal happens on teardown.
+  }
+
+  async teardown(roomId: string): Promise<void> {
+    await this.provisioner.teardownRoom(roomId);
   }
 }
