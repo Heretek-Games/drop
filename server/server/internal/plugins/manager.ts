@@ -661,10 +661,8 @@ export class PluginManager {
     if (this.options.authResolver) {
       return this.options.authResolver(event);
     }
-    const { default: aclManager } = await import("../acls");
-    const userId = (await aclManager.getUserIdACL(event, [])) ?? undefined;
-    const allAcls = await aclManager.fetchAllACLs(event);
-    return { userId, userAcls: allAcls ? Array.from(allAcls) : undefined };
+    const { resolvePluginAuth } = await import("./auth");
+    return await resolvePluginAuth(event);
   }
 
   async dispatch(

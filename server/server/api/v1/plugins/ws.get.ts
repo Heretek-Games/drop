@@ -1,5 +1,5 @@
 import pluginManager from "~/server/internal/plugins";
-import aclManager from "~/server/internal/acls";
+import { resolvePluginAuth } from "~/server/internal/plugins/auth";
 
 const clientSubscriptions = new Map<string, Array<() => void>>();
 const peerUsers = new Map<string, string | undefined>();
@@ -9,13 +9,14 @@ export default defineWebSocketHandler({
   async open(peer) {
     clientSubscriptions.set(peer.id, []);
 
-    // Authenticate the upgrade request so plugins receive a userId.
+    // Authenticate the upgrade request so plugins receive a userId. Supports
+    // both browser sessions/API tokens and desktop client JWTs.
     let userId: string | undefined;
     let userAcls: string[] | undefined;
     try {
-      userId = (await aclManager.getUserIdACL(peer.request, [])) ?? undefined;
-      const all = await aclManager.fetchAllACLs(peer.request);
-      userAcls = all ? Array.from(all) : undefined;
+      const auth = await resolvePluginAuth(peer.request);
+      userId = auth.userId;
+      userAcls = auth.userAcls;
     } catch {
       // Unauthenticated peer.
     }
