@@ -66,7 +66,7 @@ export interface IssuedCredential {
   secret: string;
   address?: string | undefined;
   /** Backend-imposed credential lifetime (ms epoch), when shorter than the room. */
-  expiresAt?: number | undefined;
+  expiresAt?: number;
 }
 
 /**

@@ -275,15 +275,18 @@ export class DropGseServerPlugin implements ServerPlugin {
       } catch (err) {
         const message = String(err);
         ctx.logger.warn(`Failed to create GSE room: ${message}`);
-        const known = message.includes("known-incompatible");
-        const invalid = message.includes("invalid");
-        throw createError({
-          statusCode: known ? 409 : invalid ? 400 : 429,
-          // Only surface our own validation messages; backend/controller errors
-          // can carry internal URLs and are logged, not returned.
-          statusMessage:
-            known || invalid ? message : "failed to create multiplayer room",
-        });
+        // Only surface our own validation messages; backend/controller errors
+        // can carry internal URLs and are logged, not returned.
+        let statusCode = 429;
+        let statusMessage = "failed to create multiplayer room";
+        if (message.includes("known-incompatible")) {
+          statusCode = 409;
+          statusMessage = message;
+        } else if (message.includes("invalid")) {
+          statusCode = 400;
+          statusMessage = message;
+        }
+        throw createError({ statusCode, statusMessage });
       }
     });
 

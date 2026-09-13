@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { Service } from "..";
 import fs from "node:fs";
+import path from "node:path";
 import { logger } from "../../logging";
 import type { Socket } from "node:net";
 import net from "node:net";
@@ -95,15 +96,24 @@ export class TorrentialService extends Service<unknown> {
           }
         }
 
-        const localDir = fs.readdirSync(".");
-        if (localDir.includes("torrential")) {
-          return spawn("./torrential", [], { env: TORRENTIAL_SPAWN_ENV });
+        // Resolve the binary to an absolute path instead of searching PATH:
+        // a user-writable directory on PATH could otherwise hijack the spawn.
+        // The Docker image installs it at /usr/bin/torrential.
+        const candidates = [
+          process.env.TORRENTIAL_PATH,
+          path.join(process.cwd(), "torrential"),
+          "/usr/local/bin/torrential",
+          "/usr/bin/torrential",
+        ].filter((candidate): candidate is string => Boolean(candidate));
+        for (const candidate of candidates) {
+          if (fs.existsSync(candidate) && fs.statSync(candidate).isFile()) {
+            return spawn(candidate, [], { env: TORRENTIAL_SPAWN_ENV });
+          }
         }
 
-        const envPath = process.env.TORRENTIAL_PATH;
-        if (envPath) return spawn(envPath, [], { env: TORRENTIAL_SPAWN_ENV });
-
-        return spawn("torrential", [], { env: TORRENTIAL_SPAWN_ENV });
+        throw new Error(
+          "torrential binary not found; set TORRENTIAL_PATH or place 'torrential' in the working directory",
+        );
       },
       async () => {
         const socket = net.createConnection({ port: 33148, host: "127.0.0.1" });

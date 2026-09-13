@@ -50,7 +50,7 @@ export interface PluginManifest extends PluginMetadata {
    * verified too. When present with `DROP_PLUGIN_SIGNING_KEY`, `signature`
    * covers the aggregate bundle digest rather than only the entry file.
    */
-  files?: Record<string, string> | undefined;
+  files?: Record<string, string>;
   /**
    * HMAC-SHA256 (hex) of `checksum`, keyed by `DROP_PLUGIN_SIGNING_KEY`.
    * Set `DROP_PLUGIN_REQUIRE_SIGNATURE=true` to reject unsigned bundles.
@@ -94,8 +94,8 @@ export interface WebSocketContext {
 
 /** Caller identity available when authorizing a channel subscription. */
 export interface SubscriptionContext {
-  userId?: string | undefined;
-  userAcls?: string[] | undefined;
+  userId: string | undefined;
+  userAcls: string[] | undefined;
 }
 
 /**

@@ -1016,12 +1016,14 @@ test("ZtnetBackend treats a 404 teardown as success", async () => {
       text: async () => "not found",
     }),
   });
-  await backend.teardown("room-x", {
-    backend: "zerotier",
-    cidr: "10.242.1.0/24",
-    networkId: "nw-gone",
-    expiresAt: 1,
-  });
+  await assert.doesNotReject(() =>
+    backend.teardown("room-x", {
+      backend: "zerotier",
+      cidr: "10.242.1.0/24",
+      networkId: "nw-gone",
+      expiresAt: 1,
+    }),
+  );
 });
 
 test("ZeroTierBackend treats a 404 teardown as success", async () => {
@@ -1036,12 +1038,14 @@ test("ZeroTierBackend treats a 404 teardown as success", async () => {
       text: async () => "not found",
     }),
   });
-  await backend.teardown("room-x", {
-    backend: "zerotier",
-    cidr: "10.242.1.0/24",
-    networkId: "net-gone",
-    expiresAt: 1,
-  });
+  await assert.doesNotReject(() =>
+    backend.teardown("room-x", {
+      backend: "zerotier",
+      cidr: "10.242.1.0/24",
+      networkId: "net-gone",
+      expiresAt: 1,
+    }),
+  );
 });
 
 test("TailscaleApiProvisioner revokes the previous key before re-issuing", async () => {

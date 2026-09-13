@@ -77,6 +77,12 @@ function isValidPluginId(id: string): boolean {
   return id.length > 0 && id.length <= 64 && PLUGIN_ID_PATTERN.test(id);
 }
 
+/** Whether a bundle-relative path is executable plugin code. */
+function isBundleCodeFile(rel: string): boolean {
+  const ext = path.extname(rel).toLowerCase();
+  return ext === ".js" || ext === ".mjs" || ext === ".cjs";
+}
+
 /** True when `child` resolves inside (or equals) `parent`. */
 function isInsideDirectory(parent: string, child: string): boolean {
   const relative = path.relative(parent, child);
@@ -386,30 +392,10 @@ export class PluginManager {
   ): Promise<string> {
     const root = path.resolve(pluginDir);
     const files = await this.listBundleFiles(root);
-    const codeExtensions = new Set([".js", ".mjs", ".cjs"]);
-    const codeFiles = files.filter((rel) =>
-      codeExtensions.has(path.extname(rel).toLowerCase()),
-    );
+    const codeFiles = files.filter(isBundleCodeFile);
 
     if (manifest.files) {
-      for (const [rel, expected] of Object.entries(manifest.files)) {
-        const resolved = path.resolve(root, rel);
-        if (path.isAbsolute(rel) || !isInsideDirectory(root, resolved)) {
-          throw new Error(`invalid bundle file path '${rel}'`);
-        }
-        if (!files.includes(rel)) {
-          throw new Error(`bundle manifest lists missing file '${rel}'`);
-        }
-        const digest = createHash("sha256")
-          .update(await fs.readFile(resolved))
-          .digest("hex");
-        if (
-          !SHA256_HEX_PATTERN.test(expected) ||
-          !constantTimeEqual(expected, digest)
-        ) {
-          throw new Error(`bundle file checksum mismatch for ${rel}`);
-        }
-      }
+      await this.verifyDeclaredBundleFiles(root, files, manifest.files);
       for (const rel of codeFiles) {
         if (!(rel in manifest.files)) {
           throw new Error(
@@ -423,6 +409,40 @@ export class PluginManager {
       );
     }
 
+    return await this.aggregateBundleDigest(root, files);
+  }
+
+  /** Verify every declared `files` entry against the bundle on disk. */
+  private async verifyDeclaredBundleFiles(
+    root: string,
+    files: string[],
+    declared: Record<string, string>,
+  ): Promise<void> {
+    for (const [rel, expected] of Object.entries(declared)) {
+      const resolved = path.resolve(root, rel);
+      if (path.isAbsolute(rel) || !isInsideDirectory(root, resolved)) {
+        throw new Error(`invalid bundle file path '${rel}'`);
+      }
+      if (!files.includes(rel)) {
+        throw new Error(`bundle manifest lists missing file '${rel}'`);
+      }
+      const digest = createHash("sha256")
+        .update(await fs.readFile(resolved))
+        .digest("hex");
+      if (
+        !SHA256_HEX_PATTERN.test(expected) ||
+        !constantTimeEqual(expected, digest)
+      ) {
+        throw new Error(`bundle file checksum mismatch for ${rel}`);
+      }
+    }
+  }
+
+  /** SHA-256 over every bundle file, used to cache-bust the entry import. */
+  private async aggregateBundleDigest(
+    root: string,
+    files: string[],
+  ): Promise<string> {
     const hasher = createHash("sha256");
     for (const rel of files) {
       const bytes = await fs.readFile(path.join(root, rel));
@@ -447,11 +467,12 @@ export class PluginManager {
         if (entry.name === "node_modules") continue;
         results.push(...(await this.listBundleFiles(root, rel)));
       } else if (entry.isFile()) {
+        // The manifest cannot checksum itself; the signer excludes it too.
+        if (!prefix && entry.name === "drop-plugin.json") continue;
         results.push(rel);
       }
     }
-    results.sort();
-    return results;
+    return results.sort((a, b) => a.localeCompare(b));
   }
 
   /**
