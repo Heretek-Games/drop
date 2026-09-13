@@ -38,7 +38,6 @@ websocketHandler.listen((message) => {
       case "disconnect": {
         const disconnectTaskId = data[0];
         taskStates.delete(disconnectTaskId);
-        console.log(`disconnected from ${disconnectTaskId}`);
         break;
       }
       case "error": {
@@ -72,7 +71,6 @@ export const useTask = (taskId: string): Ref<TaskMessage | undefined> => {
   if (task?.value && !task.value.error) return task;
 
   taskStates.set(taskId, ref(undefined));
-  console.log("connecting to " + taskId);
   websocketHandler.send(`connect/${taskId}`);
   // TODO: this may have changed behavior
   return taskStates.get(taskId) ?? ref(undefined);

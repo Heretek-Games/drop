@@ -35,7 +35,7 @@ export enum ObjectPermission {
   Write = "write",
   Delete = "delete",
 }
-export const ObjectPermissionPriority: Array<ObjectPermission> = [
+const ObjectPermissionPriority: Array<ObjectPermission> = [
   ObjectPermission.Read,
   ObjectPermission.Write,
   ObjectPermission.Delete,

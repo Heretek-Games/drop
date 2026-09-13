@@ -2,9 +2,9 @@ import Tuple from "~/utils/tuple";
 import type { Slice, SliceData } from "~/components/PieChart/types";
 import { sum, lastItem } from "~/utils/array";
 
-export const START = new Tuple(50, 10);
-export const CENTER = new Tuple(50, 50);
-export const RADIUS = 40;
+const START = new Tuple(50, 10);
+const CENTER = new Tuple(50, 50);
+const RADIUS = 40;
 
 export const polarToCartesian = (
   center: Tuple,

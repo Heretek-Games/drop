@@ -378,6 +378,11 @@ export class SteamProvider implements MetadataProvider {
       context?.logger.info(`Processing company: "${companyName}"`);
       const comp = await company(companyName);
 
+      if (!comp) {
+        context?.logger.warn(`Could not resolve company: "${companyName}"`);
+        continue;
+      }
+
       if (types.dev) {
         developers.push(comp);
         context?.logger.info(

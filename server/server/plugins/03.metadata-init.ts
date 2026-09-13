@@ -8,12 +8,7 @@ import { SteamProvider } from "../internal/metadata/steam";
 import { logger } from "~/server/internal/logging";
 
 export default defineNitroPlugin(async (_nitro) => {
-  const metadataProviders = [
-    //GiantBombProvider, // GiantBomb changed their API
-    SteamProvider,
-    PCGamingWikiProvider,
-    IGDBProvider,
-  ];
+  const metadataProviders = [SteamProvider, PCGamingWikiProvider, IGDBProvider];
 
   const providers = new Map<string, MetadataProvider>();
 

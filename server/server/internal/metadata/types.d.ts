@@ -1,4 +1,4 @@
-import type { Company, GameRating } from "~/prisma/client";
+import type { Company, GameRating } from "~/prisma/client/client";
 import type { AgeRatingOrganization } from "~/prisma/client/enums";
 import type { TransactionDataType } from "../objects/transactional";
 

@@ -6,7 +6,7 @@ interface PriorityTagged<T> {
   addedIndex: number; // Lower takes priority
 }
 
-export class PriorityList<T> {
+class PriorityList<T> {
   private readonly source: Array<PriorityTagged<T>> = [];
   private cachedSorted: Array<T> | undefined;
 

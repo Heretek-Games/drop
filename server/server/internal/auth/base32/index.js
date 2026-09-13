@@ -2,7 +2,6 @@
 //RFC4648: why include 2? Z and 2 looks similar than 8 and O
 const b32 = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
 console.assert(b32.length === 32, b32.length);
-const b32r = new Map(Array.from(b32, (ch, i) => [ch, i])).set("=", 0);
 //[constants derived from character table size]
 //cbit = 5 (as 32 == 2 ** 5), ubit = 8 (as byte)
 //ccount = 8 (= cbit / gcd(cbit, ubit)), ucount = 5 (= ubit / gcd(cbit, ubit))
@@ -26,26 +25,7 @@ function b32e5(u1, u2 = 0, u3 = 0, u4 = 0, u5 = 0) {
     b32[u40 & 0x1f],
   ];
 }
-function b32d8(b1, b2, b3, b4, b5, b6, b7, b8) {
-  const u40 =
-    b32r.get(b1) * 2 ** 35 +
-    b32r.get(b2) * 2 ** 30 +
-    b32r.get(b3) * 2 ** 25 +
-    b32r.get(b4) * 2 ** 20 +
-    b32r.get(b5) * 2 ** 15 +
-    b32r.get(b6) * 2 ** 10 +
-    b32r.get(b7) * 2 ** 5 +
-    b32r.get(b8);
-  return [
-    (u40 / 2 ** 32) & 0xff,
-    (u40 / 2 ** 24) & 0xff,
-    (u40 / 2 ** 16) & 0xff,
-    (u40 / 2 ** 8) & 0xff,
-    u40 & 0xff,
-  ];
-}
-
-// base32 encode/decode: Uint8Array <=> string
+// base32 encode: Uint8Array => string
 export function b32e(u8a) {
   console.assert(u8a instanceof Uint8Array, u8a.constructor);
   const len = u8a.length,
@@ -58,15 +38,4 @@ export function b32e(u8a) {
   return []
     .concat(...u5s.map((u5) => b32e5(...u5)), br, ["=".repeat(pad)])
     .join("");
-}
-export function b32d(bs) {
-  const len = bs.length;
-  if (len === 0) return new Uint8Array([]);
-  console.assert(len % 8 === 0, len);
-  const pad = len - bs.indexOf("="),
-    rem = b32pad.indexOf(pad);
-  console.assert(rem >= 0, pad);
-  console.assert(/^[A-Z2-7+/]*$/.test(bs.slice(0, len - pad)), bs);
-  const u8s = bs.match(/.{8}/g).flatMap((b8) => b32d8(...b8));
-  return new Uint8Array(rem > 0 ? u8s.slice(0, rem - 5) : u8s);
 }
