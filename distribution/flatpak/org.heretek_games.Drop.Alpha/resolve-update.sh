@@ -50,11 +50,14 @@ if [ "$version" = "$asset_name" ]; then
   if [[ "$tag" =~ ^alpha- ]]; then
     version="${tag#alpha-}"
   else
-    version="$(echo "$tag" | sed 's/^v//')-alpha.1.initial"
+    version="${tag#v}-alpha.1.initial"
   fi
 fi
 
-[ -n "$version" ] && [ -n "$url" ] || { echo "failed to resolve drop alpha release" >&2; exit 1; }
+if [ -z "$version" ] || [ -z "$url" ]; then
+  echo "failed to resolve drop alpha release" >&2
+  exit 1
+fi
 echo "resolved drop alpha $version ($date): $url" >&2
 
 jq -n --arg v "$version" --arg d "$date" --arg u "$url" \

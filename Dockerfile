@@ -26,6 +26,7 @@ RUN pnpm install --frozen-lockfile --ignore-scripts
 FROM rustlang/rust:nightly-bookworm-slim AS torrential-build
 ## libarchive-dev + pkg-config let libarchive3-sys link libarchive dynamically (glibc).
 ## protobuf-compiler is kept for parity (torrential's build.rs uses a vendored protoc).
+# hadolint ignore=DL3008
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libarchive-dev \
     pkg-config \
@@ -42,6 +43,7 @@ ENV NODE_ENV=production
 ENV NUXT_TELEMETRY_DISABLED=1
 
 ## add git so drop can determine its git ref at build
+# hadolint ignore=DL3008
 RUN apt-get update && apt-get install -y --no-install-recommends git \
     && rm -rf /var/lib/apt/lists/*
 
@@ -78,6 +80,7 @@ RUN rm -rf /app/torrential
 ##  - nginx: front-end proxy
 ##  - openssl + ca-certificates: required by Prisma's query engine on Debian
 ## pnpm itself is provided by corepack (enabled in the base stage)
+# hadolint ignore=DL3008
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     libarchive13 \
@@ -85,9 +88,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     openssl \
     p7zip-full \
     && rm -rf /var/lib/apt/lists/*
-RUN pnpm install prisma@7.10.0 --global --ignore-scripts
-# init prisma to download all required files
-RUN pnpm prisma init
+# Install prisma globally and initialise it to download all required files.
+RUN pnpm install prisma@7.10.0 --global --ignore-scripts \
+    && pnpm prisma init
 
 COPY --from=build-system /app/server/prisma.config.ts ./
 COPY --from=build-system /app/server/.output ./app
