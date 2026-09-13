@@ -192,9 +192,11 @@ restart preserves rooms; host migration works; teardown leaves nothing behind.
 
 Owner: TBD · Depends on: M3
 
-- [~] **B5** `TailscaleBackend` (tag provisioning + one-off ephemeral keys via
-  an injected `TailscaleProvisioner`, tested). Wiring the embedded
-  `desktop/src-tauri/tailscale` crate with isolated `--state=mem:` pending.
+- [x] **B5** `TailscaleBackend` + `TailscaleApiProvisioner` (one-off ephemeral
+      keys via the Tailscale API, revoked on teardown), selectable with
+      `GSE_MESH_BACKEND`; tested with a mock fetch. Uses one pre-declared tag
+      (BYO tailnet); the embedded client crate with isolated `--state=mem:`
+      remains a future enhancement.
 - [x] **B8** UI host/join/leave/teardown plus live updates: `plugin_subscribe`
       opens the plugin WS gateway from Rust and emits `plugin:event`; the modal
       subscribes to `gse:rooms` on open and refreshes on room events. Broadcast
@@ -244,9 +246,9 @@ The checklists above are authoritative. Summary:
 - **M3 — all except B6 client-side VPN validators**: durable store, host lease,
   credential rotation + WS hint, ZeroTier provision/authorize/teardown,
   hardening.
-- **M4 — B5 partial**: `TailscaleBackend` + provisioner interface tested; live
-  WS UI + client WS consumption done; P6 ABI decision recorded. Real tailnet
-  provisioning needs tailnet-policy/embedded-crate access.
+- **M4 complete** — `TailscaleBackend` + `TailscaleApiProvisioner` selectable
+  (both backends); live WS UI + client WS consumption; P6 ABI decision. The
+  embedded `tailscale` crate with isolated state is a future enhancement.
 - **M5 complete** — bundle format, signer, checksum/signature, install/remove,
   registry pinning, admin docs, license review.
 

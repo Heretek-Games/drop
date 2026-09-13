@@ -87,12 +87,18 @@ Built-in plugins cannot be removed.
 `drop-gse` adds peer-to-peer multiplayer rooms. Its behaviour is configured by
 environment variables:
 
-| Variable               | Purpose                                                      |
-| ---------------------- | ------------------------------------------------------------ |
-| `GSE_ZEROTIER_URL`     | ZeroTier controller base URL (e.g. `http://localhost:9993`). |
-| `GSE_ZEROTIER_TOKEN`   | Controller `authtoken.secret` value.                         |
-| `GSE_ZEROTIER_NODE`    | Controller node id.                                          |
-| `GSE_BLOCKED_APP_IDS`  | Comma-separated Steam AppIDs refused for rooms.              |
-| `GSE_BLOCKED_GAME_IDS` | Comma-separated Drop game ids refused for rooms.             |
+| Variable                | Purpose                                                          |
+| ----------------------- | ---------------------------------------------------------------- |
+| `GSE_MESH_BACKEND`      | `zerotier`, `tailscale`, or `memory` (auto-detected when unset). |
+| `GSE_ZEROTIER_URL`      | ZeroTier controller base URL (e.g. `http://localhost:9993`).     |
+| `GSE_ZEROTIER_TOKEN`    | Controller `authtoken.secret` value.                             |
+| `GSE_ZEROTIER_NODE`     | Controller node id.                                              |
+| `GSE_TAILSCALE_API_KEY` | Tailscale API token (creates one-off ephemeral keys).            |
+| `GSE_TAILSCALE_TAILNET` | Tailnet name, e.g. `example.com`.                                |
+| `GSE_TAILSCALE_TAG`     | Pre-declared policy tag (default `tag:dropgse`).                 |
+| `GSE_BLOCKED_APP_IDS`   | Comma-separated Steam AppIDs refused for rooms.                  |
+| `GSE_BLOCKED_GAME_IDS`  | Comma-separated Drop game ids refused for rooms.                 |
 
-Without `GSE_ZEROTIER_*`, an in-memory mesh backend is used (development only).
+Without any mesh backend env vars, an in-memory backend is used (development
+only). Tailscale tags must be declared in the tailnet policy; the plugin reuses
+one tag for all rooms (ZeroTier gives stronger per-room isolation).

@@ -232,7 +232,7 @@ export class ZeroTierBackend implements MeshBackend {
  */
 export interface TailscaleProvisioner {
   provisionRoom(roomId: string): Promise<string>;
-  issueAuthKey(aclTag: string, userId: string): Promise<string>;
+  issueAuthKey(aclTag: string, userId: string, roomId: string): Promise<string>;
   teardownRoom(roomId: string): Promise<void>;
 }
 
@@ -259,8 +259,9 @@ export class TailscaleBackend implements MeshBackend {
     if (mesh.backend !== "tailscale") {
       throw new Error("TailscaleBackend received non-tailscale mesh info");
     }
-    void roomId;
-    return { secret: await this.provisioner.issueAuthKey(mesh.aclTag, userId) };
+    return {
+      secret: await this.provisioner.issueAuthKey(mesh.aclTag, userId, roomId),
+    };
   }
 
   async revokeMember(): Promise<void> {
@@ -269,5 +270,99 @@ export class TailscaleBackend implements MeshBackend {
 
   async teardown(roomId: string): Promise<void> {
     await this.provisioner.teardownRoom(roomId);
+  }
+}
+
+export interface TailscaleApiOptions {
+  /** API base URL (default https://api.tailscale.com/api/v2). */
+  baseUrl?: string;
+  /** Tailscale API access token. */
+  apiKey: string;
+  /** Tailnet name, e.g. `example.com`. */
+  tailnet: string;
+  /**
+   * Pre-declared tag applied to room devices. Tailscale tags are declared in
+   * the tailnet policy file; the plugin does not mutate policy, so one tag is
+   * reused (BYO-tailnet mode, weaker per-room isolation than ZeroTier).
+   */
+  tag: string;
+  fetchImpl?: FetchLike;
+}
+
+/**
+ * Tailscale API provisioner. Issues one-off, ephemeral, pre-authorized keys
+ * tagged for the room and revokes them on teardown.
+ */
+export class TailscaleApiProvisioner implements TailscaleProvisioner {
+  private readonly fetchImpl: FetchLike;
+  private readonly baseUrl: string;
+  private readonly keyIds = new Map<string, string[]>();
+
+  constructor(private readonly options: TailscaleApiOptions) {
+    this.fetchImpl = options.fetchImpl ?? (fetch as unknown as FetchLike);
+    this.baseUrl = options.baseUrl ?? "https://api.tailscale.com/api/v2";
+  }
+
+  private headers(): Record<string, string> {
+    return {
+      Authorization: `Bearer ${this.options.apiKey}`,
+      "Content-Type": "application/json",
+    };
+  }
+
+  async provisionRoom(roomId: string): Promise<string> {
+    // Tags are policy-declared; reuse the configured tag for the room.
+    void roomId;
+    return this.options.tag;
+  }
+
+  async issueAuthKey(
+    aclTag: string,
+    userId: string,
+    roomId: string,
+  ): Promise<string> {
+    const url = `${this.baseUrl}/tailnet/${this.options.tailnet}/keys`;
+    const response = await this.fetchImpl(url, {
+      method: "POST",
+      headers: this.headers(),
+      body: JSON.stringify({
+        capabilities: {
+          devices: {
+            create: {
+              reusable: false,
+              ephemeral: true,
+              preauthorized: true,
+              tags: [aclTag],
+            },
+          },
+        },
+        expirySeconds: 3600,
+        description: `drop-gse ${userId}`,
+      }),
+    });
+    if (!response.ok) {
+      throw new Error(
+        `Tailscale key creation failed (${response.status}): ${await response.text()}`,
+      );
+    }
+    const data = (await response.json()) as { id?: string; key?: string };
+    if (!data.key) {
+      throw new Error("Tailscale key creation returned no key");
+    }
+    const ids = this.keyIds.get(roomId) ?? [];
+    if (data.id) ids.push(data.id);
+    this.keyIds.set(roomId, ids);
+    return data.key;
+  }
+
+  async teardownRoom(roomId: string): Promise<void> {
+    const ids = this.keyIds.get(roomId) ?? [];
+    this.keyIds.delete(roomId);
+    for (const id of ids) {
+      await this.fetchImpl(
+        `${this.baseUrl}/tailnet/${this.options.tailnet}/keys/${id}`,
+        { method: "DELETE", headers: this.headers() },
+      );
+    }
   }
 }

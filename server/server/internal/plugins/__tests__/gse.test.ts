@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   InMemoryMeshBackend,
+  TailscaleApiProvisioner,
   TailscaleBackend,
   ZeroTierBackend,
   roomCidr,
@@ -263,6 +264,54 @@ test("ZeroTierBackend authorizes members and deletes networks", async () => {
   const teardownCall = calls.find((call) => call.method === "DELETE");
   assert.ok(teardownCall);
   assert.match(teardownCall.url, /\/controller\/network\/net-1$/);
+});
+
+test("TailscaleApiProvisioner issues one-off keys and revokes them", async () => {
+  const calls: Array<{ url: string; method?: string; body?: string }> = [];
+  const provisioner = new TailscaleApiProvisioner({
+    apiKey: "ts-key",
+    tailnet: "example.com",
+    tag: "tag:dropgse",
+    fetchImpl: async (url, init) => {
+      calls.push({ url, method: init?.method, body: init?.body });
+      if (init?.method === "POST") {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ id: "key-1", key: "tskey-ephemeral" }),
+          text: async () => "",
+        };
+      }
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({}),
+        text: async () => "",
+      };
+    },
+  });
+
+  const backend = new TailscaleBackend(provisioner);
+  const mesh = await backend.provision("room-1", 1);
+  const issued = await backend.issueCredential("room-1", "user-1", mesh);
+  assert.equal(issued.secret, "tskey-ephemeral");
+
+  await backend.teardown("room-1");
+  const post = calls.find((call) => call.method === "POST");
+  assert.ok(post);
+  assert.equal(
+    (
+      JSON.parse(post.body ?? "{}") as {
+        capabilities: { devices: { create: { tags: string[] } } };
+      }
+    ).capabilities.devices.create.tags[0],
+    "tag:dropgse",
+  );
+  assert.ok(
+    calls.some(
+      (call) => call.method === "DELETE" && call.url.endsWith("/keys/key-1"),
+    ),
+  );
 });
 
 test("RoomStore records the address authorized for a member node", async () => {

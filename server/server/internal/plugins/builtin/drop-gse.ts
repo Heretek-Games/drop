@@ -2,7 +2,12 @@ import { createError, readBody } from "h3";
 import { PLUGIN_API_VERSION } from "../types";
 import type { PluginContext, PluginMetadata, ServerPlugin } from "../types";
 import { CompatRegistry, compatFromEnv } from "./gse/compat";
-import { InMemoryMeshBackend, ZeroTierBackend } from "./gse/mesh";
+import {
+  InMemoryMeshBackend,
+  TailscaleApiProvisioner,
+  TailscaleBackend,
+  ZeroTierBackend,
+} from "./gse/mesh";
 import { RoomStore } from "./gse/room-store";
 import { toDiscoverable } from "./gse/types";
 import type { EmulatorBinding, MeshBackend } from "./gse/types";
@@ -53,12 +58,31 @@ export class DropGseServerPlugin implements ServerPlugin {
   private pruneTimer: ReturnType<typeof setInterval> | undefined;
 
   private resolveBackend(): MeshBackend {
+    const selected = (process.env.GSE_MESH_BACKEND ?? "").toLowerCase();
+
+    const tailscaleKey = process.env.GSE_TAILSCALE_API_KEY;
+    const tailnet = process.env.GSE_TAILSCALE_TAILNET;
+    if (
+      (selected === "tailscale" || (selected === "" && tailscaleKey)) &&
+      tailscaleKey &&
+      tailnet
+    ) {
+      return new TailscaleBackend(
+        new TailscaleApiProvisioner({
+          apiKey: tailscaleKey,
+          tailnet,
+          tag: process.env.GSE_TAILSCALE_TAG ?? "tag:dropgse",
+        }),
+      );
+    }
+
     const baseUrl = process.env.GSE_ZEROTIER_URL;
     const authToken = process.env.GSE_ZEROTIER_TOKEN;
     const controllerNodeId = process.env.GSE_ZEROTIER_NODE;
     if (baseUrl && authToken && controllerNodeId) {
       return new ZeroTierBackend({ baseUrl, authToken, controllerNodeId });
     }
+
     return new InMemoryMeshBackend();
   }
 
