@@ -5,6 +5,10 @@ import {
   classifyDistribution,
   scoreExecutables,
   generatePipelineRecipe,
+  attachRecipeToManifest,
+  shellQuote,
+  batchQuote,
+  batchEcho,
 } from "../index";
 
 test("scoreExecutables ranks game binaries over crash handlers and installers", () => {
@@ -189,4 +193,58 @@ test("classifyDistribution identifies Standalone 7z Archives", () => {
   const recipe = generatePipelineRecipe(result, "10 Dead Doves");
   assert.equal(recipe.distributionType, DistributionType.ArchiveBundle);
   assert.ok(recipe.steps.some((s) => s.action === "extract_archive"));
+});
+
+test("attachRecipeToManifest embeds a recipe in torrential string manifests", () => {
+  const manifest = JSON.stringify({
+    version: "2",
+    size: 123,
+    key: [1, 2, 3],
+    chunks: { c1: { files: [], checksum: "abc", iv: [1] } },
+  });
+  const result = classifyDistribution("/data/Game", "Game", ["Game.exe"]);
+  const recipe = generatePipelineRecipe(result, "Game");
+
+  const attached = attachRecipeToManifest(manifest, recipe) as {
+    version: string;
+    size: number;
+    recipe: typeof recipe;
+  };
+
+  assert.equal(attached.version, "2");
+  assert.equal(attached.size, 123);
+  assert.deepEqual(attached.recipe, recipe);
+});
+
+test("attachRecipeToManifest preserves parsed object manifests and rejects scalars", () => {
+  const result = classifyDistribution("/data/Game", "Game", ["Game.exe"]);
+  const recipe = generatePipelineRecipe(result, "Game");
+
+  const attached = attachRecipeToManifest(
+    { version: "2", size: 1 },
+    recipe,
+  ) as { version: string; size: number; recipe: typeof recipe };
+  assert.equal(attached.version, "2");
+  assert.deepEqual(attached.recipe, recipe);
+
+  assert.throws(() => attachRecipeToManifest("null", recipe));
+  assert.throws(() => attachRecipeToManifest("[1,2,3]", recipe));
+});
+
+test("generated setup scripts quote untrusted filenames", () => {
+  assert.equal(shellQuote("plain"), "'plain'");
+  assert.equal(shellQuote("a'b"), "'a'\\''b'");
+  assert.equal(batchQuote("100%"), '"100%%"');
+  assert.equal(batchEcho("a&b"), "a^&b");
+  assert.throws(() => batchQuote('bad"name'), /unsafe/);
+
+  const result = classifyDistribution("/data/Game", "Game", [
+    "game; touch pwned.7z",
+  ]);
+  const recipe = generatePipelineRecipe(result, "Game");
+
+  assert.ok(recipe.setupScriptLinux?.includes("'game; touch pwned.7z'"));
+  assert.ok(!recipe.setupScriptLinux?.includes('"game; touch pwned.7z"'));
+  assert.ok(recipe.setupScriptWindows?.includes('"game; touch pwned.7z"'));
+  assert.ok(!recipe.setupScriptWindows?.includes("game; touch pwned.7z -o."));
 });

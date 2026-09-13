@@ -23,6 +23,7 @@ import { castManifest } from "./manifest/utils";
 import { Shescape } from "shescape";
 import type { Prisma } from "~/prisma/client/client";
 import {
+  attachRecipeToManifest,
   classifyDistribution,
   generatePipelineRecipe,
   DistributionType,
@@ -721,11 +722,10 @@ class LibraryManager {
                   classification,
                   game.mName,
                 );
-                const obj =
-                  typeof manifest === "object" && manifest !== null
-                    ? { ...manifest, recipe }
-                    : manifest;
-                return obj as unknown as Prisma.InputJsonValue;
+                return attachRecipeToManifest(
+                  manifest,
+                  recipe,
+                ) as unknown as Prisma.InputJsonValue;
               })(),
               fileList,
               versionIndex: currentIndex,

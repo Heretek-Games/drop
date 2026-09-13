@@ -5,6 +5,57 @@ import {
   type PipelineStep,
 } from "./types";
 
+/**
+ * Quotes a value as a single-quoted POSIX shell word. Single quotes are
+ * escaped by closing the quote, emitting an escaped quote, and reopening it.
+ */
+export function shellQuote(value: string): string {
+  return `'${value.replaceAll("'", "'\\''")}'`;
+}
+
+/**
+ * Escapes text embedded in a Windows batch script. `%` expands even inside
+ * double quotes; `&`, `|`, `<`, `>` and `^` are command operators. Quotes and
+ * control characters cannot be escaped reliably and are rejected.
+ */
+export function batchEcho(value: string): string {
+  if (/["\r\n\0]/.test(value)) {
+    throw new Error(`unsafe value for a Windows batch script: ${value}`);
+  }
+  return value.replaceAll("%", "%%").replace(/[&|<>^]/g, "^$&");
+}
+
+/**
+ * Escapes a value used as a Windows batch command argument. `%` expands even
+ * inside double quotes; quotes and control characters are rejected.
+ */
+export function batchQuote(value: string): string {
+  if (/["\r\n\0]/.test(value)) {
+    throw new Error(`unsafe value for a Windows batch script: ${value}`);
+  }
+  return `"${value.replaceAll("%", "%%")}"`;
+}
+
+/**
+ * Embeds a pipeline recipe into a droplet manifest.
+ *
+ * Local manifests arrive from torrential as a JSON string, while depot
+ * manifests are already parsed objects. Spread the parsed object so the
+ * recipe survives for both shapes.
+ */
+export function attachRecipeToManifest(
+  manifest: unknown,
+  recipe: PipelineRecipe,
+): object {
+  const parsed = typeof manifest === "string" ? JSON.parse(manifest) : manifest;
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    throw new Error(
+      "cannot embed a pipeline recipe in a non-object droplet manifest",
+    );
+  }
+  return { ...parsed, recipe };
+}
+
 export function generatePipelineRecipe(
   classification: ClassificationResult,
   gameName: string,
@@ -25,6 +76,8 @@ export function generatePipelineRecipe(
       const primaryArchive = classification.primaryArchive || "*.rar";
       const crackGroup = classification.releaseGroup || "Crack";
       const isDirectIso = primaryArchive.toLowerCase().endsWith(".iso");
+      const isoLabel = `[Drop Pipeline] Extracting Scene Release ISO (${crackGroup})...`;
+      const archiveLabel = `[Drop Pipeline] Extracting Scene Release (${crackGroup})...`;
 
       if (isDirectIso) {
         // Standalone Scene ISO: extracting the image directly is the whole
@@ -103,12 +156,12 @@ done`;
 
       if (isDirectIso) {
         setupScriptWindows = `@echo off
-echo [Drop Pipeline] Extracting Scene Release ISO (${crackGroup})...
+echo ${batchEcho(isoLabel)}
 set SEVENZIP="7z"
 if exist "%ProgramFiles%\\7-Zip\\7z.exe" set SEVENZIP="%ProgramFiles%\\7-Zip\\7z.exe"
 if exist "%ProgramFiles(x86)%\\7-Zip\\7z.exe" set SEVENZIP="%ProgramFiles(x86)%\\7-Zip\\7z.exe"
 
-%SEVENZIP% x -y "${primaryArchive}" -o.
+%SEVENZIP% x -y ${batchQuote(primaryArchive)} -o.
 if %ERRORLEVEL% NEQ 0 (
   echo [Drop Pipeline] ISO extraction failed.
   exit /b %ERRORLEVEL%
@@ -122,20 +175,20 @@ exit /b 0
 
         setupScriptLinux = `#!/bin/bash
 set -e
-echo "[Drop Pipeline] Extracting Scene Release ISO (${crackGroup})..."
-7z x -y "${primaryArchive}" -o.
+echo ${shellQuote(isoLabel)}
+7z x -y ${shellQuote(primaryArchive)} -o.
 ${crackOverlayLinux}
 echo "[Drop Pipeline] Scene release setup completed successfully!"
 `;
       } else {
         setupScriptWindows = `@echo off
-echo [Drop Pipeline] Extracting Scene Release (${crackGroup})...
+echo ${batchEcho(archiveLabel)}
 set SEVENZIP="7z"
 if exist "%ProgramFiles%\\7-Zip\\7z.exe" set SEVENZIP="%ProgramFiles%\\7-Zip\\7z.exe"
 if exist "%ProgramFiles(x86)%\\7-Zip\\7z.exe" set SEVENZIP="%ProgramFiles(x86)%\\7-Zip\\7z.exe"
 
 echo [Drop Pipeline] Extracting archives to temporary directory...
-%SEVENZIP% x -y "${primaryArchive}" -o.drop_iso_tmp
+%SEVENZIP% x -y ${batchQuote(primaryArchive)} -o.drop_iso_tmp
 if %ERRORLEVEL% NEQ 0 (
   echo [Drop Pipeline] Archive extraction failed.
   exit /b %ERRORLEVEL%
@@ -163,9 +216,9 @@ exit /b 0
 
         setupScriptLinux = `#!/bin/bash
 set -e
-echo "[Drop Pipeline] Extracting Scene Release (${crackGroup})..."
+echo ${shellQuote(archiveLabel)}
 mkdir -p .drop_iso_tmp
-7z x -y "${primaryArchive}" -o.drop_iso_tmp
+7z x -y ${shellQuote(primaryArchive)} -o.drop_iso_tmp
 for iso in .drop_iso_tmp/*.iso; do
   if [ -f "$iso" ]; then
     echo "[Drop Pipeline] Extracting $iso..."
@@ -222,28 +275,28 @@ echo "[Drop Pipeline] Scene release setup completed successfully!"
       }
 
       setupScriptWindows = `@echo off
-echo [Drop Pipeline] Installing GOG release (${setupExe})...
+echo ${batchEcho(`[Drop Pipeline] Installing GOG release (${setupExe})...`)}
 where innoextract >nul 2>nul
 if %ERRORLEVEL% EQU 0 (
   echo [Drop Pipeline] Extracting with innoextract...
-  innoextract -e -d app "${setupExe}"
+  innoextract -e -d app ${batchQuote(setupExe)}
   exit /b 0
 )
 
 echo [Drop Pipeline] Launching GOG silent installer...
-start /wait "" "${setupExe}" /VERYSILENT /SUPPRESSMSGBOXES /DIR="%CD%\\app"
+start /wait "" ${batchQuote(setupExe)} /VERYSILENT /SUPPRESSMSGBOXES /DIR="%CD%\\app"
 if %ERRORLEVEL% EQU 0 exit /b 0
 
 echo [Drop Pipeline] Falling back to interactive setup...
-start /wait "" "${setupExe}"
+start /wait "" ${batchQuote(setupExe)}
 exit /b %ERRORLEVEL%
 `;
 
       setupScriptLinux = `#!/bin/bash
-echo "[Drop Pipeline] Installing GOG release (${setupExe})..."
+echo ${shellQuote(`[Drop Pipeline] Installing GOG release (${setupExe})...`)}
 if command -v innoextract >/dev/null 2>&1; then
   echo "[Drop Pipeline] Extracting with innoextract..."
-  innoextract -e -d app "${setupExe}"
+  innoextract -e -d app ${shellQuote(setupExe)}
   exit 0
 else
   echo "[Drop Pipeline] Error: innoextract is required on Linux to extract GOG installers."
@@ -270,14 +323,14 @@ fi
       });
 
       setupScriptWindows = `@echo off
-echo [Drop Pipeline] Launching Repack Installer (${installerExe})...
-start /wait "" "${installerExe}"
+echo ${batchEcho(`[Drop Pipeline] Launching Repack Installer (${installerExe})...`)}
+start /wait "" ${batchQuote(installerExe)}
 exit /b %ERRORLEVEL%
 `;
 
       setupScriptLinux = `#!/bin/bash
-echo "[Drop Pipeline] Repack installation under Wine/Proton required for ${installerExe}"
-wine "${installerExe}"
+echo ${shellQuote(`[Drop Pipeline] Repack installation under Wine/Proton required for ${installerExe}`)}
+wine ${shellQuote(installerExe)}
 `;
       break;
     }
@@ -307,18 +360,18 @@ wine "${installerExe}"
       });
 
       setupScriptWindows = `@echo off
-echo [Drop Pipeline] Extracting Archive (${archive})...
+echo ${batchEcho(`[Drop Pipeline] Extracting Archive (${archive})...`)}
 set SEVENZIP="7z"
 if exist "%ProgramFiles%\\7-Zip\\7z.exe" set SEVENZIP="%ProgramFiles%\\7-Zip\\7z.exe"
 if exist "%ProgramFiles(x86)%\\7-Zip\\7z.exe" set SEVENZIP="%ProgramFiles(x86)%\\7-Zip\\7z.exe"
 
-%SEVENZIP% x -y "${archive}" -o.
+%SEVENZIP% x -y ${batchQuote(archive)} -o.
 exit /b %ERRORLEVEL%
 `;
 
       setupScriptLinux = `#!/bin/bash
-echo "[Drop Pipeline] Extracting Archive (${archive})..."
-7z x -y "${archive}" -o.
+echo ${shellQuote(`[Drop Pipeline] Extracting Archive (${archive})...`)}
+7z x -y ${shellQuote(archive)} -o.
 exit 0
 `;
       break;
