@@ -4,6 +4,8 @@ import type { NuxtConfig } from "nuxt/schema";
 export default {
   compatibilityDate: "2024-04-03",
 
+  modules: ["@nuxt/eslint"],
+
   postcss: {
     plugins: {
       tailwindcss: {},

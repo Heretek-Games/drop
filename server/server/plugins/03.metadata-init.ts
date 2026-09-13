@@ -46,7 +46,7 @@ export default defineNitroPlugin(async (_nitro) => {
 
   metadataHandler.addProvider(new ManualMetadataProvider(), -1000);
 
-  // Update the applicatonConfig
+  // Update the applicationConfig
   await applicationSettings.set(
     "metadataProviders",
     metadataHandler.fetchProviderIdsInOrder(),

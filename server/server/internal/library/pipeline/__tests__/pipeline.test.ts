@@ -238,7 +238,7 @@ test("attachRecipeToManifest preserves parsed object manifests and rejects scala
 
 test("generated setup scripts quote untrusted filenames", () => {
   assert.equal(shellQuote("plain"), "'plain'");
-  assert.equal(shellQuote("a'b"), "'a'\\''b'");
+  assert.equal(shellQuote("a'b"), String.raw`'a'\''b'`);
   assert.equal(batchQuote("100%"), '"100%%"');
   assert.equal(batchEcho("a&b"), "a^&b");
   assert.throws(() => batchQuote('bad"name'), /unsafe/);

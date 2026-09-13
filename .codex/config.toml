@@ -1,0 +1,3 @@
+[mcp_servers.sonarqube]
+command = "sonar"
+args = [ "run", "mcp", "--project", "Heretek-Games_drop" ]

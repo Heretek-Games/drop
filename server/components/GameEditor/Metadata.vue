@@ -228,6 +228,7 @@
               </div>
               <output
                 v-else-if="descriptionSaving == DescriptionSavingState.Loading"
+                aria-label="Loading"
               >
                 <svg
                   aria-hidden="true"

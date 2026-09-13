@@ -11,9 +11,9 @@
     </div>
     <button
       type="button"
-      @click="reloadPlugins"
       :disabled="isLoading"
       class="inline-flex items-center gap-x-1.5 rounded-md bg-zinc-800 px-3 py-2 text-xs font-semibold text-zinc-200 hover:bg-zinc-700 transition disabled:opacity-50"
+      @click="reloadPlugins"
     >
       <ArrowPathIcon class="size-4" :class="{ 'animate-spin': isLoading }" />
       <span>Reload Plugins</span>
@@ -52,9 +52,9 @@
     ></textarea>
     <button
       type="button"
-      @click="handleInstallBundle"
       :disabled="isLoading || !installReady"
       class="inline-flex items-center rounded-md bg-purple-600 px-3 py-2 text-xs font-semibold text-white hover:bg-purple-500 transition disabled:opacity-50"
+      @click="handleInstallBundle"
     >
       Install
     </button>
@@ -118,20 +118,20 @@
           <button
             v-if="!plugin.builtin"
             type="button"
-            @click="handleRemovePlugin(plugin.id)"
             :disabled="isLoading"
             class="text-xs font-medium text-red-400 hover:text-red-300 transition disabled:opacity-50"
+            @click="handleRemovePlugin(plugin.id)"
           >
             Remove
           </button>
           <Switch
             :model-value="plugin.status === 'active'"
-            @update:model-value="(val) => handleTogglePlugin(plugin.id, val)"
             :disabled="isLoading"
             :class="[
               plugin.status === 'active' ? 'bg-purple-600' : 'bg-zinc-700',
               'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out',
             ]"
+            @update:model-value="(val) => handleTogglePlugin(plugin.id, val)"
           >
             <span
               :class="[

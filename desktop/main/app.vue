@@ -18,8 +18,6 @@ import {
 import { listen } from "@tauri-apps/api/event";
 import type { AppState } from "./types.js";
 
-const router = useRouter();
-
 const state = useAppState();
 
 async function fetchState() {

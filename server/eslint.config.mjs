@@ -1,9 +1,10 @@
-// @ts-check
+// @ts-nocheck -- composes untyped shared JS config with typed Nuxt configs
 import { globalIgnores } from "eslint/config";
 import withNuxt from "./.nuxt/eslint.config.mjs";
 import eslintConfigPrettier from "eslint-config-prettier/flat";
 import vueI18n from "@intlify/eslint-plugin-vue-i18n";
 import noPrismaDelete from "./rules/no-prisma-delete.mts";
+import shared from "../eslint.config.shared.mjs";
 
 export default withNuxt([
   globalIgnores([".data/*"]),
@@ -43,4 +44,8 @@ export default withNuxt([
       drop: { rules: { "no-prisma-delete": noPrismaDelete } },
     },
   },
+
+  // Local equivalents of the SonarCloud rules the remote gate enforces
+  // (curated plugins and rules shared by every workspace).
+  ...shared,
 ]);

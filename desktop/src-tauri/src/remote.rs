@@ -19,7 +19,7 @@ use tauri::{AppHandle, Manager};
 use url::Url;
 use utils::{app_emit, webbrowser_open::webbrowser_open};
 
-use crate::{AppState, recieve_handshake};
+use crate::{AppState, receive_handshake};
 
 #[tauri::command]
 pub async fn use_remote(
@@ -173,8 +173,8 @@ pub fn auth_initiate_code(app: AppHandle) -> Result<String, RemoteAccessError> {
                         .map_err(|e| RemoteAccessError::UnparseableResponse(e.to_string()))?;
                     match response.response_type.as_str() {
                         "token" => {
-                            let recieve_app = app.clone();
-                            manual_recieve_handshake(recieve_app, response.value).await;
+                            let receive_app = app.clone();
+                            manual_receive_handshake(receive_app, response.value).await;
                             return Ok(());
                         }
                         _ => return Err(RemoteAccessError::HandshakeFailed(response.value)),
@@ -197,8 +197,8 @@ pub fn auth_initiate_code(app: AppHandle) -> Result<String, RemoteAccessError> {
 }
 
 #[tauri::command]
-pub async fn manual_recieve_handshake(app: AppHandle, token: String) {
-    recieve_handshake(app, format!("handshake/{token}")).await;
+pub async fn manual_receive_handshake(app: AppHandle, token: String) {
+    receive_handshake(app, format!("handshake/{token}")).await;
 }
 
 #[tauri::command]

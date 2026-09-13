@@ -47,8 +47,6 @@ import {
   RectangleGroupIcon,
   BugAntIcon,
 } from "@heroicons/vue/16/solid";
-import type { Component } from "vue";
-import { platform } from "@tauri-apps/plugin-os";
 import { invoke } from "@tauri-apps/api/core";
 import { UserIcon, PuzzlePieceIcon } from "@heroicons/vue/20/solid";
 
@@ -143,8 +141,6 @@ const navigation = computed(() => [
       ]
     : []),
 ]);
-
-const currentPlatform = platform();
 
 // Use .value to unwrap the computed ref
 const { currentNavigation } = useCurrentNavigationIndex(navigation.value);

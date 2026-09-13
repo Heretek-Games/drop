@@ -25,11 +25,11 @@
           {{ game.mName }}
         </h1>
         <div
-          class="relative"
           v-if="
             status.type === 'Installed' &&
             status.install_type.type != InstalledType.PartiallyInstalled
           "
+          class="relative"
         >
           <div
             v-if="!version?.userConfiguration?.enableUpdates"
@@ -65,6 +65,7 @@
         <div class="mt-8 flex flex-row gap-x-4 items-stretch">
           <!-- Do not add scale animations to this: https://stackoverflow.com/a/35683068 -->
           <GameStatusButton
+            :status="status"
             @install="() => installFlow()"
             @launch="() => launch()"
             @queue="() => queue()"
@@ -72,7 +73,6 @@
             @kill="() => kill()"
             @options="() => (configureModalOpen = true)"
             @resume="() => resumeDownload()"
-            :status="status"
           />
           <button
             v-if="status.type === 'Installed' && status.update_available"
@@ -120,8 +120,8 @@
           <div class="space-y-6">
             <div class="bg-zinc-800/50 rounded-xl p-6 backdrop-blur-sm">
               <div
-                v-html="htmlDescription"
                 class="prose prose-invert prose-blue overflow-y-auto custom-scrollbar max-w-none"
+                v-html="htmlDescription"
               ></div>
             </div>
           </div>
@@ -139,10 +139,10 @@
                     <TransitionGroup name="slide" tag="div" class="h-full">
                       <img
                         v-for="(url, index) in game.mImageCarouselObjectIds"
+                        v-show="index === currentImageIndex"
                         :key="index"
                         :src="useObject(url)"
                         class="absolute inset-0 w-full h-full object-cover"
-                        v-show="index === currentImageIndex"
                         :alt="`${game.mName} screenshot ${index + 1}`"
                       />
                     </TransitionGroup>
@@ -162,20 +162,20 @@
                     >
                       <div class="pointer-events-auto">
                         <button
-                          type="button"
                           v-if="game.mImageCarouselObjectIds.length > 1"
-                          @click.stop="previousImage()"
+                          type="button"
                           class="p-2 rounded-full bg-zinc-900/50 text-zinc-100 hover:bg-zinc-900/80 transition-all duration-300 hover:scale-110"
+                          @click.stop="previousImage()"
                         >
                           <ChevronLeftIcon class="size-5" />
                         </button>
                       </div>
                       <div class="pointer-events-auto">
                         <button
-                          type="button"
                           v-if="game.mImageCarouselObjectIds.length > 1"
-                          @click.stop="nextImage()"
+                          type="button"
                           class="p-2 rounded-full bg-zinc-900/50 text-zinc-100 hover:bg-zinc-900/80 transition-all duration-300 hover:scale-110"
+                          @click.stop="nextImage()"
                         >
                           <ChevronRightIcon class="size-5" />
                         </button>
@@ -197,16 +197,16 @@
                     class="absolute -bottom-2 left-1/2 -translate-x-1/2 flex gap-x-2"
                   >
                     <button
-                      type="button"
                       v-for="(_, index) in game.mImageCarouselObjectIds"
                       :key="index"
-                      @click.stop="currentImageIndex = index"
+                      type="button"
                       class="w-1.5 h-1.5 rounded-full transition-all"
                       :class="[
                         currentImageIndex === index
                           ? 'bg-zinc-100 scale-125'
                           : 'bg-zinc-600 hover:bg-zinc-500',
                       ]"
+                      @click.stop="currentImageIndex = index"
                     />
                   </div>
                 </div>
@@ -248,7 +248,7 @@
 
       <div class="space-y-6">
         <div v-if="versionOptions && versionOptions.length > 0">
-          <Listbox as="div" v-model="installVersionIndex">
+          <Listbox v-model="installVersionIndex" as="div">
             <ListboxLabel class="block text-sm/6 font-medium text-zinc-100"
               >Version</ListboxLabel
             >
@@ -320,9 +320,9 @@
                   class="absolute z-10 mt-1 max-h-60 w-full overflow-auto rounded-md bg-zinc-900 py-1 text-base shadow-lg ring-1 ring-black ring-opacity-5 focus:outline-none sm:text-sm"
                 >
                   <ListboxOption
+                    v-slot="{ active, selected }"
                     as="template"
                     :value="-1"
-                    v-slot="{ active, selected }"
                   >
                     <li
                       :class="[
@@ -353,11 +353,11 @@
                   </ListboxOption>
 
                   <ListboxOption
-                    as="template"
                     v-for="(version, versionIdx) in versionOptions"
                     :key="version.versionId"
-                    :value="versionIdx"
                     v-slot="{ active, selected }"
+                    as="template"
+                    :value="versionIdx"
                   >
                     <li
                       :class="[
@@ -408,7 +408,7 @@
           </div>
         </div>
         <div v-else class="w-full flex items-center justify-center p-4">
-          <output>
+          <output aria-label="Loading">
             <svg
               aria-hidden="true"
               class="w-7 h-7 text-transparent animate-spin fill-white"
@@ -430,8 +430,8 @@
         </div>
         <div v-if="installDirs">
           <InstallDirectorySelector
-            :install-dirs="installDirs"
             v-model="installDir"
+            :install-dirs="installDirs"
           />
         </div>
         <div
@@ -525,19 +525,19 @@
     </template>
     <template #buttons>
       <LoadingButton
-        @click="() => install()"
         :disabled="!(versionOptions && versionOptions.length > 0)"
         :loading="installLoading"
         type="submit"
         class="ml-2 w-full sm:w-fit"
+        @click="() => install()"
       >
         Install
       </LoadingButton>
       <button
+        ref="cancelButtonRef"
         type="button"
         class="mt-3 inline-flex w-full justify-center rounded-md bg-zinc-800 px-3 py-2 text-sm font-semibold text-zinc-100 shadow-sm ring-1 ring-inset ring-zinc-700 hover:bg-zinc-900 sm:mt-0 sm:w-auto"
         @click="installFlowOpen = false"
-        ref="cancelButtonRef"
       >
         Cancel
       </button>
@@ -561,7 +561,7 @@
       </div>
 
       <ol class="space-y-2">
-        <li v-for="(launchData, launchIdx) in launchOptions!">
+        <li v-for="(launchData, launchIdx) in launchOptions!" :key="launchIdx">
           <button
             type="button"
             class="transition w-full rounded-sm bg-zinc-800 inline-flex items-center text-sm py-2 px-3 gap-x-2 text-zinc-100 hover:text-zinc-300 hover:bg-zinc-700"
@@ -577,10 +577,10 @@
     </template>
     <template #buttons>
       <button
+        ref="cancelButtonRef"
         type="button"
         class="mt-3 inline-flex w-full justify-center rounded-md bg-zinc-800 px-3 py-2 text-sm font-semibold text-zinc-100 shadow-sm ring-1 ring-inset ring-zinc-700 hover:bg-zinc-900 sm:mt-0 sm:w-auto"
         @click="launchOptions = undefined"
-        ref="cancelButtonRef"
       >
         Cancel
       </button>
@@ -638,35 +638,37 @@
     <div
       v-if="fullscreenImage"
       class="fixed inset-0 z-50 bg-black/95 flex items-center justify-center"
-      @click="fullscreenImage = null"
-      @keydown.escape="fullscreenImage = null"
     >
+      <button
+        type="button"
+        class="absolute inset-0"
+        aria-label="Close image viewer"
+        @click="fullscreenImage = null"
+      ></button>
       <div
-        class="relative w-full h-full flex items-center justify-center"
-        @click.stop
-        @keydown.escape="fullscreenImage = null"
+        class="relative w-full h-full flex items-center justify-center pointer-events-none"
       >
         <button
           type="button"
-          class="absolute top-4 right-4 p-2 rounded-full bg-zinc-900/50 text-zinc-100 hover:bg-zinc-900 transition-colors"
-          @click.stop="fullscreenImage = null"
+          class="absolute top-4 right-4 p-2 rounded-full bg-zinc-900/50 text-zinc-100 hover:bg-zinc-900 transition-colors pointer-events-auto"
+          @click="fullscreenImage = null"
         >
           <XMarkIcon class="size-6" />
         </button>
 
         <button
-          type="button"
           v-if="game.mImageCarouselObjectIds.length > 1"
-          @click.stop="previousImage()"
-          class="absolute left-4 p-3 rounded-full bg-zinc-900/50 text-zinc-100 hover:bg-zinc-900 transition-colors"
+          type="button"
+          class="absolute left-4 p-3 rounded-full bg-zinc-900/50 text-zinc-100 hover:bg-zinc-900 transition-colors pointer-events-auto"
+          @click="previousImage()"
         >
           <ChevronLeftIcon class="size-6" />
         </button>
         <button
-          type="button"
           v-if="game.mImageCarouselObjectIds.length > 1"
-          @click.stop="nextImage()"
-          class="absolute right-4 p-3 rounded-full bg-zinc-900/50 text-zinc-100 hover:bg-zinc-900 transition-colors"
+          type="button"
+          class="absolute right-4 p-3 rounded-full bg-zinc-900/50 text-zinc-100 hover:bg-zinc-900 transition-colors pointer-events-auto"
+          @click="nextImage()"
         >
           <ChevronRightIcon class="size-6" />
         </button>
@@ -674,8 +676,7 @@
         <TransitionGroup
           name="slide"
           tag="div"
-          class="w-full h-full flex items-center justify-center"
-          @click.stop
+          class="w-full h-full flex items-center justify-center pointer-events-auto"
         >
           <img
             v-for="(url, index) in game.mImageCarouselObjectIds"
@@ -688,7 +689,7 @@
         </TransitionGroup>
 
         <div
-          class="absolute bottom-4 left-1/2 -translate-x-1/2 px-4 py-2 rounded-full bg-zinc-900/50 backdrop-blur-sm"
+          class="absolute bottom-4 left-1/2 -translate-x-1/2 px-4 py-2 rounded-full bg-zinc-900/50 backdrop-blur-sm pointer-events-auto"
         >
           <p class="text-zinc-100 text-sm font-medium">
             {{ currentImageIndex + 1 }} /
@@ -950,6 +951,15 @@ function previousImage() {
 }
 
 const fullscreenImage = ref<string | null>(null);
+
+// Window-level Escape keeps the overlay divs free of interactive handlers.
+function onViewerKeydown(event: KeyboardEvent) {
+  if (event.key === "Escape" && fullscreenImage.value) {
+    fullscreenImage.value = null;
+  }
+}
+onMounted(() => window.addEventListener("keydown", onViewerKeydown));
+onUnmounted(() => window.removeEventListener("keydown", onViewerKeydown));
 </script>
 
 <style scoped>

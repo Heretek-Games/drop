@@ -154,7 +154,7 @@ export class OIDCManager {
   static async create() {
     if (!systemConfig.shouldOidcRequireHttps()) {
       console.warn(
-        "Disabling HTTPS requirement for OIDC provider, not recommened in production enviroments",
+        "Disabling HTTPS requirement for OIDC provider, not recommended in production environments",
       );
     }
 

@@ -206,7 +206,7 @@ impl DropServer {
     and then updates the waitmap with the corresponding message ID
     and content
     */
-    async fn recieve_loop(
+    async fn receive_loop(
         myself: Arc<DropServer>,
         buffered_reader: &mut BufReader<OwnedReadHalf>,
     ) -> Result<(), anyhow::Error> {
@@ -262,14 +262,14 @@ impl DropServer {
     }
 
     /**
-    Long-lived subroutine that never returns, runs the `recieve_loop` and reconnects
+    Long-lived subroutine that never returns, runs the `receive_loop` and reconnects
     as necessary
     */
-    async fn recieve_subroutine(myself: Arc<DropServer>, read_stream: OwnedReadHalf) -> ! {
+    async fn receive_subroutine(myself: Arc<DropServer>, read_stream: OwnedReadHalf) -> ! {
         let mut buffered_reader = BufReader::new(read_stream);
 
         loop {
-            if let Err(err) = Self::recieve_loop(myself.clone(), &mut buffered_reader).await {
+            if let Err(err) = Self::receive_loop(myself.clone(), &mut buffered_reader).await {
                 warn!("RPC connection error: {err:?}");
 
                 let (read, write) = loop {
@@ -357,7 +357,7 @@ impl DropServer {
 
 /**
 Spins up the TCP listener, and waits for the first client to connect
-Also starts the recieve subroutine
+Also starts the receive subroutine
 
 # Errors
 
@@ -377,7 +377,7 @@ pub async fn create_drop_server() -> Result<Arc<DropServer>, anyhow::Error> {
         rpc_secret,
     });
 
-    spawn(DropServer::recieve_subroutine(client.clone(), read));
+    spawn(DropServer::receive_subroutine(client.clone(), read));
 
     info!("created client subroutine");
 

@@ -17,21 +17,46 @@ Usage:
   python3 fix_placeholder_configs.py [--apply] [--all-manifests]
 """
 
-import os
-import sys
-import re
-import json
 import argparse
+import contextlib
+import json
+import os
+import re
 from urllib.parse import urlparse
+
 import pg8000.native
 
-DEFAULT_DB_URL = os.environ.get("DATABASE_URL", "postgresql://drop:drop@127.0.0.1:5432/drop")
+DEFAULT_DB_URL = os.environ.get(
+    "DATABASE_URL", "postgresql://drop:drop@127.0.0.1:5432/drop"
+)
 
 SCENE_GROUPS = [
-    "RUNE", "TENOKE", "CODEX", "SKIDROW", "PLAZA", "FLT", "DEViANCE",
-    "RELOADED", "HOODLUM", "FAIRLIGHT", "DOGE", "EMPRESS", "PARADiGM",
-    "PROPHET", "TiNYiSO", "ALiAS", "BAT", "Razor1911", "FLTDOX", "RazorDOX",
-    "SiMPLEX", "DARKSiDERS", "DINOByTES", "Chrono", "Unleashed", "HI2U"
+    "RUNE",
+    "TENOKE",
+    "CODEX",
+    "SKIDROW",
+    "PLAZA",
+    "FLT",
+    "DEViANCE",
+    "RELOADED",
+    "HOODLUM",
+    "FAIRLIGHT",
+    "DOGE",
+    "EMPRESS",
+    "PARADiGM",
+    "PROPHET",
+    "TiNYiSO",
+    "ALiAS",
+    "BAT",
+    "Razor1911",
+    "FLTDOX",
+    "RazorDOX",
+    "SiMPLEX",
+    "DARKSiDERS",
+    "DINOByTES",
+    "Chrono",
+    "Unleashed",
+    "HI2U",
 ]
 SCENE_GROUP_REGEX = re.compile(rf"[-_. ]({'|'.join(SCENE_GROUPS)})([-_.]|$)", re.I)
 
@@ -54,7 +79,10 @@ EXCLUDED_PATTERNS = [
 ]
 
 EXCLUDED_DIR_PATTERNS = [
-    re.compile(r"[/\\](_commonredist|redist|directx|support|dependencies|crack|rune|tenoke|codex|goldberg)[/\\]", re.I)
+    re.compile(
+        r"[/\\](_commonredist|redist|directx|support|dependencies|crack|rune|tenoke|codex|goldberg)[/\\]",
+        re.I,
+    )
 ]
 
 SETUP_SCRIPT = "drop-pipeline-setup.bat"
@@ -63,12 +91,17 @@ FALLBACK_ARCHIVE = "*.rar"
 PLACEHOLDER_LAUNCH_COMMANDS = ("drop-start.bat", "exr-setup.bat", "change-start.bat")
 PLACEHOLDER_SETUP_COMMANDS = ("exr-setup.bat", "drop-start.bat")
 
+
 def score_executable(norm, base, clean_game, game_tokens):
     score = 10
     base_lower = base.lower()
     if "-win64-shipping.exe" in base_lower:
         score += 45
-    if "/binaries/win64/" in norm.lower() or "/bin/x64/" in norm.lower() or "/x64/" in norm.lower():
+    if (
+        "/binaries/win64/" in norm.lower()
+        or "/bin/x64/" in norm.lower()
+        or "/x64/" in norm.lower()
+    ):
         score += 30
     elif "/binaries/" in norm.lower() or "/bin/" in norm.lower():
         score += 15
@@ -88,9 +121,17 @@ def score_executable(norm, base, clean_game, game_tokens):
 
     return score
 
+
 def score_executables(files, game_name):
     clean_game = re.sub(r"[^a-zA-Z0-9]", "", game_name).lower()
-    game_tokens = set(re.split(r"[\s_\-.:]+", game_name.lower())) - {"", "the", "a", "an", "edition", "version"}
+    game_tokens = set(re.split(r"[\s_\-.:]+", game_name.lower())) - {
+        "",
+        "the",
+        "a",
+        "an",
+        "edition",
+        "version",
+    }
 
     candidates = []
     for f in files:
@@ -108,50 +149,81 @@ def score_executables(files, game_name):
     candidates.sort(reverse=True)
     return [c[1] for c in candidates]
 
+
 def _fallback_target(files, game_name):
     exes = score_executables(files, game_name)
     return exes[0] if exes else f"{game_name}.exe"
 
+
 def _classify_scene_release(files, game_name, rars, has_iso, release_group):
     if len(rars) == 0 and not (has_iso and release_group):
         return None
-    primary_rar = next((f for f in files if re.search(r"\.part0*1\.rar$", f.lower())), None)
+    primary_rar = next(
+        (f for f in files if re.search(r"\.part0*1\.rar$", f.lower())), None
+    )
     if not primary_rar:
-        primary_rar = next((f for f in files if f.lower().endswith(".rar")), rars[0] if rars else FALLBACK_ARCHIVE)
+        primary_rar = next(
+            (f for f in files if f.lower().endswith(".rar")),
+            rars[0] if rars else FALLBACK_ARCHIVE,
+        )
 
     return {
         "type": "SceneRelease",
         "group": release_group or "Scene",
         "target": _fallback_target(files, game_name),
         "setup": SETUP_SCRIPT,
-        "primary": primary_rar
+        "primary": primary_rar,
     }
+
 
 def _classify_fitgirl(files, folder_name, game_name):
     lower_folder = folder_name.lower()
-    if not ("[fitgirl repack]" in lower_folder or any(f.lower().startswith("fg-") for f in files) or any("fitgirl" in f.lower() for f in files)):
+    if not (
+        "[fitgirl repack]" in lower_folder
+        or any(f.lower().startswith("fg-") for f in files)
+        or any("fitgirl" in f.lower() for f in files)
+    ):
         return None
     return {
         "type": "FitGirlRepack",
         "group": "FitGirl",
         "target": _fallback_target(files, game_name),
-        "setup": SETUP_SCRIPT
+        "setup": SETUP_SCRIPT,
     }
+
 
 def _classify_kaos(files, folder_name, game_name):
     lower_folder = folder_name.lower()
-    if not ("repack-kaos" in lower_folder or "[kaos repack]" in lower_folder or any(f.lower().startswith("kaos-") for f in files) or any("repack-kaos" in f.lower() for f in files)):
+    if not (
+        "repack-kaos" in lower_folder
+        or "[kaos repack]" in lower_folder
+        or any(f.lower().startswith("kaos-") for f in files)
+        or any("repack-kaos" in f.lower() for f in files)
+    ):
         return None
     return {
         "type": "KaOsRepack",
         "group": "KaOs",
         "target": _fallback_target(files, game_name),
-        "setup": SETUP_SCRIPT
+        "setup": SETUP_SCRIPT,
     }
 
+
 def _classify_gog(files, folder_name, game_name):
-    gog_setup = next((f for f in files if os.path.basename(f).lower().startswith("setup_") and f.lower().endswith(".exe")), None)
-    if not (gog_setup or "gog" in folder_name.lower() or any(f.lower().endswith(".bin") and "setup_" in f.lower() for f in files)):
+    gog_setup = next(
+        (
+            f
+            for f in files
+            if os.path.basename(f).lower().startswith("setup_")
+            and f.lower().endswith(".exe")
+        ),
+        None,
+    )
+    if not (
+        gog_setup
+        or "gog" in folder_name.lower()
+        or any(f.lower().endswith(".bin") and "setup_" in f.lower() for f in files)
+    ):
         return None
     exes = score_executables(files, game_name)
     target = f"app/{exes[0]}" if exes else f"app/{game_name}.exe"
@@ -160,39 +232,48 @@ def _classify_gog(files, folder_name, game_name):
         "group": "GOG",
         "target": target,
         "setup": SETUP_SCRIPT,
-        "installer": gog_setup or DEFAULT_SETUP_EXE
+        "installer": gog_setup or DEFAULT_SETUP_EXE,
     }
 
+
 def _classify_archive_bundle(files, game_name):
-    archives = [f for f in files if os.path.splitext(f)[1].lower() in [".7z", ".zip", ".rar"]]
+    archives = [
+        f for f in files if os.path.splitext(f)[1].lower() in [".7z", ".zip", ".rar"]
+    ]
     if not archives:
         return None
     return {
         "type": "ArchiveBundle",
         "target": _fallback_target(files, game_name),
         "setup": SETUP_SCRIPT,
-        "archive": archives[0]
+        "archive": archives[0],
     }
+
 
 def _classify_loose_portable(files, game_name):
     exes = score_executables(files, game_name)
     if not exes:
         return None
-    return {
-        "type": "LoosePortable",
-        "target": exes[0],
-        "setup": None
-    }
+    return {"type": "LoosePortable", "target": exes[0], "setup": None}
+
 
 def classify_files_and_folder(all_files, folder_name, game_name):
     group_match = SCENE_GROUP_REGEX.search(folder_name)
     release_group = group_match.group(1).upper() if group_match else None
 
-    rars = [f for f in all_files if f.lower().endswith(".rar") or re.search(r"\.r\d{2}$", f.lower()) or re.search(r"\.part\d+\.rar$", f.lower())]
+    rars = [
+        f
+        for f in all_files
+        if f.lower().endswith(".rar")
+        or re.search(r"\.r\d{2}$", f.lower())
+        or re.search(r"\.part\d+\.rar$", f.lower())
+    ]
     has_iso = any(f.lower().endswith(".iso") for f in all_files)
 
     classifiers = (
-        lambda: _classify_scene_release(all_files, game_name, rars, has_iso, release_group),
+        lambda: _classify_scene_release(
+            all_files, game_name, rars, has_iso, release_group
+        ),
         lambda: _classify_fitgirl(all_files, folder_name, game_name),
         lambda: _classify_kaos(all_files, folder_name, game_name),
         lambda: _classify_gog(all_files, folder_name, game_name),
@@ -206,6 +287,7 @@ def classify_files_and_folder(all_files, folder_name, game_name):
 
     return {"type": "Unknown", "target": f"{game_name}.exe", "setup": None}
 
+
 def build_recipe(info, game_name):
     dist_type = info["type"]
     target = info.get("target", f"{game_name}.exe")
@@ -216,10 +298,41 @@ def build_recipe(info, game_name):
         primary = info.get("primary", FALLBACK_ARCHIVE)
         group = info.get("group", "Scene")
         steps = [
-            {"id": "extract_rar", "action": "extract_rar", "params": {"input": primary, "outputDir": ".drop_iso_tmp"}, "description": f"Extract multi-part Scene archive ({primary})"},
-            {"id": "extract_iso", "action": "extract_iso", "params": {"sourceGlob": ".drop_iso_tmp/*.iso", "outputDir": "."}, "description": "Extract unpacked ISO disc image into root game folder"},
-            {"id": "apply_crack", "action": "apply_crack", "params": {"crackDir": group, "targetDir": "."}, "description": f"Apply {group} crack overlay", "optional": True},
-            {"id": "cleanup", "action": "cleanup", "params": {"targets": [".drop_iso_tmp", "*.r0*", "*.r1*", "*.r2*", "*.r3*", FALLBACK_ARCHIVE]}, "description": "Remove intermediate ISO and multi-part RAR slices", "optional": True}
+            {
+                "id": "extract_rar",
+                "action": "extract_rar",
+                "params": {"input": primary, "outputDir": ".drop_iso_tmp"},
+                "description": f"Extract multi-part Scene archive ({primary})",
+            },
+            {
+                "id": "extract_iso",
+                "action": "extract_iso",
+                "params": {"sourceGlob": ".drop_iso_tmp/*.iso", "outputDir": "."},
+                "description": "Extract unpacked ISO disc image into root game folder",
+            },
+            {
+                "id": "apply_crack",
+                "action": "apply_crack",
+                "params": {"crackDir": group, "targetDir": "."},
+                "description": f"Apply {group} crack overlay",
+                "optional": True,
+            },
+            {
+                "id": "cleanup",
+                "action": "cleanup",
+                "params": {
+                    "targets": [
+                        ".drop_iso_tmp",
+                        "*.r0*",
+                        "*.r1*",
+                        "*.r2*",
+                        "*.r3*",
+                        FALLBACK_ARCHIVE,
+                    ]
+                },
+                "description": "Remove intermediate ISO and multi-part RAR slices",
+                "optional": True,
+            },
         ]
         bat = f"""@echo off
 echo [Drop Pipeline] Extracting Scene Release ({group})...
@@ -286,14 +399,25 @@ echo "[Drop Pipeline] Scene release setup completed successfully!"
             "targetExecutable": target,
             "setupCommand": setup_cmd,
             "setupScriptWindows": bat,
-            "setupScriptLinux": sh
+            "setupScriptLinux": sh,
         }
 
     elif dist_type == "GogInstaller":
         installer = info.get("installer", DEFAULT_SETUP_EXE)
         steps = [
-            {"id": "innoextract", "action": "innoextract", "params": {"installerExe": installer, "outputDir": "app"}, "description": f"Extract GOG Inno Setup installer ({installer})"},
-            {"id": "cleanup", "action": "cleanup", "params": {"targets": ["*.bin", installer]}, "description": "Remove GOG setup and data .bin files", "optional": True}
+            {
+                "id": "innoextract",
+                "action": "innoextract",
+                "params": {"installerExe": installer, "outputDir": "app"},
+                "description": f"Extract GOG Inno Setup installer ({installer})",
+            },
+            {
+                "id": "cleanup",
+                "action": "cleanup",
+                "params": {"targets": ["*.bin", installer]},
+                "description": "Remove GOG setup and data .bin files",
+                "optional": True,
+            },
         ]
         bat = f"""@echo off
 echo [Drop Pipeline] Installing GOG release ({installer})...
@@ -329,14 +453,19 @@ fi
             "targetExecutable": target,
             "setupCommand": setup_cmd,
             "setupScriptWindows": bat,
-            "setupScriptLinux": sh
+            "setupScriptLinux": sh,
         }
 
     elif dist_type in ("FitGirlRepack", "KaOsRepack"):
         group = info.get("group", "Repack")
         installer = DEFAULT_SETUP_EXE if dist_type == "FitGirlRepack" else "Install.exe"
         steps = [
-            {"id": "run_installer", "action": "run_command", "params": {"command": installer, "targetDir": "."}, "description": f"Run {group} installer ({installer})"}
+            {
+                "id": "run_installer",
+                "action": "run_command",
+                "params": {"command": installer, "targetDir": "."},
+                "description": f"Run {group} installer ({installer})",
+            }
         ]
         bat = f"""@echo off
 echo [Drop Pipeline] Launching {group} Installer ({installer})...
@@ -353,14 +482,25 @@ wine "{installer}"
             "targetExecutable": target,
             "setupCommand": setup_cmd,
             "setupScriptWindows": bat,
-            "setupScriptLinux": sh
+            "setupScriptLinux": sh,
         }
 
     elif dist_type == "ArchiveBundle":
         archive = info.get("archive", "*.7z")
         steps = [
-            {"id": "extract_archive", "action": "extract_archive", "params": {"archiveFile": archive, "outputDir": "."}, "description": f"Extract compressed archive ({archive})"},
-            {"id": "cleanup", "action": "cleanup", "params": {"targets": [archive]}, "description": "Remove source archive", "optional": True}
+            {
+                "id": "extract_archive",
+                "action": "extract_archive",
+                "params": {"archiveFile": archive, "outputDir": "."},
+                "description": f"Extract compressed archive ({archive})",
+            },
+            {
+                "id": "cleanup",
+                "action": "cleanup",
+                "params": {"targets": [archive]},
+                "description": "Remove source archive",
+                "optional": True,
+            },
         ]
         bat = f"""@echo off
 echo [Drop Pipeline] Extracting {archive}...
@@ -382,7 +522,7 @@ echo "[Drop Pipeline] Extracting {archive}..."
             "targetExecutable": target,
             "setupCommand": setup_cmd,
             "setupScriptWindows": bat,
-            "setupScriptLinux": sh
+            "setupScriptLinux": sh,
         }
 
     else:
@@ -391,14 +531,29 @@ echo "[Drop Pipeline] Extracting {archive}..."
             "distributionType": dist_type,
             "steps": [],
             "targetExecutable": target,
-            "setupCommand": None
+            "setupCommand": None,
         }
 
+
 def parse_args():
-    parser = argparse.ArgumentParser(description="Repair Drop database placeholder configurations and populate pipeline recipes.")
-    parser.add_argument("--apply", action="store_true", help="Apply changes directly to the PostgreSQL database.")
-    parser.add_argument("--all-manifests", action="store_true", help="Also attach pipeline recipes to all GameVersion dropletManifests.")
-    parser.add_argument("--db-url", default=DEFAULT_DB_URL, help="PostgreSQL connection string (defaults to DATABASE_URL or postgresql://drop:drop@127.0.0.1:5432/drop)")
+    parser = argparse.ArgumentParser(
+        description="Repair Drop database placeholder configurations and populate pipeline recipes."
+    )
+    parser.add_argument(
+        "--apply",
+        action="store_true",
+        help="Apply changes directly to the PostgreSQL database.",
+    )
+    parser.add_argument(
+        "--all-manifests",
+        action="store_true",
+        help="Also attach pipeline recipes to all GameVersion dropletManifests.",
+    )
+    parser.add_argument(
+        "--db-url",
+        default=DEFAULT_DB_URL,
+        help="PostgreSQL connection string (defaults to DATABASE_URL or postgresql://drop:drop@127.0.0.1:5432/drop)",
+    )
     return parser.parse_args()
 
 
@@ -409,7 +564,7 @@ def connect_db(db_url):
         password=parsed_url.password or "drop",
         host=parsed_url.hostname or "127.0.0.1",
         port=parsed_url.port or 5432,
-        database=parsed_url.path.lstrip("/") or "drop"
+        database=parsed_url.path.lstrip("/") or "drop",
     )
 
 
@@ -481,10 +636,8 @@ def walk_candidate_files(root):
 def collect_candidate_files(target_path, file_list):
     candidate_files = []
     if target_path and os.path.exists(target_path):
-        try:
+        with contextlib.suppress(Exception):
             candidate_files = walk_candidate_files(target_path)
-        except Exception:
-            pass
 
     if not candidate_files and file_list:
         candidate_files = list(file_list)
@@ -515,38 +668,58 @@ def get_recipe_field(manifest_obj):
 
 def repair_launch_and_setup(conn, launch_id, setup_id, version_id, game_name, info):
     if launch_id:
-        conn.run("""
+        conn.run(
+            """
             UPDATE "LaunchConfiguration"
             SET command = :cmd, name = :name
             WHERE "launchId" = :lid
-        """, cmd=info["target"], name=game_name, lid=launch_id)
+        """,
+            cmd=info["target"],
+            name=game_name,
+            lid=launch_id,
+        )
 
     if setup_id:
         if info.get("setup"):
-            conn.run("""
+            conn.run(
+                """
                 UPDATE "SetupConfiguration"
                 SET command = :cmd
                 WHERE "setupId" = :sid
-            """, cmd=info["setup"], sid=setup_id)
+            """,
+                cmd=info["setup"],
+                sid=setup_id,
+            )
         else:
-            conn.run("""
+            conn.run(
+                """
                 DELETE FROM "SetupConfiguration"
                 WHERE "setupId" = :sid
-            """, sid=setup_id)
+            """,
+                sid=setup_id,
+            )
     elif info.get("setup"):
-        conn.run("""
+        conn.run(
+            """
             INSERT INTO "SetupConfiguration" ("setupId", "versionId", command, platform)
             VALUES (gen_random_uuid()::text, :vid, :cmd, 'Windows')
-        """, vid=version_id, cmd=info["setup"])
+        """,
+            vid=version_id,
+            cmd=info["setup"],
+        )
 
 
 def apply_manifest_recipe(conn, version_id, manifest_obj, recipe):
     manifest_obj["recipe"] = recipe
-    conn.run("""
+    conn.run(
+        """
         UPDATE "GameVersion"
         SET "dropletManifest" = :m::jsonb
         WHERE "versionId" = :vid
-    """, m=json.dumps(manifest_obj), vid=version_id)
+    """,
+        m=json.dumps(manifest_obj),
+        vid=version_id,
+    )
 
 
 def print_summary(rows, stats, repaired_configs, updated_manifests, applied):
@@ -558,7 +731,9 @@ def print_summary(rows, stats, repaired_configs, updated_manifests, applied):
 
     if applied:
         print(f"\nSuccessfully repaired {repaired_configs} placeholder configurations!")
-        print(f"Successfully attached pipeline recipes to {updated_manifests} GameVersions!")
+        print(
+            f"Successfully attached pipeline recipes to {updated_manifests} GameVersions!"
+        )
     else:
         print("\nDry run complete. Use --apply to commit these changes to PostgreSQL.")
 
@@ -632,7 +807,9 @@ def main():
     args = parse_args()
 
     print("=== Drop Distribution Pipeline - Configuration & Manifest Engine ===")
-    print(f"Mode: {'APPLY CHANGES' if args.apply else 'DRY RUN (preview only, use --apply to commit)'}\n")
+    print(
+        f"Mode: {'APPLY CHANGES' if args.apply else 'DRY RUN (preview only, use --apply to commit)'}\n"
+    )
 
     conn = connect_db(args.db_url)
 
@@ -654,6 +831,7 @@ def main():
         updated_manifests += updated
 
     print_summary(rows, stats, repaired_configs, updated_manifests, args.apply)
+
 
 if __name__ == "__main__":
     main()

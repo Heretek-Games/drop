@@ -6,15 +6,22 @@ import TextInputModal from "../components/TextInputModal.vue";
 export type ModalCallbackType<T extends ModalType> = (
   event: ModalEvents[T],
   close: () => void,
-  ...args: any[]
+  ...args: unknown[]
 ) => Promise<void> | void;
 
-export interface ModalStackElement<T extends ModalType> {
+/** Erased callback shape stored in the heterogeneous modal stack. */
+export type ModalCallback = (
+  event: string,
+  close: () => void,
+  ...args: unknown[]
+) => Promise<void> | void;
+
+export interface ModalStackElement {
   component: Component;
-  type: T;
-  callback: ModalCallbackType<T>;
+  type: ModalType;
+  callback: ModalCallback;
   loading: Ref<boolean>;
-  data: ModalDatas[T];
+  data: ModalDataMap[ModalType];
 }
 
 export enum ModalType {
@@ -29,7 +36,7 @@ export type ModalEvents = {
   [ModalType.TextInput]: "cancel" | "submit";
 };
 
-export type ModalDatas = {
+export type ModalDataMap = {
   [ModalType.Confirmation]: {
     title: string;
     description: string;
@@ -57,18 +64,19 @@ const modalComponents: { [key in ModalType]: Component } = {
 
 export function createModal<T extends ModalType>(
   type: T,
-  data: ModalDatas[T],
+  data: ModalDataMap[T],
   callback: ModalCallbackType<T>,
 ) {
   const modalStack = useModalStack();
   modalStack.value.push({
     type,
     component: modalComponents[type],
+    // The owning component invokes the callback with its own event union.
+    callback: callback as ModalCallback,
     data,
-    callback,
     loading: ref(false),
   });
 }
 
 export const useModalStack = () =>
-  useState<Array<ModalStackElement<any>>>("modal-stack", () => []);
+  useState<Array<ModalStackElement>>("modal-stack", () => []);

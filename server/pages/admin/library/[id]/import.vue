@@ -320,6 +320,7 @@
     </div>
     <output
       v-else-if="currentlySelectedVersion != -1"
+      aria-label="Loading"
       class="inline-flex text-zinc-100 font-display font-semibold items-center gap-x-4"
     >
       {{ $t("library.admin.import.version.loadingVersion") }}

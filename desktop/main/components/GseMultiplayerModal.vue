@@ -101,17 +101,17 @@
         <div class="flex gap-x-3">
           <button
             type="button"
-            @click="handleLaunchWithRoom"
             class="flex-1 inline-flex justify-center items-center gap-x-2 rounded-md bg-purple-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-purple-500 transition uppercase font-display"
+            @click="handleLaunchWithRoom"
           >
             <PlayIcon class="size-4" />
             Launch With Room
           </button>
           <button
             type="button"
-            @click="handleLeaveRoom"
             :disabled="isLoading"
             class="inline-flex justify-center items-center rounded-md bg-zinc-800 px-4 py-2 text-sm font-semibold text-red-400 hover:text-red-300 hover:bg-zinc-700 transition"
+            @click="handleLeaveRoom"
           >
             Leave Room
           </button>
@@ -161,9 +161,9 @@
 
           <button
             type="button"
-            @click="handleHostRoom"
             :disabled="isLoading || !consent"
             class="w-full inline-flex justify-center items-center gap-x-2 rounded-md bg-purple-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-purple-500 disabled:opacity-50 transition"
+            @click="handleHostRoom"
           >
             <PlusIcon class="size-4" />
             <span>Create &amp; Host Room</span>
@@ -178,8 +178,8 @@
             </h4>
             <button
               type="button"
-              @click="() => fetchRooms()"
               class="text-xs text-purple-400 hover:text-purple-300 inline-flex items-center gap-x-1"
+              @click="() => fetchRooms()"
             >
               <ArrowPathIcon
                 class="size-3"
@@ -224,9 +224,9 @@
 
               <button
                 type="button"
-                @click="() => handleJoinRoom(room.id)"
                 :disabled="isLoading || !consent"
                 class="rounded bg-zinc-800 px-3 py-1.5 text-xs font-medium text-purple-300 hover:bg-purple-600 hover:text-white transition disabled:opacity-50"
+                @click="() => handleJoinRoom(room.id)"
               >
                 Join
               </button>

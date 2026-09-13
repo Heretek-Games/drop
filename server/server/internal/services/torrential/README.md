@@ -12,7 +12,7 @@ Each message is prefixed with an 8 byte little-endian unsigned integer that dict
 
 **Note: "Query" is the old name for a DropBound message**
 
-The service allows you to configure a series of query processors that match based on type and recieve the raw message to deserialize themselves. They can optionally return a response message, which automatically gets returned and wrapped.
+The service allows you to configure a series of query processors that match based on type and receive the raw message to deserialize themselves. They can optionally return a response message, which automatically gets returned and wrapped.
 
 ## message ids
 

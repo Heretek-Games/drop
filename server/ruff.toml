@@ -1,0 +1,32 @@
+# Ruff configuration for the server's Python tooling (dev-tools/).
+# Run:  cd server && ruff check dev-tools && ruff format dev-tools
+# Hooks run ruff on staged *.py files; CI runs the same command.
+target-version = "py314"
+line-length = 88
+include = ["dev-tools/**/*.py"]
+
+[lint]
+select = [
+  "E",     # pycodestyle errors
+  "F",     # pyflakes
+  "W",     # pycodestyle warnings
+  "I",     # import sorting
+  "UP",    # pyupgrade
+  "B",     # flake8-bugbear
+  "SIM",   # flake8-simplify (collapsible-if etc.)
+  "C901",  # mccabe complexity
+  "PLR0912", # too many branches
+  "PLR0915", # too many statements
+  "ARG",   # unused arguments
+  "F541",  # f-string without placeholders (Sonar S3457)
+]
+ignore = [
+  "E501", # line length is handled by ruff format where possible
+]
+
+[lint.mccabe]
+max-complexity = 15
+
+[lint.pylint]
+max-branches = 15
+max-statements = 60

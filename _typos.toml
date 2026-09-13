@@ -1,0 +1,24 @@
+# Project-specific words that typos would otherwise flag, and files it should
+# not scan (binary fixtures).
+[files]
+extend-exclude = [
+  "sites/promo/public/key.gpg",
+  "server/i18n/locales/**",
+  # Historical changelog quotes old commit messages verbatim.
+  "desktop/changelog.md",
+  # Historical Prisma migrations are immutable (checksummed) and generated
+  # build output is not source.
+  "server/prisma/migrations/**",
+  "server/.output/**",
+  "**/target/**",
+  "**/dist/**",
+  "**/.nuxt/**",
+]
+
+[default.extend-words]
+# Auth "mechanism" (AuthMec enum) shorthand used across the server.
+Mek = "Mek"
+# Rust enum variant name; "unparseable" is intentional.
+Unparseable = "Unparseable"
+# Steam API field name.
+packageid = "packageid"

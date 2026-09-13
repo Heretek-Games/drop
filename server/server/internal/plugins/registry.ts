@@ -76,15 +76,14 @@ export class PluginRegistry {
         `plugin '${manifest.id}' version ${manifest.version} does not match pinned ${entry.version}`,
       );
     }
-    if (entry.checksum) {
-      if (
-        !SHA256_HEX_PATTERN.test(entry.checksum) ||
-        !constantTimeEqual(entry.checksum, digest)
-      ) {
-        throw new Error(
-          `plugin '${manifest.id}' checksum does not match the registry`,
-        );
-      }
+    if (
+      entry.checksum &&
+      (!SHA256_HEX_PATTERN.test(entry.checksum) ||
+        !constantTimeEqual(entry.checksum, digest))
+    ) {
+      throw new Error(
+        `plugin '${manifest.id}' checksum does not match the registry`,
+      );
     }
   }
 }

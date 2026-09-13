@@ -28,9 +28,9 @@
           >
             <LoadingButton
               :loading="props.loading"
-              @click="emit('event', 'close')"
               type="submit"
               class="w-full sm:w-fit"
+              @click="emit('event', 'close')"
             >
               {{ props.data.buttonText ?? "Close" }}
             </LoadingButton>
@@ -43,7 +43,7 @@
 
 <script setup lang="ts">
 import type {
-  ModalDatas,
+  ModalDataMap,
   ModalEvents,
   ModalType,
 } from "../composables/modal-stack";
@@ -51,7 +51,7 @@ import type {
 const props = defineProps<{
   zHeight: number;
   loading: boolean;
-  data: ModalDatas[ModalType.Notification];
+  data: ModalDataMap[ModalType.Notification];
 }>();
 const emit = defineEmits<{
   (e: "event", v: ModalEvents[ModalType.Notification]): void;

@@ -51,7 +51,7 @@
 <script setup lang="ts">
 import { Dialog, TransitionChild, TransitionRoot } from "@headlessui/vue";
 
-const open: Ref<boolean> = defineModel<boolean>() as any;
+const open = defineModel<boolean>({ default: false });
 const props = defineProps<{ sizeClass?: string }>();
 
 function close() {

@@ -5,16 +5,16 @@
     >
     <div class="mt-2">
       <input
+        id="launch"
+        v-model="model.launchTemplate"
         type="text"
         name="launch"
-        id="launch"
         class="block w-full rounded-md bg-zinc-800 px-3 py-1.5 text-base text-zinc-100 outline-1 -outline-offset-1 outline-zinc-800 placeholder:text-zinc-400 focus:outline-2 focus:-outline-offset-2 focus:outline-blue-600 sm:text-sm/6"
         placeholder="{}"
         aria-describedby="launch-description"
-        v-model="model.launchTemplate"
       />
     </div>
-    <p class="mt-2 text-sm text-zinc-400" id="launch-description">
+    <p id="launch-description" class="mt-2 text-sm text-zinc-400">
       Override the launch string. Passed to system's default shell, and replaces
       "{}" with the command to start the game.
       <span class="font-semibold text-zinc-200"
@@ -22,7 +22,7 @@
       >
     </p>
 
-    <ProtonSelector v-model="model" v-if="$props.protonEnabled" />
+    <ProtonSelector v-if="$props.protonEnabled" v-model="model" />
     <HandlerSelector v-model="model" :game-id="$props.gameId" />
   </div>
 </template>
@@ -34,7 +34,7 @@ import HandlerSelector from "./HandlerSelector.vue";
 
 const model = defineModel<GameVersion["userConfiguration"]>({ required: true });
 
-const props = defineProps<{
+defineProps<{
   protonEnabled: boolean;
   gameId: string;
 }>();

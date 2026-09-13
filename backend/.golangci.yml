@@ -15,6 +15,14 @@ linters:
     - staticcheck
     - ineffassign
     - unused
+    - gocognit # cognitive complexity (Sonar S3776 equivalent)
+    - gocyclo
+    - misspell
+  settings:
+    gocognit:
+      min-complexity: 15
+    gocyclo:
+      min-complexity: 15
   exclusions:
     rules:
       - path: _test\.go

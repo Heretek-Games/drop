@@ -292,7 +292,7 @@ function buildToggleProxy(param: "developed" | "published") {
     });
   }
   return new Proxy({} as { [key: string]: boolean }, {
-    get(_target, prop, _reciever) {
+    get(_target, prop, _receiver) {
       return company.value[param].includes(prop.toString());
     },
     set(_target, prop, value) {

@@ -3277,7 +3277,6 @@ dependencies = [
  "anyhow",
  "bincode",
  "doc-comment",
- "log",
  "native_model_macro",
  "rmp-serde",
  "serde",

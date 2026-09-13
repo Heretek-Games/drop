@@ -37,8 +37,6 @@
 import { Switch } from "@headlessui/vue";
 import { invoke } from "@tauri-apps/api/core";
 
-defineProps<{}>();
-
 const autostartEnabled = ref<boolean>(false);
 
 // Load initial state

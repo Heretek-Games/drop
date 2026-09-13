@@ -10,8 +10,8 @@ async function checkOffline() {
 <template>
   <button
     type="button"
-    @click="checkOffline"
     class="transition inline-flex items-center rounded-sm px-4 py-1.5 bg-zinc-900 text-sm text-zinc-400 gap-x-2"
+    @click="checkOffline"
   >
     <div class="relative">
       <CloudIcon class="h-5 z-50 text-zinc-500" />

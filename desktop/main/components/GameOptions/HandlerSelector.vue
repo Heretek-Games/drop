@@ -1,9 +1,9 @@
 <template>
   <Listbox
-    as="div"
-    v-model="model.overrideHandler"
-    class="mt-6"
     v-if="handlers.length > 1"
+    v-model="model.overrideHandler"
+    as="div"
+    class="mt-6"
   >
     <ListboxLabel class="block text-sm/6 font-medium text-white"
       >Launch method</ListboxLabel
@@ -37,9 +37,9 @@
           class="absolute z-10 mt-1 max-h-60 w-full overflow-auto rounded-md bg-zinc-800 py-1 text-base outline-1 -outline-offset-1 outline-white/10 sm:text-sm"
         >
           <ListboxOption
+            v-slot="{ active, selected }"
             as="template"
             :value="undefined"
-            v-slot="{ active, selected }"
           >
             <li
               :class="[
@@ -70,11 +70,11 @@
             </li>
           </ListboxOption>
           <ListboxOption
-            as="template"
             v-for="handler in handlers"
             :key="handler.id"
-            :value="handler.id"
             v-slot="{ active, selected }"
+            as="template"
+            :value="handler.id"
           >
             <li
               :class="[

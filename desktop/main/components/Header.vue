@@ -9,6 +9,7 @@
           <ol class="inline-flex items-center gap-x-6">
             <NuxtLink
               v-for="(nav, navIdx) in navigation"
+              :key="nav.route"
               :class="[
                 'transition  uppercase font-display font-semibold text-md',
                 navIdx === currentNavigation
@@ -23,19 +24,20 @@
         </nav>
       </div>
       <div
-        @mousedown="() => window.startDragging()"
         class="flex cursor-pointer grow h-full"
+        role="presentation"
+        @mousedown="() => window.startDragging()"
       />
       <div class="inline-flex items-center">
         <ol class="inline-flex gap-3">
           <HeaderProtonSupportWidget />
           <HeaderQueueWidget :object="currentQueueObject" />
-          <li v-for="(item, itemIdx) in quickActions">
+          <li v-for="(item, itemIdx) in quickActions" :key="itemIdx">
             <HeaderWidget
-              @click="item.action"
               :notifications="item.notifications"
+              @click="item.action"
             >
-              <component class="h-5" :is="item.icon" />
+              <component :is="item.icon" class="h-5" />
             </HeaderWidget>
           </li>
           <OfflineHeaderWidget v-if="state?.status === AppStatus.Offline" />

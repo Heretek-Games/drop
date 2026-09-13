@@ -13,8 +13,8 @@
           />
         </div>
         <input
-          type="text"
           v-model="searchQuery"
+          type="text"
           aria-label="Search library"
           class="block w-full rounded-lg border-0 bg-zinc-800/50 py-2 pl-10 pr-3 text-zinc-100 placeholder:text-zinc-500 focus:bg-zinc-800 focus:ring-2 focus:ring-inset focus:ring-blue-500 sm:text-sm sm:leading-6"
           placeholder="Search library..."
@@ -22,8 +22,8 @@
       </div>
       <button
         type="button"
-        @click="() => calculateGames(true, true)"
         class="p-1 flex items-center justify-center transition-transform duration-300 size-10 hover:scale-110 active:scale-90 rounded-lg bg-zinc-800/50 text-zinc-100"
+        @click="() => calculateGames(true, true)"
       >
         <ArrowPathIcon class="size-4" />
       </button>
@@ -35,16 +35,16 @@
       class="flex flex-col gap-y-1.5 h-full"
     >
       <Disclosure
-        as="div"
         v-for="(nav, navIndex) in filteredNavigation"
         :key="nav.id"
+        v-slot="{ open }"
+        as="div"
         :class="[
           'first:pt-0 last:pb-0',
           nav.tools && !filteredNavigation[navIndex - 1]?.tools
             ? 'mt-auto'
             : '',
         ]"
-        v-slot="{ open }"
         :default-open="nav.deft"
       >
         <dt>
@@ -69,7 +69,7 @@
         <DisclosurePanel as="dd" class="mt-2 flex flex-col gap-y-1.5">
           <NuxtLink
             v-for="item in nav.items"
-            :key="nav.id"
+            :key="item.id"
             :class="[
               'transition-all duration-300 rounded-lg flex items-center px-1 py-0.5 hover:scale-105 active:scale-95 hover:shadow-lg hover:shadow-zinc-950/50',
               currentNavigation == item.id
@@ -117,7 +117,7 @@
       v-if="loading"
       class="h-full grow flex p-8 justify-center text-zinc-100"
     >
-      <output>
+      <output aria-label="Loading">
         <svg
           aria-hidden="true"
           class="w-6 h-6 text-transparent animate-spin fill-zinc-600"
@@ -155,7 +155,6 @@ import {
   type Game,
   type GameStatus,
 } from "~/types";
-import { TransitionGroup } from "vue";
 import { listen } from "@tauri-apps/api/event";
 
 // Style information
@@ -343,9 +342,9 @@ const filteredNavigation = computed(() => {
     .filter((e) => e.items.length > 0);
 });
 
-listen("update_library", async (event) => {
+listen("update_library", async () => {
   console.log("Updating library");
-  let oldNavigation = currentNavigation.value;
+  const oldNavigation = currentNavigation.value;
   await calculateGames(false, true);
   if (oldNavigation !== currentNavigation.value) {
     router.push("/library");

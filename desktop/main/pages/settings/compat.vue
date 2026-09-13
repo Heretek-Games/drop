@@ -117,8 +117,8 @@
                   class="py-4 pr-3 pl-4 text-sm font-medium inline-flex items-center gap-x-2 whitespace-nowrap text-white sm:pl-0"
                 >
                   <DefaultProtonButton
-                    :path="path.path"
                     v-model="paths.data.value!.default"
+                    :path="path.path"
                   />
                   {{ path.name }}
                 </td>
@@ -157,9 +157,9 @@
       </div>
       <div class="mt-4 sm:mt-0 sm:ml-16 sm:flex-none">
         <button
-          @click="pickLayerModal = true"
           type="button"
           class="block rounded-md bg-blue-500 px-3 py-2 text-center text-sm font-semibold text-white shadow-xs hover:bg-blue-400 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500"
+          @click="pickLayerModal = true"
         >
           Add layer
         </button>
@@ -197,8 +197,8 @@
                   class="py-4 pr-3 pl-4 text-sm font-medium inline-flex items-center gap-x-2 whitespace-nowrap text-white sm:pl-0"
                 >
                   <DefaultProtonButton
-                    :path="path.path"
                     v-model="paths.data.value!.default"
+                    :path="path.path"
                   />
                   {{ path.name }}
                 </td>
@@ -210,8 +210,8 @@
                 >
                   <button
                     type="button"
-                    @click="() => deleteCustom(pathIdx)"
                     class="text-red-400 hover:text-red-300"
+                    @click="() => deleteCustom(pathIdx)"
                   >
                     Delete<span class="sr-only"></span>
                   </button>
@@ -268,19 +268,19 @@
     </template>
     <template #buttons>
       <LoadingButton
-        @click="() => add()"
         :loading="false"
         :disabled="!path"
         type="submit"
         class="ml-2 w-full sm:w-fit"
+        @click="() => add()"
       >
         Add
       </LoadingButton>
       <button
+        ref="cancelButtonRef"
         type="button"
         class="mt-3 inline-flex w-full justify-center rounded-md bg-zinc-800 px-3 py-2 text-sm font-semibold text-zinc-100 shadow-sm ring-1 ring-inset ring-zinc-700 hover:bg-zinc-900 sm:mt-0 sm:w-auto"
         @click="cancel"
-        ref="cancelButtonRef"
       >
         Cancel
       </button>

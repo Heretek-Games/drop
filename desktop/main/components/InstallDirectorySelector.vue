@@ -1,5 +1,5 @@
 <template>
-  <Listbox as="div" v-model="installDir">
+  <Listbox v-model="installDir" as="div">
     <ListboxLabel class="block text-sm/6 font-medium text-zinc-100"
       >Install to</ListboxLabel
     >
@@ -24,11 +24,11 @@
           class="absolute z-10 mt-1 max-h-60 w-full overflow-auto rounded-md bg-zinc-900 py-1 text-base shadow-lg ring-1 ring-black ring-opacity-5 focus:outline-none sm:text-sm"
         >
           <ListboxOption
-            as="template"
             v-for="(dir, dirIdx) in installDirs"
             :key="dir"
-            :value="dirIdx"
             v-slot="{ active, selected }"
+            as="template"
+            :value="dirIdx"
           >
             <li
               :class="[

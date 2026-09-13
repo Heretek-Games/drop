@@ -227,9 +227,7 @@
   </ModalTemplate>
 </template>
 
-<script lang="ts">
-const runningPipelines = new Set<string>();
-</script>
+<script lang="ts"></script>
 
 <script setup lang="ts">
 import { invoke } from "@tauri-apps/api/core";
@@ -244,6 +242,7 @@ import {
   WrenchIcon,
 } from "@heroicons/vue/20/solid";
 import type { PipelineCompletedEvent, PipelineProgressEvent } from "~/types";
+const runningPipelines = new Set<string>();
 
 const props = defineProps<{
   gameId: string;
@@ -251,8 +250,8 @@ const props = defineProps<{
 }>();
 
 const emit = defineEmits<{
-  (e: "play"): void;
-  (e: "fallback"): void;
+  play: [];
+  fallback: [];
 }>();
 
 const isOpen = defineModel<boolean>({ default: false });

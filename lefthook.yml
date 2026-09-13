@@ -1,5 +1,7 @@
 # Lefthook git hooks for the Drop monorepo.
 # Docs: https://lefthook.dev
+# Toolchain: mise install (see .mise.toml); scripts/run-tool.sh resolves tools
+# from mise and fails with an actionable message rather than skipping a check.
 # Escape hatches: git commit/push --no-verify, or LEFTHOOK=0
 #
 # Commands with a glob that matches no staged files are skipped entirely,
@@ -30,16 +32,42 @@ pre-commit:
       glob: "*.{ts,tsx,vue,go}"
       run: pnpm exec ast-grep scan {staged_files}
 
-    # Secret scan on the diff about to be committed. Warns if the binary is
-    # missing locally — CI enforces this authoritatively (security.yml).
+    # Shell scripts (pairs with the analysis CI shellcheck job).
+    shellcheck:
+      glob: "*.{sh,bash}"
+      run: scripts/run-tool.sh shellcheck {staged_files}
+
+    # Dockerfile best practices (pairs with the analysis CI hadolint job).
+    hadolint:
+      glob: "Dockerfile*"
+      run: scripts/run-tool.sh hadolint {staged_files}
+
+    # GitHub Actions workflows (pairs with the analysis CI actionlint job).
+    actionlint:
+      glob: "**/.github/workflows/*.{yml,yaml}"
+      run: scripts/run-tool.sh actionlint {staged_files}
+
+    # Python dev tooling: lint + format (ruff is the source of truth).
+    ruff:
+      glob: "*.py"
+      run: scripts/run-tool.sh ruff check --fix {staged_files} && scripts/run-tool.sh ruff format {staged_files}
+      stage_fixed: true
+
+    # Spell check (exclusions for locales/migrations live in _typos.toml).
+    # Runs repo-wide because typos only applies its exclusion config when
+    # walking directories, not when given explicit file arguments.
+    typos:
+      run: scripts/run-tool.sh typos
+
+    # Secret scan on the diff about to be committed. CI enforces too (security.yml).
     gitleaks:
-      run: |
-        if command -v gitleaks >/dev/null 2>&1; then
-          gitleaks protect --staged --redact --verbose
-        else
-          echo "::warning:: gitleaks not installed locally; CI enforces. Install: brew install gitleaks"
-          exit 0
-        fi
+      run: scripts/run-tool.sh gitleaks protect --staged --redact --verbose
+
+commit-msg:
+  commands:
+    # Conventional Commits (AGENTS.md §7).
+    commitlint:
+      run: pnpm exec commitlint --edit {1}
 
 pre-push:
   parallel: true
@@ -50,9 +78,31 @@ pre-push:
       glob: "server/**/*.{ts,tsx,vue}"
       run: pnpm run typecheck
 
-    # Per-crate clippy over changed crates only (-D warnings, matching droplet-ci).
+    # Full server lint (eslint + prettier), matching the server-ci lint job.
+    server-lint:
+      glob: "server/**/*.{js,cjs,mjs,ts,tsx,vue}"
+      run: pnpm -C server run lint
+
+    # Frontend workspaces (eslint with the shared Sonar-equivalent rules).
+    desktop-lint:
+      glob: "desktop/main/**/*.{js,cjs,mjs,ts,tsx,vue}"
+      run: pnpm -C desktop/main run lint
+
+    base-lint:
+      glob: "libraries/base/**/*.{js,cjs,mjs,ts,tsx,vue}"
+      run: pnpm -C libraries/base run lint
+
+    promo-lint:
+      glob: "sites/promo/**/*.{js,cjs,mjs,ts,tsx}"
+      run: pnpm -C sites/promo run lint
+
+    docs-lint:
+      glob: "sites/docs/**/*.{js,cjs,mjs,ts,tsx,astro}"
+      run: pnpm -C sites/docs run lint
+
+    # Per-crate fmt + clippy over changed crates only (-D warnings, matching CI).
     # desktop/src-tauri is excluded locally (needs Tauri system libs); CI covers it.
-    clippy:
+    rust:
       glob: "*.rs"
       run: ./scripts/clippy-changed.sh
 
@@ -70,5 +120,27 @@ pre-push:
         fi
 
     # Report-only by design (rollout phase): prints findings, never fails.
+    # Promotion to blocking is tracked in AGENTS.md (needs export triage).
     knip:
       run: pnpm exec knip --reporter compact || true
+
+    # Early local signal from the Sonar engine; the remote analysis (and its
+    # 30-day new-code gate) remains authoritative. Never blocks the push.
+    sonar:
+      glob: "**/*.{js,cjs,mjs,ts,tsx,vue,py,sh,bash,yml,yaml,go,rs}"
+      run: |
+        sonar_bin="$(command -v sonar || true)"
+        if [ -z "$sonar_bin" ] && [ -x "$HOME/.local/bin/sonar" ]; then
+          sonar_bin="$HOME/.local/bin/sonar"
+        fi
+        if [ -z "$sonar_bin" ]; then
+          echo "sonar: CLI not installed locally; remote analysis is authoritative"
+          exit 0
+        fi
+        if [ ! -f "$HOME/.config/sonar/env" ]; then
+          echo "sonar: not authenticated locally (missing ~/.config/sonar/env); skipping"
+          exit 0
+        fi
+        # shellcheck disable=SC1091
+        . "$HOME/.config/sonar/env"
+        "$sonar_bin" analyze --base origin/develop --force -p Heretek-Games_drop || true

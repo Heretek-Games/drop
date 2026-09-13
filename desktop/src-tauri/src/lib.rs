@@ -250,7 +250,7 @@ pub fn run() {
             auth_initiate,
             auth_initiate_code,
             retry_connect,
-            manual_recieve_handshake,
+            manual_receive_handshake,
             sign_out,
             // Remote
             use_remote,
@@ -352,12 +352,12 @@ pub fn run() {
                     let url = match binding.first() {
                         Some(url) => url,
                         None => {
-                            warn!("No value recieved from deep link. Is this a drop server?");
+                            warn!("No value received from deep link. Is this a drop server?");
                             return;
                         }
                     };
                     if let Some("handshake") = url.host_str() {
-                        tauri::async_runtime::spawn(recieve_handshake(
+                        tauri::async_runtime::spawn(receive_handshake(
                             handle.clone(),
                             url.path().to_string(),
                         ));
@@ -529,11 +529,11 @@ fn run_on_tray<T: FnOnce()>(f: T) {
 }
 
 // TODO: Refactor
-pub async fn recieve_handshake(app: AppHandle, path: String) {
+pub async fn receive_handshake(app: AppHandle, path: String) {
     // Tell the app we're processing
     app_emit!(&app, "auth/processing", ());
 
-    let handshake_result = recieve_handshake_logic(&app, path).await;
+    let handshake_result = receive_handshake_logic(&app, path).await;
     if let Err(e) = handshake_result {
         warn!("error with authentication: {e}");
         app_emit!(&app, "auth/failed", e.to_string());
@@ -558,7 +558,7 @@ pub async fn recieve_handshake(app: AppHandle, path: String) {
 }
 
 // TODO: Refactor
-async fn recieve_handshake_logic(app: &AppHandle, path: String) -> Result<(), RemoteAccessError> {
+async fn receive_handshake_logic(app: &AppHandle, path: String) -> Result<(), RemoteAccessError> {
     let path_chunks: Vec<&str> = path.split('/').collect();
     if path_chunks.len() != 3 {
         app_emit!(app, "auth/failed", ());

@@ -254,12 +254,16 @@
     <!-- Create Group Modal -->
     <div
       v-if="showCreateGroup"
-      class="fixed inset-0 z-50 flex items-center justify-center bg-zinc-950/70"
-      @click.self="showCreateGroup = false"
-      @keydown.escape="showCreateGroup = false"
+      class="fixed inset-0 z-50 flex items-center justify-center"
     >
+      <button
+        type="button"
+        class="absolute inset-0 bg-zinc-950/70"
+        aria-label="Close"
+        @click="showCreateGroup = false"
+      ></button>
       <div
-        class="rounded-lg border border-zinc-700 bg-zinc-900 p-6 shadow-xl w-full max-w-md"
+        class="relative rounded-lg border border-zinc-700 bg-zinc-900 p-6 shadow-xl w-full max-w-md"
       >
         <h2 class="text-lg font-semibold text-zinc-100 mb-4">
           {{ $t("users.admin.groups.createGroup") }}
@@ -317,12 +321,16 @@
     <!-- Delete Group Confirm Modal -->
     <div
       v-if="groupToDelete"
-      class="fixed inset-0 z-50 flex items-center justify-center bg-zinc-950/70"
-      @click.self="groupToDelete = undefined"
-      @keydown.escape="groupToDelete = undefined"
+      class="fixed inset-0 z-50 flex items-center justify-center"
     >
+      <button
+        type="button"
+        class="absolute inset-0 bg-zinc-950/70"
+        aria-label="Close"
+        @click="groupToDelete = undefined"
+      ></button>
       <div
-        class="rounded-lg border border-zinc-700 bg-zinc-900 p-6 shadow-xl w-full max-w-md"
+        class="relative rounded-lg border border-zinc-700 bg-zinc-900 p-6 shadow-xl w-full max-w-md"
       >
         <h2 class="text-lg font-semibold text-zinc-100 mb-4">
           {{ $t("users.admin.groups.deleteGroup") }}
@@ -386,6 +394,14 @@ const showCreateGroup = ref(false);
 const newGroupName = ref("");
 const newGroupDescription = ref("");
 const groupToDelete = ref<GroupListItem | undefined>();
+
+// Close whichever modal is open on Escape. A window listener keeps the modal
+// containers free of interactive handlers (vue-a11y/no-static-element-interactions).
+useEventListener("keydown", (event) => {
+  if (event.key !== "Escape") return;
+  if (showCreateGroup.value) showCreateGroup.value = false;
+  if (groupToDelete.value) groupToDelete.value = undefined;
+});
 
 const fetchGroups = async () => {
   groups.value = await $dropFetch<GroupListItem[]>("/api/v1/admin/groups");

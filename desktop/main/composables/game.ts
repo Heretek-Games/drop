@@ -37,7 +37,7 @@ export const useGame = async (gameId: string) => {
         const payload: {
           status: RawGameStatus;
           version?: GameVersion;
-        } = event.payload as any;
+        } = event.payload as { status: RawGameStatus; version?: GameVersion };
         statusRef.value = parseStatus(payload.status);
 
         /**

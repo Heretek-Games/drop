@@ -9,13 +9,13 @@
     "build": "nuxt build .playground",
     "generate": "nuxt generate .playground",
     "preview": "nuxt preview .playground",
-    "lint": "eslint ."
+    "lint": "pnpm run dev:prepare && eslint ."
   },
   "devDependencies": {
     "@nuxt/eslint": "latest",
     "eslint": "^10.9.1",
     "nuxt": "^4.5.2",
-    "typescript": "^7.0.2",
+    "typescript": "^5.9.3",
     "vue": "latest"
   },
   "dependencies": {

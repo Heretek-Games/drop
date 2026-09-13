@@ -14,7 +14,7 @@
         <slot />
         <div class="mt-10">
           <div>
-            <output v-if="loading">
+            <output v-if="loading" aria-label="Loading">
               <svg
                 aria-hidden="true"
                 class="w-5 h-5 text-transparent animate-spin fill-white"
@@ -33,12 +33,12 @@
               </svg>
               <span class="sr-only">Loading...</span>
             </output>
-            <span class="inline-flex gap-x-8 items-center" v-else>
+            <span v-else class="inline-flex gap-x-8 items-center">
               <button
                 type="button"
-                @click="() => authWrapper_wrapper()"
                 :disabled="loading"
                 class="px-3 py-1 inline-flex items-center gap-x-2 bg-zinc-700 rounded text-sm text-left font-semibold leading-7 text-white"
+                @click="() => authWrapper_wrapper()"
               >
                 Sign in with your browser
                 <ArrowTopRightOnSquareIcon class="size-4" />
@@ -52,7 +52,7 @@
             </span>
           </div>
 
-          <div class="mt-5" v-if="offerManual">
+          <div v-if="offerManual" class="mt-5">
             <h1 class="text-zinc-100 font-semibold">Having trouble?</h1>
             <p class="mt-1 text-zinc-400 text-sm">
               You can manually enter the token from your web browser.
@@ -60,18 +60,18 @@
             <div class="inline-flex gap-x-1 mt-2 w-full">
               <input
                 id="token"
+                v-model="manualToken"
                 name="token"
                 type="text"
                 autocomplete="off"
                 required
                 aria-label="Token"
                 class="grow block w-full rounded-md border-0 py-1.5 px-3 shadow-sm bg-zinc-950/20 text-zinc-300 ring-1 ring-inset ring-zinc-800 placeholder:text-zinc-400 focus:ring-2 focus:ring-inset focus:ring-blue-600 sm:text-sm sm:leading-6"
-                v-model="manualToken"
               />
               <LoadingButton
                 :loading="manualLoading"
-                @click="() => continueManual_wrapper()"
                 class="w-fit"
+                @click="() => continueManual_wrapper()"
               >
                 Submit
               </LoadingButton>
@@ -161,7 +161,7 @@ function authWrapper_wrapper() {
 }
 
 async function continueManual() {
-  await invoke("manual_recieve_handshake", { token: manualToken.value });
+  await invoke("manual_receive_handshake", { token: manualToken.value });
 }
 
 function continueManual_wrapper() {
