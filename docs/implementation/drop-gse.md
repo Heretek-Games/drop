@@ -170,6 +170,8 @@ Owner: TBD · Depends on: M0, M2
       (`GseRoom`, `GseCredential`; migration `20260914000000_add_gse_rooms`),
       with a `StorageRoomPersistence` fallback for tests/dev; host lease
       (heartbeat 15s / expiry 45s, first-writer-wins) in `room-store.ts`.
+      **Verified end-to-end against a real Postgres** via
+      `dev-tools/gse-prisma-check.ts` (create/credential/join/list/close).
 - [x] **B3** Membership-gated credential issuance, cached per member, rotated
       10 min before expiry, never in the public room view. WS peers are
       authenticated at the upgrade; `gse:credential` delivers the secret only to
@@ -253,6 +255,7 @@ The checklists above are authoritative. Summary:
 - **M5 complete** — bundle format, signer, checksum/signature, install/remove,
   registry pinning, admin docs, license review.
 
-**Verification:** `pnpm --filter drop run test` (31 server tests/3 files),
-`cargo test -p gse-engine` (19), `cargo check -p process --tests` and
-`-p drop-app`, plus `nuxt typecheck` — all green.
+**Verification:** `pnpm --filter drop run test` (server tests), `cargo test -p
+gse-engine` (19), `cargo check -p process --tests` and `-p drop-app`, plus
+`nuxt typecheck` — all green. The Prisma room store was also run against a live
+Postgres (`prisma migrate deploy` + `dev-tools/gse-prisma-check.ts`).
