@@ -190,9 +190,11 @@ jobs:
       - name: Install dependencies
         run: pnpm install --ignore-scripts
       - name: Lint commit messages
+        env:
+          BASE_REF: ${{ github.base_ref }}
         run: >-
           pnpm exec commitlint
-          --from "origin/${{ github.base_ref }}"
+          --from "origin/$BASE_REF"
           --to HEAD
 
   ruff:
