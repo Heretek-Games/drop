@@ -15,10 +15,18 @@ on:
 
 # This workflow will trigger on each push to the `release` branch to create or update a GitHub release, build your app, and upload the artifacts to the release.
 
+# Least privilege for every job; publish-tauri overrides with contents: write.
+permissions:
+  contents: read
+
 jobs:
   publish-tauri:
     permissions:
       contents: write
+    env:
+      # Read at job scope so the macOS steps can gate on presence without
+      # referencing `secrets` in a step-level `if` (not an allowed context).
+      APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
     strategy:
       fail-fast: false
       matrix:
@@ -70,9 +78,8 @@ jobs:
         # webkitgtk 4.0 is for Tauri v1 - webkitgtk 4.1 is for Tauri v2.
 
       - name: Import Apple Developer Certificate
-        if: matrix.platform == 'macos-14'
+        if: matrix.platform == 'macos-14' && env.APPLE_CERTIFICATE != ''
         env:
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
           KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
         run: |
@@ -90,7 +97,11 @@ jobs:
 
           echo "Created keychain"
 
-          curl https://droposs.org/drop.der --output drop.der
+          # SECURITY: this fetches a code-signing trust anchor from a third-party
+          # domain at build time. Vendor this certificate into the repo (or pin
+          # its SHA-256) so a compromise of droposs.org cannot inject a trusted
+          # root into the signing keychain.
+          curl --fail --silent --show-error https://droposs.org/drop.der --output drop.der
 
           # swiftc libs/appletrust/add-certificate.swift
           # ./add-certificate drop.der
@@ -109,7 +120,7 @@ jobs:
           security find-identity -v -p codesigning build.keychain
 
       - name: Verify Certificate
-        if: matrix.platform == 'macos-14'
+        if: matrix.platform == 'macos-14' && env.APPLE_CERTIFICATE != ''
         run: |
           CERT_INFO=$(security find-identity -v -p codesigning build.keychain | grep "Drop OSS")
           CERT_ID=$(echo "$CERT_INFO" | awk -F'"' '{print $2}')
