@@ -425,8 +425,10 @@ export class PluginManager {
 
   private assertPluginCompatible(plugin: ServerPlugin): void {
     const { id, apiVersion, trust } = plugin.metadata;
-    if (apiVersion !== undefined && apiVersion !== PLUGIN_API_VERSION) {
-      throw new PluginApiVersionError(id, PLUGIN_API_VERSION, apiVersion);
+    // Every plugin must declare the contract version it was built against;
+    // omitting it previously bypassed the compatibility gate entirely.
+    if (apiVersion !== PLUGIN_API_VERSION) {
+      throw new PluginApiVersionError(id, PLUGIN_API_VERSION, apiVersion ?? 0);
     }
     if (trust !== undefined && trust !== "trusted") {
       throw new PluginTrustError(id, trust);

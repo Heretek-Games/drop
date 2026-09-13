@@ -9,7 +9,7 @@ const InstallBundle = type({
     id: "string>0",
     name: "string>0",
     version: "string>0",
-    "apiVersion?": "number",
+    apiVersion: "number",
     "entry?": "string",
     "capabilities?": "string[]",
     "checksum?": "string",

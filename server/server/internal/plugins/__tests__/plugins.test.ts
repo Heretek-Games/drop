@@ -85,6 +85,7 @@ test("PluginManager registers and initializes plugin", async () => {
       id: "test-plugin",
       name: "Test Plugin",
       version: "1.0.0",
+      apiVersion: PLUGIN_API_VERSION,
     },
     init: (_ctx: PluginContext) => {
       initCalled = true;
@@ -108,6 +109,7 @@ test("PluginManager route registration and pattern matching", async () => {
       id: "route-plugin",
       name: "Route Plugin",
       version: "1.0.0",
+      apiVersion: PLUGIN_API_VERSION,
       capabilities: ["routes"],
     },
     init: (ctx: PluginContext) => {
@@ -220,6 +222,7 @@ test("PluginManager togglePlugin enables and disables plugin lifecycle", async (
       id: "toggle-test",
       name: "Toggle Test Plugin",
       version: "1.0.0",
+      apiVersion: PLUGIN_API_VERSION,
       capabilities: ["routes"],
     },
     init: (ctx: PluginContext) => {
@@ -287,6 +290,7 @@ test("PluginManager fails closed when using an undeclared capability", async () 
       id: "no-routes-plugin",
       name: "No Routes Plugin",
       version: "1.0.0",
+      apiVersion: PLUGIN_API_VERSION,
       capabilities: ["storage"], // explicitly lacks "routes"
     },
     init: (ctx: PluginContext) => {
@@ -313,6 +317,7 @@ test("PluginManager denies storage and network without capabilities", async () =
       id: "no-io-plugin",
       name: "No IO Plugin",
       version: "1.0.0",
+      apiVersion: PLUGIN_API_VERSION,
       capabilities: ["routes"],
     },
     async init(ctx: PluginContext) {
@@ -339,7 +344,12 @@ test("PluginManager defaults to denying capabilities when none are declared", as
     ["undeclared-plugin", undefined],
     ["empty-capabilities-plugin", [] as PluginCapability[]],
   ] as const) {
-    const metadata: PluginMetadata = { id, name: id, version: "1.0.0" };
+    const metadata: PluginMetadata = {
+      id,
+      name: id,
+      version: "1.0.0",
+      apiVersion: PLUGIN_API_VERSION,
+    };
     if (capabilities) metadata.capabilities = [...capabilities];
     const plugin: ServerPlugin = {
       metadata,
@@ -426,6 +436,7 @@ test("PluginManager rejects unsupported trust tiers", async () => {
       id: "sandboxed-plugin",
       name: "Sandboxed",
       version: "1.0.0",
+      apiVersion: PLUGIN_API_VERSION,
       trust: "sandboxed",
     },
     init: () => {},
@@ -446,6 +457,7 @@ test("PluginManager runs storage migrations to the declared version", async () =
       id: "migrating-plugin",
       name: "Migrating",
       version: "1.0.0",
+      apiVersion: PLUGIN_API_VERSION,
       capabilities: ["storage"],
       storageVersion: 2,
     },
@@ -790,6 +802,7 @@ test("PluginManager routes WebSocket messages and enforces the capability", asyn
       id: "ws-plugin",
       name: "WS Plugin",
       version: "1.0.0",
+      apiVersion: PLUGIN_API_VERSION,
       capabilities: ["websocket"],
     },
     init: (ctx: PluginContext) => {
@@ -821,6 +834,7 @@ test("PluginManager routes WebSocket messages and enforces the capability", asyn
       id: "no-ws",
       name: "No WS",
       version: "1.0.0",
+      apiVersion: PLUGIN_API_VERSION,
       capabilities: ["routes"],
     },
     init: (ctx: PluginContext) => {
