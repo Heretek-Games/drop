@@ -256,7 +256,7 @@ The checklists above are authoritative. Summary:
 - **M0 complete** — versioned contract, fail-closed capabilities (incl.
   `websocket` + `registerWebSocket`), trust model, storage migrations, test
   runner + CI, PATCH fix, frozen A↔B contract.
-- **M1 (A1–A6) complete** — `gse-engine` crate (19 tests); the interceptor
+- **M1 (A1–A6) complete** — `gse-engine` crate (22 tests); the interceptor
   applies a staged payload and restores on exit; `gse_fetch_release` downloads
   and verifies an emulator release into `<dataDir>/tools/gse/`.
 - **M2 complete** — opt-in room-gated interceptor, crash recovery, AppID
@@ -272,9 +272,15 @@ The checklists above are authoritative. Summary:
   registry pinning, admin docs, license review.
 
 **Verification:** `pnpm --filter drop run test` (server tests), `cargo test -p
-gse-engine` (19), `cargo check -p process --tests` and `-p drop-app`, plus
+gse-engine` (22), `cargo check -p process --tests` and `-p drop-app`, plus
 `nuxt typecheck` — all green. The Prisma room store was run against a live
 Postgres (`prisma migrate deploy` + `dev-tools/gse-prisma-check.ts`), and the
-ZTNET backend was verified end-to-end against a live ZTNET + ZeroTier controller
-(`dev-tools/ztnet-bootstrap.mjs` then `dev-tools/gse-ztnet-check.ts` →
-provision/authorize/teardown OK, member assigned `10.242.x.x`).
+ZTNET backend is exercised on every push to `develop` by the `ZTNET E2E`
+workflow (`dev-tools/ztnet-bootstrap.mjs` then `dev-tools/gse-ztnet-check.ts`
+→ provision/authorize/teardown OK, member assigned `10.242.x.x`). Desktop
+plugin calls authenticate with the client JWT (`internal/plugins/auth.ts`).
+
+Known follow-ups: Tailscale member revocation is a no-op until keys expire and
+teardown after a coordinator restart relies on key TTLs; credential secrets are
+redacted at rest, so credentials are re-issued rather than cached; mesh HTTP
+calls have no timeouts yet.

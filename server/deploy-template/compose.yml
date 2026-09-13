@@ -33,6 +33,8 @@ services:
     environment:
       - DATABASE_URL=postgres://drop:drop@postgres:5432/drop
       # Optional depot chunk cache (requires CHUNK_CACHE_DIR and the matching
-      # volume mount above). Content-addressed, best-effort, disabled by default.
+      # volume mount above). Content-addressed, best-effort, disabled by
+      # default; defaults to 20 GiB when CHUNK_CACHE_MAX_BYTES is unset and
+      # verifies each chunk's SHA-256 before caching it.
       # - CHUNK_CACHE_DIR=/fast-block/drop-chunk-cache
       # - CHUNK_CACHE_MAX_BYTES=500000000000

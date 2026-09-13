@@ -71,8 +71,11 @@ drop:
 
 The cache is **off unless `CHUNK_CACHE_DIR` is set**, is best-effort (a cache
 failure never fails a download), and stores **plaintext game data unencrypted
-at rest** on that disk. Make sure `CHUNK_CACHE_MAX_BYTES` leaves headroom on
-the mount.
+at rest** on that disk. Chunk bytes are SHA-256 verified against their cache
+key before being published, so a corrupt source never becomes a cached entry.
+When `CHUNK_CACHE_MAX_BYTES` is unset it defaults to 20 GiB; a value of `0`
+means unbounded (discouraged). Make sure the limit leaves headroom on the
+mount.
 :::
 
 :::tip Optional: peer-to-peer multiplayer
