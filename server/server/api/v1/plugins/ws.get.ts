@@ -14,6 +14,37 @@ const MAX_SUBSCRIPTIONS_PER_PEER = 32;
 
 export default defineWebSocketHandler({
   async open(peer) {
+    // Browsers always send Origin on WebSocket handshakes. Reject cross-site
+    // upgrades so a malicious page cannot ride a victim's session cookie into
+    // the plugin gateway (non-browser clients omit Origin and are allowed).
+    const origin = peer.request.headers.get("origin");
+    if (origin) {
+      const allowedHosts = new Set<string>();
+      const host = peer.request.headers.get("host");
+      if (host) allowedHosts.add(host);
+      const externalUrl = process.env.EXTERNAL_URL;
+      if (externalUrl) {
+        try {
+          allowedHosts.add(new URL(externalUrl).host);
+        } catch {
+          // Ignore malformed configuration here; auth still applies below.
+        }
+      }
+      let originHost: string | undefined;
+      try {
+        originHost = new URL(origin).host;
+      } catch {
+        originHost = undefined;
+      }
+      if (
+        !originHost ||
+        (allowedHosts.size > 0 && !allowedHosts.has(originHost))
+      ) {
+        peer.close();
+        return;
+      }
+    }
+
     clientSubscriptions.set(peer.id, []);
     clientChannels.set(peer.id, new Set());
 

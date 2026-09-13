@@ -267,7 +267,13 @@ export class SessionHandler {
     const token = randomUUID();
     // TODO: we should probably switch to jwts to minimize possibility of someone
     // trying to guess a session id (jwts let us sign + encrypt stuff in a std way)
-    setCookie(h3, dropTokenCookieName, token, { expires: expiresAt });
+    setCookie(h3, dropTokenCookieName, token, {
+      expires: expiresAt,
+      path: "/",
+      httpOnly: true,
+      sameSite: "lax",
+      secure: (process.env.EXTERNAL_URL ?? "").startsWith("https://"),
+    });
     return token;
   }
 }
