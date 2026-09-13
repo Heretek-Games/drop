@@ -85,7 +85,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     openssl \
     p7zip-full \
     && rm -rf /var/lib/apt/lists/*
-RUN pnpm install prisma@7.7.0 --global --ignore-scripts
+RUN pnpm install prisma@7.10.0 --global --ignore-scripts
 # init prisma to download all required files
 RUN pnpm prisma init
 
