@@ -93,7 +93,7 @@
           v-if="createLoading"
           class="absolute inset-0 bg-zinc-950 flex items-center justify-center"
         >
-          <output>
+          <div role="status">
             <svg
               aria-hidden="true"
               class="size-8 text-transparent animate-spin fill-white"
@@ -111,7 +111,7 @@
               />
             </svg>
             <span class="sr-only">{{ $t("common.srLoading") }}</span>
-          </output>
+          </div>
         </div>
       </div>
     </Combobox>

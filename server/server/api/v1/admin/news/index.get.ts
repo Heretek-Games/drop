@@ -12,16 +12,15 @@ export default defineEventHandler(async (h3) => {
   const query = getQuery(h3);
 
   const orderBy = query.order as "asc" | "desc";
-  if (orderBy) {
-    if (typeof orderBy !== "string" || !["asc", "desc"].includes(orderBy))
-      throw createError({ statusCode: 400, statusMessage: "Invalid order" });
-  }
+  if (
+    orderBy &&
+    (typeof orderBy !== "string" || !["asc", "desc"].includes(orderBy))
+  )
+    throw createError({ statusCode: 400, statusMessage: "Invalid order" });
 
   const tags = query.tags as string[] | undefined;
-  if (tags) {
-    if (typeof tags !== "object" || !Array.isArray(tags))
-      throw createError({ statusCode: 400, statusMessage: "Invalid tags" });
-  }
+  if (tags && (typeof tags !== "object" || !Array.isArray(tags)))
+    throw createError({ statusCode: 400, statusMessage: "Invalid tags" });
 
   const options = {
     take: Number.parseInt(query.limit as string),

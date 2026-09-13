@@ -269,10 +269,8 @@ const emulator = computed({
 function updatePlatform(v: Platform | undefined) {
   if (!v) return;
   launchConfiguration.value.platform = v;
-  if (emulator.value) {
-    if (emulator.value.platform !== v) {
-      emulator.value = undefined;
-    }
+  if (emulator.value && emulator.value.platform !== v) {
+    emulator.value = undefined;
   }
 }
 

@@ -391,15 +391,14 @@ export class PluginManager {
   private verifyBundleBytes(bytes: Buffer, manifest: PluginManifest): string {
     const digest = createHash("sha256").update(bytes).digest("hex");
 
-    if (manifest.checksum) {
-      if (
-        !SHA256_HEX_PATTERN.test(manifest.checksum) ||
-        !constantTimeEqual(manifest.checksum, digest)
-      ) {
-        throw new Error(
-          `bundle checksum mismatch for ${manifest.id}: expected ${manifest.checksum}, found ${digest}`,
-        );
-      }
+    if (
+      manifest.checksum &&
+      (!SHA256_HEX_PATTERN.test(manifest.checksum) ||
+        !constantTimeEqual(manifest.checksum, digest))
+    ) {
+      throw new Error(
+        `bundle checksum mismatch for ${manifest.id}: expected ${manifest.checksum}, found ${digest}`,
+      );
     }
     return digest;
   }
