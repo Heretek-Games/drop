@@ -550,11 +550,16 @@ export class PluginManager {
     if (!isValidPluginId(manifest.id)) {
       throw new Error(`invalid plugin id '${manifest.id}'`);
     }
-    const entryRel = manifest.entry || "index.js";
+
+    // Check if plugin targets server (default true for v1 or when targets includes 'server')
+    const targets = manifest.targets;
+    const targetsServer = !targets || targets.includes("server");
+    const entryRel = manifest.server?.entry || manifest.entry || "index.js";
     const entryPath = path.resolve(pluginDir, entryRel);
     if (
-      path.isAbsolute(entryRel) ||
-      !isInsideDirectory(path.resolve(pluginDir), entryPath)
+      targetsServer &&
+      (path.isAbsolute(entryRel) ||
+        !isInsideDirectory(path.resolve(pluginDir), entryPath))
     ) {
       throw new Error(`invalid entry path '${entryRel}'`);
     }
@@ -564,43 +569,80 @@ export class PluginManager {
     // manifest, not after the module has already executed.
     this.assertManifestCompatible(manifest);
 
-    const entryDigest = this.verifyBundleBytes(
-      await fs.readFile(entryPath),
-      manifest,
-    );
+    let entryDigest = "";
+    if (targetsServer) {
+      entryDigest = this.verifyBundleBytes(
+        await fs.readFile(entryPath),
+        manifest,
+      );
+    }
     const aggregateDigest = await this.verifyBundleFiles(pluginDir, manifest);
     this.verifyBundleSignature(aggregateDigest, entryDigest, manifest);
     (await this.getRegistry()).check(manifest, entryDigest);
 
-    // Version the import URL by the whole-bundle digest so a change to any
-    // file (not just the entry) forces a fresh entry module instance.
-    const mod = await import(
-      `${pathToFileURL(entryPath).href}?v=${aggregateDigest}`
-    );
-    const pluginInstance = resolvePluginExport(mod);
-
-    if (!pluginInstance) {
-      throw new Error(
-        `Plugin module at ${entryPath} does not export a valid ServerPlugin`,
+    if (targetsServer) {
+      // Version the import URL by the whole-bundle digest so a change to any
+      // file (not just the entry) forces a fresh entry module instance.
+      const mod = await import(
+        `${pathToFileURL(entryPath).href}?v=${aggregateDigest}`
       );
+      const pluginInstance = resolvePluginExport(mod);
+
+      if (!pluginInstance) {
+        throw new Error(
+          `Plugin module at ${entryPath} does not export a valid ServerPlugin`,
+        );
+      }
+
+      pluginInstance.metadata = {
+        ...manifest,
+        builtin: false,
+      };
+
+      await this.registerPlugin(pluginInstance);
+    } else {
+      // Client-only plugin registered for discovery and asset serving
+      const clientOnlyPlugin: ServerPlugin = {
+        metadata: {
+          ...manifest,
+          builtin: false,
+        },
+        init: () => {},
+      };
+      await this.registerPlugin(clientOnlyPlugin);
     }
+  }
 
-    pluginInstance.metadata = {
-      ...manifest,
-      builtin: false,
-    };
-
-    await this.registerPlugin(pluginInstance);
+  /**
+   * Resolve an on-disk asset for client-side bundle serving.
+   * Path traversal or symlink escapes outside the plugin directory return null.
+   */
+  async getClientAssetPath(
+    pluginId: string,
+    assetRelPath: string,
+  ): Promise<string | null> {
+    if (!isValidPluginId(pluginId)) return null;
+    const pluginDir = path.join(await this.getPluginsDirectory(), pluginId);
+    const resolved = path.resolve(pluginDir, assetRelPath);
+    if (!isInsideDirectory(path.resolve(pluginDir), resolved)) {
+      return null;
+    }
+    try {
+      const s = await fs.stat(resolved);
+      if (s.isFile()) {
+        return resolved;
+      }
+    } catch {
+      return null;
+    }
+    return null;
   }
 
   /** Validate a manifest's declared contract before importing its module. */
   private assertManifestCompatible(manifest: PluginManifest): void {
-    if (manifest.apiVersion !== PLUGIN_API_VERSION) {
-      throw new PluginApiVersionError(
-        manifest.id,
-        PLUGIN_API_VERSION,
-        manifest.apiVersion ?? 0,
-      );
+    const version = manifest.apiVersion ?? 0;
+    if (version !== 1 && version !== PLUGIN_API_VERSION) {
+      throw new PluginApiVersionError(manifest.id, PLUGIN_API_VERSION, version);
     }
     if (manifest.trust !== undefined && manifest.trust !== "trusted") {
       throw new PluginTrustError(manifest.id, manifest.trust);
@@ -609,10 +651,11 @@ export class PluginManager {
 
   private assertPluginCompatible(plugin: ServerPlugin): void {
     const { id, apiVersion, trust } = plugin.metadata;
+    const version = apiVersion ?? 0;
     // Every plugin must declare the contract version it was built against;
     // omitting it previously bypassed the compatibility gate entirely.
-    if (apiVersion !== PLUGIN_API_VERSION) {
-      throw new PluginApiVersionError(id, PLUGIN_API_VERSION, apiVersion ?? 0);
+    if (version !== 1 && version !== PLUGIN_API_VERSION) {
+      throw new PluginApiVersionError(id, PLUGIN_API_VERSION, version);
     }
     if (trust !== undefined && trust !== "trusted") {
       throw new PluginTrustError(id, trust);

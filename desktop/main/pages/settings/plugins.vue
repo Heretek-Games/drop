@@ -167,6 +167,50 @@
       </div>
     </div>
   </div>
+
+  <!-- For Developers Section (Playnite-inspired) -->
+  <div
+    class="mt-8 rounded-xl border border-zinc-800 bg-zinc-850/60 p-5 space-y-3"
+  >
+    <div class="flex items-center justify-between">
+      <div>
+        <h4 class="text-sm font-semibold text-zinc-100">
+          For Developers: Load Unpacked Plugin
+        </h4>
+        <p class="text-xs text-zinc-400">
+          Load a development plugin bundle directly from a local path without
+          packaging.
+        </p>
+      </div>
+      <span
+        class="rounded bg-amber-500/10 border border-amber-500/30 px-2 py-0.5 text-[10px] font-medium text-amber-300 uppercase tracking-wide"
+      >
+        Developer Mode
+      </span>
+    </div>
+    <div class="flex gap-x-2">
+      <input
+        v-model="devPluginPath"
+        type="text"
+        aria-label="Development plugin path"
+        class="flex-1 rounded-md bg-zinc-900 border border-zinc-700 px-3 py-2 text-xs font-mono text-zinc-200 focus:outline-none focus:border-purple-500"
+        placeholder="/path/to/my-plugin/dist/client/index.js"
+      />
+      <button
+        type="button"
+        :disabled="isLoading || !devPluginPath.trim()"
+        class="inline-flex items-center rounded-md bg-amber-600 px-3 py-2 text-xs font-semibold text-white hover:bg-amber-500 transition disabled:opacity-50"
+        @click="handleLoadDevPlugin"
+      >
+        Load
+      </button>
+    </div>
+  </div>
+
+  <div class="mt-8 space-y-4">
+    <h4 class="text-sm font-semibold text-zinc-100">Extension Settings</h4>
+    <PluginSlot name="settings:tabs" />
+  </div>
 </template>
 
 <script setup lang="ts">
@@ -178,6 +222,24 @@ import {
   XCircleIcon,
 } from "@heroicons/vue/20/solid";
 import { invoke } from "@tauri-apps/api/core";
+import { clientPluginManager } from "~/internal/plugins/ClientPluginManager";
+
+const devPluginPath = ref("");
+
+async function handleLoadDevPlugin() {
+  if (!devPluginPath.value.trim()) return;
+  isLoading.value = true;
+  error.value = null;
+  try {
+    const p = devPluginPath.value.trim();
+    await clientPluginManager.loadFromUrl("dev-plugin", p);
+    devPluginPath.value = "";
+  } catch (e) {
+    error.value = `Failed to load dev plugin: ${e}`;
+  } finally {
+    isLoading.value = false;
+  }
+}
 
 export interface PluginItem {
   id: string;

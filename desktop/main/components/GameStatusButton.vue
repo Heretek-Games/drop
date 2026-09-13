@@ -62,6 +62,26 @@
               </button>
             </MenuItem>
 
+            <MenuItem
+              v-for="action in playActions"
+              :key="action.id"
+              v-slot="{ active }"
+            >
+              <button
+                type="button"
+                :class="[
+                  active
+                    ? 'bg-zinc-800 text-zinc-100 outline-none'
+                    : 'text-zinc-300',
+                  'w-full px-4 py-2 text-sm inline-flex justify-between items-center',
+                ]"
+                @click="() => emit('playAction', action)"
+              >
+                {{ action.name }}
+                <PlayIcon class="size-4 text-purple-400" />
+              </button>
+            </MenuItem>
+
             <MenuItem v-if="showOptions" v-slot="{ active }">
               <button
                 type="button"
@@ -116,13 +136,18 @@ import {
   InstalledType,
   type GameStatus,
 } from "~/types.js";
+import type { PlayAction } from "~/internal/plugins/types";
 import { Menu, MenuButton, MenuItem, MenuItems } from "@headlessui/vue";
 import { Cog6ToothIcon, TrashIcon } from "@heroicons/vue/24/outline";
 
-const props = defineProps<{ status: GameStatus }>();
+const props = defineProps<{
+  status: GameStatus;
+  playActions?: PlayAction[];
+}>();
 const emit = defineEmits<{
   install: [];
   launch: [];
+  playAction: [action: PlayAction];
   queue: [];
   uninstall: [];
   kill: [];

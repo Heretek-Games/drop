@@ -1,0 +1,63 @@
+import { invoke } from "@tauri-apps/api/core";
+import { clientPluginManager } from "~/internal/plugins/ClientPluginManager";
+
+interface RemotePluginInfo {
+  id: string;
+  name: string;
+  version: string;
+  status: "active" | "disabled" | "error";
+  targets?: string[];
+  client?: {
+    entry?: string;
+    css?: string;
+  };
+}
+
+async function loadRemotePlugin(plugin: RemotePluginInfo): Promise<void> {
+  if (plugin.status !== "active") return;
+  const targets = plugin.targets;
+  if (targets && !targets.includes("client")) return;
+
+  const entry = plugin.client?.entry || "bundle.js";
+  const clientJsUrl = `/api/v1/plugins/${plugin.id}/client/${entry}`;
+  const clientCssUrl = plugin.client?.css
+    ? `/api/v1/plugins/${plugin.id}/client/${plugin.client.css}`
+    : undefined;
+
+  try {
+    await clientPluginManager.loadFromUrl(plugin.id, clientJsUrl, clientCssUrl);
+  } catch (loadErr) {
+    console.debug(
+      `Plugin ${plugin.id} has no client bundle or failed to load:`,
+      loadErr,
+    );
+  }
+}
+
+async function fetchRemotePlugins(): Promise<RemotePluginInfo[]> {
+  const res = await invoke<{ plugins: RemotePluginInfo[] }>("plugin_request", {
+    pluginId: "",
+    method: "GET",
+    path: "",
+  }).catch(() => null);
+
+  return res && Array.isArray(res.plugins) ? res.plugins : [];
+}
+
+export default defineNuxtPlugin(async () => {
+  if (clientPluginManager.isInitialized.value) return;
+
+  try {
+    const plugins = await fetchRemotePlugins();
+    for (const plugin of plugins) {
+      await loadRemotePlugin(plugin);
+    }
+  } catch (err) {
+    console.debug(
+      "Could not reach Drop server for client plugin discovery:",
+      err,
+    );
+  } finally {
+    clientPluginManager.isInitialized.value = true;
+  }
+});

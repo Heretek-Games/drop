@@ -1398,6 +1398,7 @@ dependencies = [
  "serde_json",
  "serde_with",
  "sha1",
+ "sha2",
  "shared_child",
  "sysinfo 0.36.1",
  "tar",

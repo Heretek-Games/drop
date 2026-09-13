@@ -6,12 +6,37 @@ import type { Logger } from "pino";
  * contract changes incompatibly. Plugins declare the version they were built
  * against in `metadata.apiVersion`; mismatches are rejected at registration.
  */
-export const PLUGIN_API_VERSION = 1;
+/**
+ * Current plugin API version. Bump this when `PluginContext` or the manifest
+ * contract changes incompatibly. Plugins declare the version they were built
+ * against in `metadata.apiVersion`; mismatches are rejected at registration.
+ */
+export const PLUGIN_API_VERSION = 2;
+export const SUPPORTED_API_VERSIONS = [1, 2] as const;
 
 export type HttpMethod = "GET" | "POST" | "PUT" | "DELETE" | "PATCH" | "ALL";
 
-export type PluginCapability =
+export type PluginTarget = "server" | "client";
+
+export type PluginCategory = "generic" | "metadata" | "storage" | "multiplayer";
+
+export type ServerCapability =
   "routes" | "storage" | "websocket" | "events" | "network";
+
+export type ClientCapability =
+  | "ui:slot"
+  | "ui:play-action"
+  | "ui:context-menu"
+  | "ui:sidebar"
+  | "ui:topbar"
+  | "game:launch-hook"
+  | "game:fs"
+  | "game:scan"
+  | "client:storage"
+  | "client:ws"
+  | "system:sidecar";
+
+export type PluginCapability = ServerCapability | ClientCapability;
 
 /**
  * Trust tier. Only `"trusted"` is supported today: plugins run in-process with
@@ -36,6 +61,8 @@ export interface PluginMetadata {
   trust?: PluginTrust;
   /** Declared storage schema version; drives `migrateStorage`. */
   storageVersion?: number;
+  category?: PluginCategory;
+  targets?: PluginTarget[];
   capabilities?: PluginCapability[];
   enabled?: boolean;
 }
@@ -56,6 +83,18 @@ export interface PluginManifest extends PluginMetadata {
    * Set `DROP_PLUGIN_REQUIRE_SIGNATURE=true` to reject unsigned bundles.
    */
   signature?: string;
+
+  server?: {
+    entry: string;
+    capabilities: ServerCapability[];
+    storageVersion?: number;
+  };
+  client?: {
+    entry: string;
+    css?: string;
+    capabilities: ClientCapability[];
+    slots?: Array<{ slot: string; component: string }>;
+  };
 }
 
 export interface PluginStateRecord {

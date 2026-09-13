@@ -63,6 +63,7 @@ mod collections;
 mod download_manager;
 mod downloads;
 mod games;
+mod plugins;
 mod process;
 mod remote;
 mod scheduler;
@@ -73,6 +74,7 @@ use client::*;
 use download_manager::*;
 use downloads::*;
 use games::*;
+use plugins::*;
 use process::*;
 use remote::*;
 use settings::*;
@@ -250,6 +252,15 @@ pub fn run() {
             plugin_request,
             plugin_subscribe,
             plugin_request_ws,
+            // Client Plugins
+            plugin_game_fs_read,
+            plugin_game_fs_write,
+            plugin_game_fs_backup,
+            plugin_game_fs_restore,
+            plugin_game_fs_exists,
+            plugin_game_fs_delete,
+            plugin_game_scan_executables,
+            plugin_game_check_anticheat,
             // Library
             fetch_library,
             fetch_game,

@@ -60,14 +60,19 @@
           >
             Update available <ArrowDownTrayIcon class="size-3 text-blue-600" />
           </div>
+          <div class="mt-2 flex items-center gap-x-2">
+            <PluginSlot name="game-detail:badges" :context="{ game, status }" />
+          </div>
         </div>
 
         <div class="mt-8 flex flex-row gap-x-4 items-stretch">
           <!-- Do not add scale animations to this: https://stackoverflow.com/a/35683068 -->
           <GameStatusButton
             :status="status"
+            :play-actions="pluginPlayActions"
             @install="() => installFlow()"
             @launch="() => launch()"
+            @play-action="(action) => executeCustomPlayAction(action)"
             @queue="() => queue()"
             @uninstall="() => uninstall()"
             @kill="() => kill()"
@@ -93,11 +98,17 @@
             <BuildingStorefrontIcon class="mr-2 size-5" aria-hidden="true" />
             Store
           </NuxtLink>
+
+          <!-- Plugin Slot: Game Detail Actions (e.g. Multiplayer Button, Mod Manager) -->
+          <PluginSlot name="game-detail:actions" :context="{ game, status }" />
         </div>
       </div>
 
       <!-- Main content -->
       <div class="mt-8 w-full bg-zinc-900 px-8">
+        <!-- Plugin Slot: Game Detail Panels -->
+        <PluginSlot name="game-detail:panels" :context="{ game, status }" />
+
         <div class="grid grid-cols-[2fr,1fr] gap-8">
           <div class="space-y-6">
             <div class="bg-zinc-800/50 rounded-xl p-6 backdrop-blur-sm">
@@ -704,10 +715,15 @@ import {
 import { invoke } from "@tauri-apps/api/core";
 import { micromark } from "micromark";
 import { InstalledType } from "~/types";
+import { usePlayActions } from "~/composables/usePlugins";
+import { clientPluginManager } from "~/internal/plugins/ClientPluginManager";
+import type { PlayAction } from "~/internal/plugins/types";
 
 const route = useRoute();
 const router = useRouter();
 const id = route.params.id?.toString() ?? "";
+
+const { actions: pluginPlayActions } = usePlayActions(() => id);
 
 const { game, status, version } = await useGame(id);
 const installedData = computed(() =>
@@ -845,13 +861,52 @@ const dependencyRequiredModal = ref<
   { gameId: string; versionId: string } | undefined
 >(undefined);
 
-async function launchIndex(index: number) {
+async function executeCustomPlayAction(action: PlayAction) {
+  const gameDir =
+    status.value?.type === "Installed" ? status.value.install_dir : "";
+  const launchContext = {
+    gameId: game.id,
+    gameTitle: game.mName,
+    gameDir,
+    actionId: action.id,
+  };
+  try {
+    await action.execute(launchContext);
+  } catch (err) {
+    createModal(
+      ModalType.Notification,
+      {
+        title: `Action "${action.name}" failed`,
+        description: `Drop encountered an error: ${err}`,
+        buttonText: "Close",
+      },
+      (e, c) => c(),
+    );
+  }
+}
+
+async function launchIndex(index: number, actionId?: string) {
   launchOptions.value = undefined;
   try {
-    const result = await invoke<LaunchResult>("launch_game", {
-      id: game.id,
-      index,
-    });
+    const gameDir =
+      status.value?.type === "Installed" ? status.value.install_dir : "";
+    const launchContext = {
+      gameId: game.id,
+      gameTitle: game.mName,
+      gameDir,
+      actionId,
+    };
+
+    const result = await clientPluginManager.executeLaunchPipeline(
+      launchContext,
+      async () => {
+        return await invoke<LaunchResult>("launch_game", {
+          id: game.id,
+          index,
+        });
+      },
+    );
+
     if (result.result == "InstallRequired") {
       dependencyRequiredModal.value = {
         gameId: result.data[0],

@@ -911,3 +911,65 @@ test("sign-plugin output loads as a verified signed bundle", async () => {
     }
   }
 });
+
+test("PluginManager supports manifest v2, client targets, and getClientAssetPath", async () => {
+  const dataDir = tmpDataDir();
+  const pluginDir = path.join(dataDir, "plugins", "client-asset-demo");
+  await fs.mkdir(path.join(pluginDir, "client"), { recursive: true });
+
+  const clientJs = "export default { render() {} };\n";
+  const clientCss = ".custom-badge { color: red; }\n";
+  await fs.writeFile(path.join(pluginDir, "client", "bundle.js"), clientJs);
+  await fs.writeFile(path.join(pluginDir, "client", "bundle.css"), clientCss);
+
+  const manifest = {
+    id: "client-asset-demo",
+    name: "Client Asset Demo",
+    version: "1.0.0",
+    apiVersion: 2,
+    targets: ["client"],
+    client: {
+      entry: "client/bundle.js",
+      css: "client/bundle.css",
+      capabilities: ["ui:slot"],
+    },
+  };
+  await fs.writeFile(
+    path.join(pluginDir, "drop-plugin.json"),
+    JSON.stringify(manifest),
+  );
+
+  const manager = new PluginManager({
+    dataDir,
+    storageFactory: () => new MemoryStorage(),
+    authResolver: async () => ({}),
+  });
+
+  await manager.discoverAndLoadExternalPlugins();
+  const plugins = manager.listPlugins();
+  const found = plugins.find((p) => p.id === "client-asset-demo");
+  assert.ok(found, "client-only plugin must be registered in plugin list");
+  assert.equal(found.status, "active");
+
+  // Verify getClientAssetPath resolves legitimate files
+  const resolvedJs = await manager.getClientAssetPath(
+    "client-asset-demo",
+    "client/bundle.js",
+  );
+  assert.ok(resolvedJs);
+  assert.equal(await fs.readFile(resolvedJs, "utf-8"), clientJs);
+
+  const resolvedCss = await manager.getClientAssetPath(
+    "client-asset-demo",
+    "client/bundle.css",
+  );
+  assert.ok(resolvedCss);
+  assert.equal(await fs.readFile(resolvedCss, "utf-8"), clientCss);
+
+  // Path traversal escapes must return null
+  const escaped = await manager.getClientAssetPath(
+    "client-asset-demo",
+    "../../_state.json",
+  );
+  assert.equal(escaped, null);
+});
