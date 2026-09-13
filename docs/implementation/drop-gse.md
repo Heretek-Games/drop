@@ -220,41 +220,34 @@ Owner: TBD · Depends on: M0–M4
       version/checksum (`DROP_PLUGIN_REGISTRY`), enforced on install and load;
       tested.
 - [x] Docs: admin guide at `sites/docs/src/content/docs/admin/plugins.md`
-- [x] License review recorded (see **Licensing** below)
+- [x] License review recorded (see **Licensing** above)
 
 **Acceptance:** fresh Drop + bundle → host/join/launch with no server rebuild;
 removing the plugin leaves no dangling routes/data/backups.
 
 ---
 
-## M0 — current increment (this change)
+## Status
 
-Delivered in the working tree:
+The checklists above are authoritative. Summary:
 
-- `PluginManager` is now dependency-injectable (`dataDir`, `storageFactory`,
-  `authResolver`) and imports Drop's runtime config / ACL manager / file storage
-  **lazily**, so the module can be imported outside Nuxt.
-- `server/dev-tools/run-tests.mjs` discovers and runs `*.test.ts` through jiti
-  with the `~` alias; wired as `pnpm --filter drop run test`.
-- `plugins.test.ts` injects in-memory storage + a stub auth resolver; all 6 tests
-  pass (pipeline tests: 7 pass).
-- `remote.rs::plugin_request` now forwards `PATCH` (Settings → Plugins toggle).
-- A↔B contract frozen on both sides and consumed by
-  `useGseMultiplayer.syncRoomConfigToDisk`.
-- Removed the undeclared `uuid` dependency in `drop-gse.ts` (`node:crypto`
-  `randomUUID`); declared `jiti` for the server test script.
-- P1–P4: `PLUGIN_API_VERSION` + `apiVersion`/`trust`/`storageVersion` manifest
-  fields; fail-closed capabilities (`PluginCapabilityError`), guarded storage,
-  `ctx.fetch`; storage schema migrations; version/trust validation. Tests cover
-  each (10 plugin tests + 7 pipeline tests pass).
+- **M0 complete** — versioned contract, fail-closed capabilities (incl.
+  `websocket` + `registerWebSocket`), trust model, storage migrations, test
+  runner + CI, PATCH fix, frozen A↔B contract.
+- **M1 (A1–A6) complete** — `gse-engine` crate (19 tests); the interceptor
+  applies a staged payload and restores on exit. Open: a release manager that
+  populates `<dataDir>/tools/gse/`, and the desktop install/update UI.
+- **M2 complete** — opt-in room-gated interceptor, crash recovery, AppID
+  pinning end-to-end, compat registry + consent UI.
+- **M3 — all except B6 client-side VPN validators**: durable store, host lease,
+  credential rotation + WS hint, ZeroTier provision/authorize/teardown,
+  hardening.
+- **M4 — B5 partial**: `TailscaleBackend` + provisioner interface tested; live
+  WS UI + client WS consumption done; P6 ABI decision recorded. Real tailnet
+  provisioning needs tailnet-policy/embedded-crate access.
+- **M5 complete** — bundle format, signer, checksum/signature, install/remove,
+  registry pinning, admin docs, license review.
 
-M0 complete. **M1 engine (A1–A6) landed** as the `desktop/src-tauri/gse-engine`
-crate (19 unit tests pass) and the `process` interceptor now delegates to it and
-applies a staged payload when one is present. Remaining in M1: a release manager
-that populates `<dataDir>/tools/gse/`, and the desktop install/update UI.
-
-M2 A7/A8 landed: the interceptor is opt-in (room config or `DROP_GSE_ENABLE`)
-and the client restores interrupted sessions on startup. Remaining: A9/A10 and
-the in-app consent toggle.
-
-Next: A9/A10, then M3 (Part B mesh backend).
+**Verification:** `pnpm --filter drop run test` (31 server tests/3 files),
+`cargo test -p gse-engine` (19), `cargo check -p process --tests` and
+`-p drop-app`, plus `nuxt typecheck` — all green.
