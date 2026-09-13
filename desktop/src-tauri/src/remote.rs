@@ -199,3 +199,93 @@ pub fn auth_initiate_code(app: AppHandle) -> Result<String, RemoteAccessError> {
 pub async fn manual_recieve_handshake(app: AppHandle, token: String) {
     recieve_handshake(app, format!("handshake/{token}")).await;
 }
+
+#[tauri::command]
+pub async fn plugin_request(
+    plugin_id: String,
+    method: String,
+    path: String,
+    body: Option<serde_json::Value>,
+) -> Result<serde_json::Value, RemoteAccessError> {
+    let base_url = {
+        let db_lock = borrow_db_checked();
+        Url::parse(&db_lock.base_url.clone())?
+    };
+
+    let trimmed = path.trim_start_matches('/');
+    let target_path = if trimmed.is_empty() {
+        format!("/api/v1/plugins/{plugin_id}")
+    } else {
+        format!("/api/v1/plugins/{plugin_id}/{trimmed}")
+    };
+    let endpoint = base_url.join(&target_path)?;
+
+    let auth_header = generate_authorization_header();
+    let client = DROP_CLIENT_ASYNC.clone();
+
+    let request_builder = match method.to_uppercase().as_str() {
+        "POST" => {
+            let mut req = client.post(endpoint.to_string()).header("Authorization", auth_header);
+            if let Some(b) = body {
+                req = req.json(&b);
+            }
+            req
+        }
+        "DELETE" => {
+            let mut req = client.delete(endpoint.to_string()).header("Authorization", auth_header);
+            if let Some(b) = body {
+                req = req.json(&b);
+            }
+            req
+        }
+        _ => client.get(endpoint.to_string()).header("Authorization", auth_header),
+    };
+
+    let response = request_builder.send().await?;
+    let status = response.status();
+    if !status.is_success() {
+        let err_text = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+        return Err(RemoteAccessError::UnparseableResponse(format!(
+            "Plugin API error ({status}): {err_text}"
+        )));
+    }
+
+    let json_val = response.json::<serde_json::Value>().await?;
+    Ok(json_val)
+}
+
+#[tauri::command]
+pub fn gse_write_room_config(install_dir: String, peer_ips: Vec<String>) -> Result<(), String> {
+    let path = std::path::Path::new(&install_dir);
+    if !path.is_dir() {
+        return Err("Game install directory does not exist".to_string());
+    }
+
+    let settings_dir = path.join("steam_settings");
+    if let Err(e) = std::fs::create_dir_all(&settings_dir) {
+        return Err(format!("Failed to create steam_settings dir: {e}"));
+    }
+
+    let broadcasts_file = settings_dir.join("custom_broadcasts.txt");
+    let content = if peer_ips.is_empty() {
+        "127.0.0.1:47584\n".to_string()
+    } else {
+        let mut lines: Vec<String> = peer_ips
+            .iter()
+            .map(|ip| {
+                if ip.contains(':') {
+                    ip.to_string()
+                } else {
+                    format!("{ip}:47584")
+                }
+            })
+            .collect();
+        lines.push(String::new());
+        lines.join("\n")
+    };
+
+    std::fs::write(&broadcasts_file, content)
+        .map_err(|e| format!("Failed to write custom_broadcasts.txt: {e}"))?;
+    Ok(())
+}
+

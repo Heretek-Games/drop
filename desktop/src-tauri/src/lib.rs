@@ -29,7 +29,7 @@ use ::client::{
 };
 use ::download_manager::DownloadManagerWrapper;
 use ::games::scan::scan_install_dirs;
-use ::process::ProcessManagerWrapper;
+use ::process::{ProcessManagerWrapper, gse_interceptor::GseLaunchInterceptor};
 use ::remote::{
     auth::{self, HandshakeRequestBody, HandshakeResponse, generate_authorization_header},
     cache::clear_cached_object,
@@ -111,6 +111,9 @@ async fn setup(handle: AppHandle) -> AppState {
     log4rs::init_config(config).expect("Failed to initialise log4rs");
 
     ProcessManagerWrapper::init(handle.clone());
+    ProcessManagerWrapper::register_global_interceptor(std::sync::Arc::new(
+        GseLaunchInterceptor::new(),
+    ));
     DownloadManagerWrapper::init(handle.clone());
 
     debug!("checking if database is set up");
@@ -244,6 +247,8 @@ pub fn run() {
             gen_drop_url,
             fetch_drop_object,
             check_online,
+            plugin_request,
+            gse_write_room_config,
             // Library
             fetch_library,
             fetch_game,

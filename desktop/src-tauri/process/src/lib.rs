@@ -18,6 +18,7 @@ pub static PROCESS_MANAGER: ProcessManagerWrapper = ProcessManagerWrapper::new()
 pub mod compat;
 pub mod error;
 pub mod format;
+pub mod gse_interceptor;
 pub mod interceptor;
 mod parser;
 pub mod process_handlers;
@@ -36,6 +37,9 @@ impl ProcessManagerWrapper {
     }
     pub fn register_interceptor(&self, interceptor: Arc<dyn crate::interceptor::LaunchInterceptor>) {
         self.lock().register_interceptor(interceptor);
+    }
+    pub fn register_global_interceptor(interceptor: Arc<dyn crate::interceptor::LaunchInterceptor>) {
+        PROCESS_MANAGER.register_interceptor(interceptor);
     }
     pub fn unregister_interceptor(&self, id: &str) {
         self.lock().unregister_interceptor(id);
