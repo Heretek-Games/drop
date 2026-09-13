@@ -3,6 +3,7 @@ use std::{sync::nonpoison::Mutex, time::Duration};
 use client::app_status::AppStatus;
 use database::{borrow_db_checked, borrow_db_mut_checked};
 use futures_lite::StreamExt;
+use futures_util::SinkExt;
 use log::{debug, warn};
 use remote::{
     auth::{auth_initiate_logic, generate_authorization_header},
@@ -259,6 +260,49 @@ pub async fn plugin_request(
 
     let json_val = response.json::<serde_json::Value>().await?;
     Ok(json_val)
+}
+
+/// Subscribe to a plugin WebSocket channel and emit each event as `plugin:event`.
+///
+/// The Tauri webview cannot reach the Drop server directly (TLS/auth), so the
+/// Rust side owns the socket and forwards decoded JSON to the frontend.
+#[tauri::command]
+pub fn plugin_subscribe(app: AppHandle, channel: String) -> Result<(), RemoteAccessError> {
+    let ws_url = generate_url(&["/api/v1/plugins/ws"], &[])?;
+    let auth_header = generate_authorization_header();
+
+    tauri::async_runtime::spawn(async move {
+        let load = async || -> Result<(), RemoteAccessError> {
+            let response = DROP_CLIENT_WS_CLIENT
+                .get(ws_url)
+                .header("Authorization", auth_header)
+                .upgrade()
+                .send()
+                .await?;
+            let mut websocket = response.into_websocket().await?;
+
+            let subscribe = serde_json::json!({ "type": "subscribe", "channel": channel });
+            websocket
+                .send(Message::Text(subscribe.to_string()))
+                .await
+                .map_err(|e| RemoteAccessError::HandshakeFailed(e.to_string()))?;
+
+            while let Some(message) = websocket.try_next().await? {
+                if let Message::Text(text) = message
+                    && let Ok(value) = serde_json::from_str::<serde_json::Value>(&text)
+                {
+                    app_emit!(&app, "plugin:event", value);
+                }
+            }
+            Ok(())
+        };
+
+        if let Err(err) = load().await {
+            warn!("plugin websocket for {channel} closed: {err}");
+        }
+    });
+
+    Ok(())
 }
 
 #[tauri::command]

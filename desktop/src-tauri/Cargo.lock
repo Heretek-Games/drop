@@ -1368,6 +1368,7 @@ dependencies = [
  "filetime",
  "futures-core",
  "futures-lite",
+ "futures-util",
  "games",
  "gethostname",
  "hex",

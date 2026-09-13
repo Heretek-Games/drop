@@ -271,6 +271,8 @@ const {
   joinRoom,
   leaveRoom,
   syncRoomConfigToDisk,
+  startLiveUpdates,
+  stopLiveUpdates,
 } = useGseMultiplayer(props.gameId);
 
 watch(
@@ -278,6 +280,9 @@ watch(
   async (open) => {
     if (open) {
       await fetchRooms();
+      await startLiveUpdates();
+    } else {
+      stopLiveUpdates();
     }
   },
   { immediate: true },

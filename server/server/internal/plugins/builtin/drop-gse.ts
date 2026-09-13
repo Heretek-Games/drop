@@ -4,6 +4,7 @@ import type { PluginContext, PluginMetadata, ServerPlugin } from "../types";
 import { CompatRegistry, compatFromEnv } from "./gse/compat";
 import { InMemoryMeshBackend, ZeroTierBackend } from "./gse/mesh";
 import { RoomStore } from "./gse/room-store";
+import { toDiscoverable } from "./gse/types";
 import type { EmulatorBinding, MeshBackend } from "./gse/types";
 
 export type {
@@ -136,7 +137,10 @@ export class DropGseServerPlugin implements ServerPlugin {
           emulator: body.emulator ?? DEFAULT_EMULATOR,
           hostUserId: context.userId,
         });
-        ctx.broadcast("gse:rooms", { type: "room_created", room });
+        ctx.broadcast("gse:rooms", {
+          type: "room_created",
+          room: toDiscoverable(room),
+        });
         ctx.logger.info(
           `Multiplayer room ${room.id} created for game ${body.gameId} by user ${context.userId}`,
         );
@@ -185,7 +189,10 @@ export class DropGseServerPlugin implements ServerPlugin {
         roomId: room.id,
         userId: context.userId,
       });
-      ctx.broadcast("gse:rooms", { type: "room_updated", room });
+      ctx.broadcast("gse:rooms", {
+        type: "room_updated",
+        room: toDiscoverable(room),
+      });
       return { room };
     });
 
@@ -237,7 +244,10 @@ export class DropGseServerPlugin implements ServerPlugin {
           context.userId,
           body.memberId,
         );
-        ctx.broadcast("gse:rooms", { type: "room_updated", room });
+        ctx.broadcast("gse:rooms", {
+          type: "room_updated",
+          room: toDiscoverable(room),
+        });
         return { room };
       } catch (err) {
         const message = String(err);

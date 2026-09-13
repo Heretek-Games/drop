@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { roomToActiveRoom } from "~/gse-contract";
 
 export interface EmulatorBinding {
@@ -44,6 +45,8 @@ export const useGseMultiplayer = (gameId: string) => {
   if (!currentRoomMap.value[gameId]) {
     currentRoomMap.value[gameId] = null;
   }
+
+  let liveUnlisten: (() => void) | null = null;
 
   const rooms = computed(() => activeRoomsMap.value[gameId] ?? []);
   const currentRoom = computed({
@@ -210,6 +213,39 @@ export const useGseMultiplayer = (gameId: string) => {
     });
   }
 
+  /**
+   * Subscribe to `gse:rooms` over the plugin WebSocket gateway. Events arrive
+   * via the Tauri `plugin:event` channel (the Rust side owns the socket).
+   */
+  async function startLiveUpdates(): Promise<void> {
+    if (liveUnlisten) return;
+    try {
+      await invoke("plugin_subscribe", { channel: "gse:rooms" });
+      liveUnlisten = await listen<{
+        channel: string;
+        data: { type?: string; roomId?: string };
+      }>("plugin:event", (event) => {
+        const payload = event.payload;
+        if (payload?.channel !== "gse:rooms") return;
+        const data = payload.data;
+        if (
+          data?.type === "room_closed" &&
+          currentRoom.value?.id === data.roomId
+        ) {
+          currentRoom.value = null;
+        }
+        void fetchRooms();
+      });
+    } catch (e) {
+      error.value = (e as string).toString();
+    }
+  }
+
+  function stopLiveUpdates(): void {
+    liveUnlisten?.();
+    liveUnlisten = null;
+  }
+
   return {
     rooms,
     currentRoom,
@@ -222,5 +258,7 @@ export const useGseMultiplayer = (gameId: string) => {
     joinRoom,
     leaveRoom,
     syncRoomConfigToDisk,
+    startLiveUpdates,
+    stopLiveUpdates,
   };
 };

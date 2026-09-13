@@ -174,11 +174,15 @@ Owner: TBD · Depends on: M3
 - [~] **B5** `TailscaleBackend` (tag provisioning + one-off ephemeral keys via
   an injected `TailscaleProvisioner`, tested). Wiring the embedded
   `desktop/src-tauri/tailscale` crate with isolated `--state=mem:` pending.
-- [ ] **B8** UI: host/join/leave/teardown + live WebSocket updates
+- [x] **B8** UI host/join/leave/teardown plus live updates: `plugin_subscribe`
+      opens the plugin WS gateway from Rust and emits `plugin:event`; the modal
+      subscribes to `gse:rooms` on open and refreshes on room events. Broadcast
+      payloads for the public channel are sanitized with `toDiscoverable`.
 - [x] **P6** Desktop extension ABI decision recorded: third-party plugins are
       server-side only; desktop work is a compiled-in first-party privileged
       tier (WASM/sidecar runtime deferred)
-- [ ] Client-side WS consumption of `gse:rooms`
+- [x] Client-side WS consumption of `gse:rooms` (via the `plugin:event`
+      Tauri channel)
 
 **Acceptance:** both backends selectable; documented/enforced plugin tiering.
 
