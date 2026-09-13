@@ -12,7 +12,7 @@ import type { RoomPersistence } from "./gse/persistence";
 import { PrismaRoomPersistence } from "./gse/prisma-persistence";
 import { RoomStore } from "./gse/room-store";
 import { ZtnetBackend } from "./gse/ztnet";
-import { isMeshMemberId, toDiscoverable } from "./gse/types";
+import { isMeshMemberId, toDiscoverable, toMemberView } from "./gse/types";
 import type { EmulatorBinding, MeshBackend } from "./gse/types";
 
 export type {
@@ -175,7 +175,8 @@ export class DropGseServerPlugin implements ServerPlugin {
           },
         });
       } catch (err) {
-        wsCtx.send({ ok: false, error: String(err) });
+        ctx.logger.warn(`Failed to issue GSE credential: ${String(err)}`);
+        wsCtx.send({ ok: false, error: "failed to issue credential" });
       }
     });
 
@@ -193,6 +194,19 @@ export class DropGseServerPlugin implements ServerPlugin {
         wsCtx.send({ ok: false, error: "room not found" });
       }
     });
+
+    // Restrict `gse:room:<id>` subscriptions to room members. Without this any
+    // authenticated peer could observe member ids/activity for any room.
+    ctx.registerSubscriptionAuthorizer(
+      (channel) => channel.startsWith("gse:room:"),
+      async (channel, auth) => {
+        if (!auth.userId) return false;
+        const room = await this.store.get(channel.slice("gse:room:".length));
+        return (
+          !!room && room.members.some((member) => member.userId === auth.userId)
+        );
+      },
+    );
 
     // Route: GET /compat — known-incompatible games/AppIDs.
     ctx.registerRoute("GET", "/compat", () => compat.info());
@@ -260,13 +274,15 @@ export class DropGseServerPlugin implements ServerPlugin {
         return { room };
       } catch (err) {
         const message = String(err);
+        ctx.logger.warn(`Failed to create GSE room: ${message}`);
+        const known = message.includes("known-incompatible");
+        const invalid = message.includes("invalid");
         throw createError({
-          statusCode: message.includes("known-incompatible")
-            ? 409
-            : message.includes("invalid")
-              ? 400
-              : 429,
-          statusMessage: message,
+          statusCode: known ? 409 : invalid ? 400 : 429,
+          // Only surface our own validation messages; backend/controller errors
+          // can carry internal URLs and are logged, not returned.
+          statusMessage:
+            known || invalid ? message : "failed to create multiplayer room",
         });
       }
     });
@@ -280,8 +296,12 @@ export class DropGseServerPlugin implements ServerPlugin {
       const isMember =
         !!context.userId &&
         room.members.some((member) => member.userId === context.userId);
-      if (isMember) return { room };
-      const { toDiscoverable } = await import("./gse/types");
+      if (isMember) {
+        // Peer node ids are revocation handles: host-only.
+        return {
+          room: toMemberView(room, context.userId === room.hostUserId),
+        };
+      }
       return { room: toDiscoverable(room) };
     });
 
@@ -310,7 +330,7 @@ export class DropGseServerPlugin implements ServerPlugin {
         type: "room_updated",
         room: toDiscoverable(room),
       });
-      return { room };
+      return { room: toMemberView(room, room.hostUserId === context.userId) };
     });
 
     // Route: POST /rooms/:id/heartbeat — host lease renewal / migration.
@@ -370,12 +390,28 @@ export class DropGseServerPlugin implements ServerPlugin {
           type: "room_updated",
           room: toDiscoverable(room),
         });
-        return { room, address };
+        return {
+          room: toMemberView(room, room.hostUserId === context.userId),
+          address,
+        };
       } catch (err) {
         const message = String(err);
+        ctx.logger.warn(`Failed to register GSE member: ${message}`);
+        if (message.includes("not a room member")) {
+          throw createError({
+            statusCode: 403,
+            statusMessage: "not a room member",
+          });
+        }
+        if (message.includes("already registered")) {
+          throw createError({
+            statusCode: 409,
+            statusMessage: "mesh node is already registered to another member",
+          });
+        }
         throw createError({
-          statusCode: message.includes("not a room member") ? 403 : 404,
-          statusMessage: message,
+          statusCode: 404,
+          statusMessage: "Room not found",
         });
       }
     });
