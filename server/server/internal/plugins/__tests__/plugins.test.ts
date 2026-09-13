@@ -6,7 +6,9 @@ import os from "node:os";
 import path from "node:path";
 import { PluginManager } from "../manager";
 import { DropGseServerPlugin } from "../builtin/drop-gse";
+import { InMemoryMeshBackend } from "../builtin/gse/mesh";
 import { StorageRoomPersistence } from "../builtin/gse/persistence";
+import { RoomStore } from "../builtin/gse/room-store";
 import { HelloWorldPlugin } from "../builtin/hello-world";
 import { PLUGIN_API_VERSION } from "../types";
 import type { PluginContext, PluginStorage, ServerPlugin } from "../types";
@@ -415,6 +417,58 @@ test("HelloWorldPlugin proves the platform is not GSE-shaped", async () => {
     mockEvent,
   )) as { pong: boolean };
   assert.equal(res.pong, true);
+});
+
+test("drop-gse distributes credentials over the authenticated WebSocket", async () => {
+  const storage = new MemoryStorage();
+  const seed = new RoomStore(
+    new StorageRoomPersistence(storage),
+    new InMemoryMeshBackend(),
+    () => Date.now(),
+  );
+  const room = await seed.create({
+    gameId: "game-1",
+    versionId: "v1",
+    emulator: {
+      flavor: "gbe_fork",
+      release: "latest",
+      releaseDigest: "sha256-default",
+    },
+    hostUserId: "user-1",
+  });
+
+  const manager = new PluginManager({
+    dataDir: tmpDataDir(),
+    storageFactory: () => storage,
+    authResolver: async () => ({}),
+  });
+  await manager.registerPlugin(
+    new DropGseServerPlugin(new StorageRoomPersistence(storage)),
+  );
+
+  const sent: unknown[] = [];
+  const handled = await manager.dispatchWebSocket(
+    "gse:credential",
+    { roomId: room.id },
+    { userId: "user-1", send: (data) => sent.push(data) },
+  );
+  assert.equal(handled, true);
+  const reply = sent[0] as {
+    ok: boolean;
+    credential?: { secret: string; address?: string };
+  };
+  assert.equal(reply.ok, true);
+  assert.ok(reply.credential?.secret);
+  assert.ok(reply.credential?.address);
+
+  // Unauthenticated peers are refused.
+  const refused: unknown[] = [];
+  await manager.dispatchWebSocket(
+    "gse:credential",
+    { roomId: room.id },
+    { userId: undefined, send: (data) => refused.push(data) },
+  );
+  assert.equal((refused[0] as { ok: boolean }).ok, false);
 });
 
 test("PluginManager routes WebSocket messages and enforces the capability", async () => {

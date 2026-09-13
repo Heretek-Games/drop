@@ -150,6 +150,23 @@ export const useGseMultiplayer = (gameId: string) => {
   async function requestCredential(
     roomId: string,
   ): Promise<{ secret: string; address?: string } | null> {
+    // Prefer authenticated WebSocket delivery; fall back to the HTTP endpoint.
+    try {
+      const res = await invoke<{
+        ok?: boolean;
+        credential?: { secret: string; address?: string };
+      }>("plugin_request_ws", {
+        channel: "gse:credential",
+        data: { roomId },
+      });
+      if (res?.credential) {
+        selfAddress.value = res.credential.address ?? null;
+        return res.credential;
+      }
+    } catch {
+      // Fall through to HTTP.
+    }
+
     try {
       const res = await invoke<{
         credential?: { secret: string; address?: string };

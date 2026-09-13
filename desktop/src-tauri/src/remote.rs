@@ -305,6 +305,49 @@ pub fn plugin_subscribe(app: AppHandle, channel: String) -> Result<(), RemoteAcc
     Ok(())
 }
 
+/// Send one message to a plugin WebSocket channel and return its reply.
+///
+/// Used for authenticated request/response flows (e.g. credential delivery)
+/// where the sandboxed webview cannot open a server WebSocket directly.
+#[tauri::command]
+pub async fn plugin_request_ws(
+    channel: String,
+    data: serde_json::Value,
+) -> Result<serde_json::Value, RemoteAccessError> {
+    let ws_url = generate_url(&["/api/v1/plugins/ws"], &[])?;
+    let auth_header = generate_authorization_header();
+
+    let response = DROP_CLIENT_WS_CLIENT
+        .get(ws_url)
+        .header("Authorization", auth_header)
+        .upgrade()
+        .send()
+        .await?;
+    let mut websocket = response.into_websocket().await?;
+
+    let request = serde_json::json!({
+        "type": "message",
+        "channel": channel,
+        "data": data,
+    });
+    websocket
+        .send(Message::Text(request.to_string()))
+        .await
+        .map_err(|e| RemoteAccessError::HandshakeFailed(e.to_string()))?;
+
+    while let Some(message) = websocket.try_next().await? {
+        if let Message::Text(text) = message {
+            let value: serde_json::Value = serde_json::from_str(&text)
+                .map_err(|e| RemoteAccessError::UnparseableResponse(e.to_string()))?;
+            return Ok(value.get("data").cloned().unwrap_or(value));
+        }
+    }
+
+    Err(RemoteAccessError::HandshakeFailed(
+        "plugin WebSocket closed before replying".to_string(),
+    ))
+}
+
 /// Download and verify an emulator release into
 /// `<dataDir>/tools/gse/<flavor>/`, where the launch interceptor picks it up.
 ///

@@ -171,9 +171,10 @@ Owner: TBD · Depends on: M0, M2
       with a `StorageRoomPersistence` fallback for tests/dev; host lease
       (heartbeat 15s / expiry 45s, first-writer-wins) in `room-store.ts`.
 - [x] **B3** Membership-gated credential issuance, cached per member, rotated
-      10 min before expiry, never in the public room view. A `credential_available`
-      event is broadcast on the room channel; the secret itself is only returned
-      from the authenticated endpoint.
+      10 min before expiry, never in the public room view. WS peers are
+      authenticated at the upgrade; `gse:credential` delivers the secret only to
+      the authenticated requester (client `plugin_request_ws`, HTTP fallback).
+      `credential_available` is broadcast without the secret.
 - [x] **B4** `ZeroTierBackend` creates networks (per-room /24, `enableBroadcast`),
       authorizes a joined member and returns its assigned address, and deletes
       the network on teardown (mock-fetch tests). Per-user revoke still a stub.

@@ -110,6 +110,34 @@ export class DropGseServerPlugin implements ServerPlugin {
     }, PRUNE_INTERVAL_MS);
     this.pruneTimer.unref?.();
 
+    // WebSocket: authenticated credential distribution. The secret is only
+    // ever sent to the authenticated peer that requested it.
+    ctx.registerWebSocket("gse:credential", async (message, wsCtx) => {
+      const payload = (message ?? {}) as { roomId?: string };
+      if (!payload.roomId || !wsCtx.userId) {
+        wsCtx.send({ ok: false, error: "roomId and authentication required" });
+        return;
+      }
+      try {
+        const credential = await this.store.credential(
+          payload.roomId,
+          wsCtx.userId,
+        );
+        const room = await this.store.get(payload.roomId);
+        wsCtx.send({
+          ok: true,
+          credential: {
+            mesh: room?.mesh,
+            secret: credential.secret,
+            address: credential.address,
+            expiresAt: credential.expiresAt,
+          },
+        });
+      } catch (err) {
+        wsCtx.send({ ok: false, error: String(err) });
+      }
+    });
+
     // WebSocket: host lease renewal / liveness over the plugin WS gateway.
     ctx.registerWebSocket("gse:heartbeat", async (message, wsCtx) => {
       const payload = (message ?? {}) as { roomId?: string };

@@ -1,10 +1,26 @@
 import pluginManager from "~/server/internal/plugins";
+import aclManager from "~/server/internal/acls";
 
 const clientSubscriptions = new Map<string, Array<() => void>>();
+const peerUsers = new Map<string, string | undefined>();
+const peerAcls = new Map<string, string[] | undefined>();
 
 export default defineWebSocketHandler({
-  open(peer) {
+  async open(peer) {
     clientSubscriptions.set(peer.id, []);
+
+    // Authenticate the upgrade request so plugins receive a userId.
+    let userId: string | undefined;
+    let userAcls: string[] | undefined;
+    try {
+      userId = (await aclManager.getUserIdACL(peer.request, [])) ?? undefined;
+      const all = await aclManager.fetchAllACLs(peer.request);
+      userAcls = all ? Array.from(all) : undefined;
+    } catch {
+      // Unauthenticated peer.
+    }
+    peerUsers.set(peer.id, userId);
+    peerAcls.set(peer.id, userAcls);
   },
   async message(peer, message) {
     try {
@@ -25,7 +41,8 @@ export default defineWebSocketHandler({
           data.channel,
           data.data,
           {
-            userId: undefined,
+            userId: peerUsers.get(peer.id),
+            userAcls: peerAcls.get(peer.id),
             send: (payload) =>
               peer.send(
                 JSON.stringify({ channel: data.channel, data: payload }),
@@ -53,5 +70,7 @@ export default defineWebSocketHandler({
       }
       clientSubscriptions.delete(peer.id);
     }
+    peerUsers.delete(peer.id);
+    peerAcls.delete(peer.id);
   },
 });
