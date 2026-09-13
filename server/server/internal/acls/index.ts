@@ -164,6 +164,26 @@ class ACLManager {
     return undefined;
   }
 
+  /**
+   * Resolves a `Bearer` User/Client API token to its owning user id without
+   * requiring any specific ACL. Used by callers (e.g. the plugin gateway) that
+   * authenticate the token itself rather than gating on a permission.
+   */
+  async getUserIdFromBearer(
+    request: MinimumRequestObject | undefined,
+  ): Promise<string | undefined> {
+    if (!request) return undefined;
+    const authorizationToken = this.getAuthorizationToken(request);
+    if (!authorizationToken) return undefined;
+    const token = await prisma.aPIToken.findUnique({
+      where: {
+        token: authorizationToken,
+        mode: { in: [APITokenMode.User, APITokenMode.Client] },
+      },
+    });
+    return token?.userId ?? undefined;
+  }
+
   async getUserACL(request: MinimumRequestObject | undefined, acls: UserACL) {
     if (!request)
       throw new Error("Native web requests not available - weird deployment?");

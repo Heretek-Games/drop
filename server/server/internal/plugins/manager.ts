@@ -26,6 +26,8 @@ import type {
   RouteHandler,
   RouteHandlerContext,
   ServerPlugin,
+  SubscriptionAuthorizer,
+  SubscriptionContext,
   WebSocketContext,
   WebSocketHandler,
 } from "./types";
@@ -61,6 +63,11 @@ interface RegisteredRoute {
   regex: RegExp;
   paramNames: string[];
   handler: RouteHandler;
+}
+
+interface SubscriptionAuthorizerEntry {
+  matches: (channel: string) => boolean;
+  authorize: SubscriptionAuthorizer;
 }
 
 const PLUGIN_ID_PATTERN = /^[a-z0-9][a-z0-9._-]*$/i;
@@ -99,6 +106,10 @@ export class PluginManager {
   private readonly webSockets = new Map<
     string,
     { pluginId: string; handler: WebSocketHandler }
+  >();
+  private readonly subscriptionAuthorizers = new Map<
+    string,
+    SubscriptionAuthorizerEntry[]
   >();
   private readonly eventBus = new EventEmitter();
   private readonly pluginEventSubscriptions = new Map<
@@ -294,6 +305,21 @@ export class PluginManager {
         }
         this.webSockets.set(channel, { pluginId: id, handler });
       },
+      registerSubscriptionAuthorizer: (
+        matches: (channel: string) => boolean,
+        authorize: SubscriptionAuthorizer,
+      ) => {
+        if (!this.hasCapability(capabilities, "websocket")) {
+          throw new PluginCapabilityError(
+            id,
+            "websocket",
+            "registerSubscriptionAuthorizer",
+          );
+        }
+        const entries = this.subscriptionAuthorizers.get(id) ?? [];
+        entries.push({ matches, authorize });
+        this.subscriptionAuthorizers.set(id, entries);
+      },
       fetch: async (input: string | URL, init?: RequestInit) => {
         if (!this.hasCapability(capabilities, "network")) {
           throw new PluginCapabilityError(id, "network", "fetch");
@@ -323,12 +349,11 @@ export class PluginManager {
   }
 
   /**
-   * Verify an external bundle's entry file before importing it.
+   * Verify an external bundle's entry file.
    *
-   * - `checksum` (if present) must match the entry file's SHA-256.
-   * - `signature` (if present) must be an HMAC-SHA256 of the checksum under
-   *   `DROP_PLUGIN_SIGNING_KEY`.
-   * - When `DROP_PLUGIN_REQUIRE_SIGNATURE=true`, an unsigned bundle is refused.
+   * `checksum` (if present) must match the entry file's SHA-256. Signature and
+   * whole-bundle verification happen in {@link verifyBundleFiles} and
+   * {@link verifyBundleSignature} once the bundle contents are known.
    */
   private verifyBundleBytes(bytes: Buffer, manifest: PluginManifest): string {
     const digest = createHash("sha256").update(bytes).digest("hex");
@@ -343,7 +368,103 @@ export class PluginManager {
         );
       }
     }
+    return digest;
+  }
 
+  /**
+   * Verify every importable file in a bundle and return an aggregate digest
+   * used to cache-bust the entry import.
+   *
+   * A bundle with more than one code file must declare `files` checksums; a
+   * single-file bundle may rely on the entry `checksum`. Values in `files`
+   * must match and cover every code file, so relative imports cannot smuggle
+   * unverified modules into the process.
+   */
+  private async verifyBundleFiles(
+    pluginDir: string,
+    manifest: PluginManifest,
+  ): Promise<string> {
+    const root = path.resolve(pluginDir);
+    const files = await this.listBundleFiles(root);
+    const codeExtensions = new Set([".js", ".mjs", ".cjs"]);
+    const codeFiles = files.filter((rel) =>
+      codeExtensions.has(path.extname(rel).toLowerCase()),
+    );
+
+    if (manifest.files) {
+      for (const [rel, expected] of Object.entries(manifest.files)) {
+        const resolved = path.resolve(root, rel);
+        if (path.isAbsolute(rel) || !isInsideDirectory(root, resolved)) {
+          throw new Error(`invalid bundle file path '${rel}'`);
+        }
+        if (!files.includes(rel)) {
+          throw new Error(`bundle manifest lists missing file '${rel}'`);
+        }
+        const digest = createHash("sha256")
+          .update(await fs.readFile(resolved))
+          .digest("hex");
+        if (
+          !SHA256_HEX_PATTERN.test(expected) ||
+          !constantTimeEqual(expected, digest)
+        ) {
+          throw new Error(`bundle file checksum mismatch for ${rel}`);
+        }
+      }
+      for (const rel of codeFiles) {
+        if (!(rel in manifest.files)) {
+          throw new Error(
+            `bundle file '${rel}' is not covered by the manifest 'files' checksums`,
+          );
+        }
+      }
+    } else if (codeFiles.length > 1) {
+      throw new Error(
+        `bundle '${manifest.id}' contains multiple code files but no 'files' checksums; refusing unverified imports`,
+      );
+    }
+
+    const hasher = createHash("sha256");
+    for (const rel of files) {
+      const bytes = await fs.readFile(path.join(root, rel));
+      hasher.update(rel);
+      hasher.update("\0");
+      hasher.update(String(bytes.length));
+      hasher.update("\0");
+      hasher.update(bytes);
+    }
+    return hasher.digest("hex");
+  }
+
+  /** Recursively list bundle files, ignoring installed dependencies. */
+  private async listBundleFiles(root: string, prefix = ""): Promise<string[]> {
+    const results: string[] = [];
+    const entries = await fs.readdir(path.join(root, prefix), {
+      withFileTypes: true,
+    });
+    for (const entry of entries) {
+      const rel = prefix ? `${prefix}/${entry.name}` : entry.name;
+      if (entry.isDirectory()) {
+        if (entry.name === "node_modules") continue;
+        results.push(...(await this.listBundleFiles(root, rel)));
+      } else if (entry.isFile()) {
+        results.push(rel);
+      }
+    }
+    results.sort();
+    return results;
+  }
+
+  /**
+   * Verify the bundle signature. When `files` is present the signature covers
+   * the aggregate bundle digest; otherwise it covers the entry checksum
+   * (legacy single-file bundles). `DROP_PLUGIN_REQUIRE_SIGNATURE=true` refuses
+   * unsigned bundles.
+   */
+  private verifyBundleSignature(
+    aggregateDigest: string,
+    entryDigest: string,
+    manifest: PluginManifest,
+  ): void {
     const signingKey = process.env.DROP_PLUGIN_SIGNING_KEY;
     if (manifest.signature) {
       if (!signingKey) {
@@ -351,8 +472,9 @@ export class PluginManager {
           `bundle ${manifest.id} is signed but DROP_PLUGIN_SIGNING_KEY is not set`,
         );
       }
+      const covered = manifest.files ? aggregateDigest : entryDigest;
       const expected = createHmac("sha256", signingKey)
-        .update(digest)
+        .update(covered)
         .digest("hex");
       if (
         !SHA256_HEX_PATTERN.test(manifest.signature) ||
@@ -363,7 +485,6 @@ export class PluginManager {
     } else if (process.env.DROP_PLUGIN_REQUIRE_SIGNATURE === "true") {
       throw new Error(`bundle ${manifest.id} is unsigned`);
     }
-    return digest;
   }
 
   private async getRegistry(): Promise<PluginRegistry> {
@@ -391,15 +512,24 @@ export class PluginManager {
       throw new Error(`invalid entry path '${entryRel}'`);
     }
 
-    const digest = this.verifyBundleBytes(
+    // Validate the declared contract *before* importing: a dynamic import runs
+    // the module's top-level code, so compatibility must be checked on the
+    // manifest, not after the module has already executed.
+    this.assertManifestCompatible(manifest);
+
+    const entryDigest = this.verifyBundleBytes(
       await fs.readFile(entryPath),
       manifest,
     );
-    (await this.getRegistry()).check(manifest, digest);
+    const aggregateDigest = await this.verifyBundleFiles(pluginDir, manifest);
+    this.verifyBundleSignature(aggregateDigest, entryDigest, manifest);
+    (await this.getRegistry()).check(manifest, entryDigest);
 
-    // Version the import URL by content so a reload of changed code does not
-    // silently reuse Node's ESM module cache.
-    const mod = await import(`${pathToFileURL(entryPath).href}?v=${digest}`);
+    // Version the import URL by the whole-bundle digest so a change to any
+    // file (not just the entry) forces a fresh entry module instance.
+    const mod = await import(
+      `${pathToFileURL(entryPath).href}?v=${aggregateDigest}`
+    );
     const pluginInstance: ServerPlugin =
       mod.default && typeof mod.default.init === "function"
         ? mod.default
@@ -421,6 +551,20 @@ export class PluginManager {
     };
 
     await this.registerPlugin(pluginInstance);
+  }
+
+  /** Validate a manifest's declared contract before importing its module. */
+  private assertManifestCompatible(manifest: PluginManifest): void {
+    if (manifest.apiVersion !== PLUGIN_API_VERSION) {
+      throw new PluginApiVersionError(
+        manifest.id,
+        PLUGIN_API_VERSION,
+        manifest.apiVersion ?? 0,
+      );
+    }
+    if (manifest.trust !== undefined && manifest.trust !== "trusted") {
+      throw new PluginTrustError(manifest.id, manifest.trust);
+    }
   }
 
   private assertPluginCompatible(plugin: ServerPlugin): void {
@@ -505,6 +649,7 @@ export class PluginManager {
         this.webSockets.delete(channel);
       }
     }
+    this.subscriptionAuthorizers.delete(id);
     const subscriptions = this.pluginEventSubscriptions.get(id) ?? [];
     for (const off of subscriptions) {
       off();
@@ -714,6 +859,29 @@ export class PluginManager {
     return () => {
       this.eventBus.off(channel, listener);
     };
+  }
+
+  /**
+   * Whether a client may subscribe to `channel`. Only authorizers whose
+   * `matches` accepts the channel are consulted; when none match the channel
+   * is allowed (the gateway still requires authentication for non-public
+   * channels).
+   */
+  async canSubscribe(
+    channel: string,
+    context: SubscriptionContext,
+  ): Promise<boolean> {
+    const matching: SubscriptionAuthorizer[] = [];
+    for (const entries of this.subscriptionAuthorizers.values()) {
+      for (const entry of entries) {
+        if (entry.matches(channel)) matching.push(entry.authorize);
+      }
+    }
+    if (matching.length === 0) return true;
+    for (const authorize of matching) {
+      if (await authorize(channel, context)) return true;
+    }
+    return false;
   }
 
   /** Route a client WebSocket message to the plugin that claimed the channel. */

@@ -28,10 +28,18 @@ export interface PluginRegistryData {
  * An empty registry disables the check (default: trust checksum/signature).
  */
 export class PluginRegistry {
-  constructor(private readonly entries: PluginRegistryEntry[]) {}
+  /**
+   * @param strict When true (a registry file is configured), the registry is
+   * authoritative even when empty: every plugin is denied. A non-strict empty
+   * registry (no file configured) disables pinning.
+   */
+  constructor(
+    private readonly entries: PluginRegistryEntry[],
+    private readonly strict = false,
+  ) {}
 
   static async load(filePath: string | undefined): Promise<PluginRegistry> {
-    if (!filePath) return new PluginRegistry([]);
+    if (!filePath) return new PluginRegistry([], false);
     let raw: string;
     try {
       raw = await fs.readFile(filePath, "utf-8");
@@ -45,11 +53,13 @@ export class PluginRegistry {
     } catch (err) {
       throw new Error(`failed to parse plugin registry '${filePath}': ${err}`);
     }
-    return new PluginRegistry(data.plugins ?? []);
+    // A syntactically valid but empty registry (`{}` / `{"plugins":null}`)
+    // must deny, not silently disable pinning.
+    return new PluginRegistry(data.plugins ?? [], true);
   }
 
   get enabled(): boolean {
-    return this.entries.length > 0;
+    return this.strict || this.entries.length > 0;
   }
 
   /** Throw when `manifest`/`digest` violate the registry. */
