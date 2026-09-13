@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { roomToActiveRoom } from "~/gse-contract";
 
 export interface EmulatorBinding {
   flavor: "gbe_fork" | "gse_fork";
@@ -155,13 +156,10 @@ export const useGseMultiplayer = (gameId: string) => {
     installDir: string,
     room: GseRoom,
   ): Promise<void> {
-    const peerIps = (room.members ?? [])
-      .map((m) => m.meshAddress)
-      .filter((addr): addr is string => Boolean(addr));
-
+    const activeRoom = roomToActiveRoom(room);
     await invoke("gse_write_room_config", {
       installDir,
-      peerIps,
+      peerIps: activeRoom.peers,
     });
   }
 

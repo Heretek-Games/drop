@@ -238,6 +238,13 @@ pub async fn plugin_request(
             }
             req
         }
+        "PATCH" => {
+            let mut req = client.patch(endpoint.to_string()).header("Authorization", auth_header);
+            if let Some(b) = body {
+                req = req.json(&b);
+            }
+            req
+        }
         _ => client.get(endpoint.to_string()).header("Authorization", auth_header),
     };
 

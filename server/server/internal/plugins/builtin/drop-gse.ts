@@ -1,5 +1,5 @@
+import { randomUUID } from "node:crypto";
 import { readBody, createError } from "h3";
-import { v4 as uuidv4 } from "uuid";
 import type { PluginContext, ServerPlugin, PluginMetadata } from "../types";
 
 export interface EmulatorBinding {
@@ -111,7 +111,7 @@ export class DropGseServerPlugin implements ServerPlugin {
         });
       }
 
-      const roomId = uuidv4();
+      const roomId = randomUUID();
       const now = Date.now();
       const expiresAt = now + 4 * 60 * 60 * 1000; // 4 hour TTL
       const backend = body.backend ?? "zerotier";

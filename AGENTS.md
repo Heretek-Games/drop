@@ -194,9 +194,9 @@ cd server && pnpm exec prisma generate      # after schema changes
 # Server
 pnpm --filter drop run typecheck
 pnpm --filter drop run lint
-node_modules/.bin/jiti server/server/internal/library/pipeline/__tests__/pipeline.test.ts
-#   ^ server uses node:test with extensionless ESM imports; no test runner is wired,
-#     so run test files through jiti (plain `node --test` fails).
+pnpm --filter drop run test
+#   ^ runs every server `*.test.ts` through `server/dev-tools/run-tests.mjs`
+#     (jiti + the `~` alias). Plain `node --test` fails on the ESM/alias setup.
 
 # Desktop frontend (separate workspace; not gated)
 pnpm -C desktop/main install

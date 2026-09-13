@@ -1,0 +1,168 @@
+# drop-gse implementation plan (tracked board)
+
+> Status: active. GitHub Issues are disabled on this repository, so this file is
+> the tracked board. If issues are enabled later, each milestone below becomes
+> one issue verbatim.
+>
+> Context: upstream Drop has **no official plugin system**; building one is part
+> of this effort. `Heretek-Games/drop-gse` is an **unfinished prototype**
+> (`gse-engine/src/dll.rs` and `anticheat.rs` are the only hardened slices); its
+> `docs/architecture/SPECIFICATION.md` is aspirational, not a contract.
+
+## Objective
+
+Build an official, first-party extension platform for Drop and deliver
+multiplayer as its first plugin family, split into two independently shippable
+tracks:
+
+- **Part A — GSE for games:** emulator scanning, patching, config, anti-cheat,
+  restore. Ships **without** mesh (offline/LAN mode).
+- **Part B — LAN emulation:** per-room mesh (ZeroTier / Tailscale), credentials,
+  room and host lifecycle.
+- **Track P — Plugin platform:** the foundation both parts are packaged as
+  optional plugins on.
+
+## Decisions (confirmed)
+
+1. Platform lives in this Drop repo; `drop-gse` becomes a first-party plugin
+   bundle. Only `gse-engine` is carried forward as a starting crate.
+2. The prototype addon/client scaffolds are re-implemented, not depended on.
+3. Desktop is a **compile-time first-party privileged extension** (Cargo feature
+   - runtime opt-in); the server plugin is genuinely optional. The platform must
+     define this privileged tier explicitly (M4 / P6).
+4. Server ships as an external plugin bundle; durable rooms use additive Prisma
+   models.
+5. Mesh backend order: **ZeroTier self-hosted controller first**, Tailscale
+   second.
+6. License review required: GPL-3.0-or-later (drop-gse) + LGPL-3.0 (emulator
+   binaries) combined into AGPL-3.0-or-later (Drop).
+
+## Frozen A↔B contract
+
+Track B produces an `ActiveRoom`; Track A consumes `peers` as the contents of
+`custom_broadcasts.txt`. Empty `peers` is valid and means LAN/offline mode.
+
+- TypeScript: `desktop/main/gse-contract.ts` (`ActiveRoom`, `PeerSource`,
+  `roomToActiveRoom`).
+- Rust: `desktop/src-tauri/process/src/peer_source.rs` (`ActiveRoom`,
+  `PeerSource`, `MeshBackend`).
+
+---
+
+## M0 — Plugin platform MVP + test harness (foundation)
+
+Owner: TBD · Depends on: none · Blocks: M1–M5
+
+- [ ] **P1** Versioned plugin contract (`PLUGIN_API_VERSION`, manifest schema,
+      deprecation policy)
+- [ ] **P2** Real capability enforcement for `routes` / `storage` / `events` /
+      `websocket` / `network` (today only `routes` + `events` are checked; others
+      warn-and-no-op in `server/internal/plugins/manager.ts`)
+- [ ] **P3** Decide + document the trust/isolation model
+- [ ] **P4** Namespaced storage with migrations; state outside the code dir
+- [x] **P8** Test harness — plugin tests run without a Nuxt runtime (`server/dev-tools/run-tests.mjs`,
+      `pnpm --filter drop run test`)
+- [x] Fix `remote.rs::plugin_request` PATCH branch
+- [x] Freeze A↔B contract
+
+**Acceptance:** plugin tests green in CI; capability violations fail closed and
+are tested; enable/disable/reload without core changes; contract typed on both
+sides.
+
+## M1 — Part A: GSE engine (offline/LAN) + reference plugin
+
+Owner: TBD · Depends on: M0
+
+- [ ] **A1** Scanner for `steam_api*.dll` / `libsteam_api.so` / `steamclient*.dll`
+      (depth-limited, prefix-aware)
+- [ ] **A2** Replace `desktop/src-tauri/process/src/gse_interceptor.rs` backup/
+      restore logic with the tested `gse-engine/dll.rs`
+- [ ] **A3** Interface extractor → `steam_interfaces.txt`
+- [ ] **A4** Patcher/replacer + digest verify + rollback (`PatchPlan` executor)
+- [ ] **A5** Per-flavor config generation (`configs.main.ini`, `steam_appid.txt`,
+      `steam_interfaces.txt`, `custom_broadcasts.txt`)
+- [ ] **A6** Emulator release manager (pinned + SHA-256, fetched at runtime)
+- [ ] **P5/P7/P9** Bundle format + install/update UI + a second trivial plugin to
+      prove generality
+
+**Acceptance:** engine patches/configures/restores a real game offline on
+Windows and Linux; idempotent; interrupted runs recover; digest mismatch refuses
+to deploy.
+
+## M2 — Part A: opt-in launch interceptor + consent/compat
+
+Owner: TBD · Depends on: M1
+
+- [ ] **A7** Engine-backed interceptor that runs **only when a room is active or
+      the user opted in** — fixes the current global anti-cheat launch block
+      (`process_manager.rs` aborts any launch with EAC/BattleEye markers)
+- [ ] **A8** Crash-recovery startup sweep (stale `.orig` + crash marker)
+- [ ] **A9** AppID pinning + Proton prefix resolution via installed-version records
+- [ ] **A10** Server compatibility DB + user consent UI
+
+**Acceptance:** non-opted games launch byte-identically; anti-cheat titles
+blocked only when opted in; kill mid-patch restores on next startup.
+
+## M3 — Part B: mesh backend #1 + real multiplayer session
+
+Owner: TBD · Depends on: M0, M2
+
+- [ ] **B1** `MeshBackend` trait (+ fake backend for tests)
+- [ ] **B2** Durable rooms/memberships/credentials (Prisma) + host lease
+      (heartbeat ~15s, expiry ~45s, first-writer-wins migration)
+- [ ] **B3** Credential provisioning/rotation/distribution over authenticated WS;
+      never in public `Room`, never logged
+- [ ] **B4** Backend #1: ZeroTier self-hosted controller — per-room CIDR from
+      `10.242.0.0/16`, `enableBroadcast`
+- [ ] **B6** Client mesh join/leave + `vpn.ts` validators; peers → engine
+- [ ] **B7** Room hardening: TTL sweeper, per-user/global caps, auth on all reads,
+      input validation
+
+**Acceptance:** two machines on different networks play together; coordinator
+restart preserves rooms; host migration works; teardown leaves nothing behind.
+
+## M4 — Part B: mesh backend #2 + desktop extension ABI
+
+Owner: TBD · Depends on: M3
+
+- [ ] **B5** Backend #2: Tailscale ephemeral — transactional tag/ACL before keys,
+      one-off per-member keys, isolated `--state=mem:`
+- [ ] **B8** UI: host/join/leave/teardown + live WebSocket updates
+- [ ] **P6** Desktop extension ABI decision + implementation (privileged tier)
+- [ ] Client-side WS consumption of `gse:rooms`
+
+**Acceptance:** both backends selectable; documented/enforced plugin tiering.
+
+## M5 — Distribution, packaging & release
+
+Owner: TBD · Depends on: M0–M4
+
+- [ ] Bundle format + `drop-plugin.json` schema finalized
+- [ ] Install/update/remove with checksum + signature verification
+- [ ] Registry/version pinning; UI hidden unless server advertises capability
+- [ ] Docs: admin install guide, `AGENTS.md` plugin section
+- [ ] License review + corresponding-source obligations
+
+**Acceptance:** fresh Drop + bundle → host/join/launch with no server rebuild;
+removing the plugin leaves no dangling routes/data/backups.
+
+---
+
+## M0 — current increment (this change)
+
+Delivered in the working tree:
+
+- `PluginManager` is now dependency-injectable (`dataDir`, `storageFactory`,
+  `authResolver`) and imports Drop's runtime config / ACL manager / file storage
+  **lazily**, so the module can be imported outside Nuxt.
+- `server/dev-tools/run-tests.mjs` discovers and runs `*.test.ts` through jiti
+  with the `~` alias; wired as `pnpm --filter drop run test`.
+- `plugins.test.ts` injects in-memory storage + a stub auth resolver; all 6 tests
+  pass (pipeline tests: 7 pass).
+- `remote.rs::plugin_request` now forwards `PATCH` (Settings → Plugins toggle).
+- A↔B contract frozen on both sides and consumed by
+  `useGseMultiplayer.syncRoomConfigToDisk`.
+- Removed the undeclared `uuid` dependency in `drop-gse.ts` (`node:crypto`
+  `randomUUID`); declared `jiti` for the server test script.
+
+Still open in M0: P1–P4, and the CI test step.

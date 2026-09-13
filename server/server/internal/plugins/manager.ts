@@ -6,9 +6,6 @@ import type { H3Event } from "h3";
 import { getQuery, createError } from "h3";
 import type { Logger } from "pino";
 import { logger } from "../logging";
-import aclManager from "../acls";
-import { systemConfig } from "../config/sys-conf";
-import { FilePluginStorage } from "./storage";
 import type {
   HttpMethod,
   PluginCapability,
@@ -17,10 +14,31 @@ import type {
   PluginMetadata,
   PluginStateRecord,
   PluginStatus,
+  PluginStorage,
   RouteHandler,
   RouteHandlerContext,
   ServerPlugin,
 } from "./types";
+
+/** Resolved caller identity passed to route handlers. */
+export interface PluginAuthContext {
+  userId?: string | undefined;
+  userAcls?: string[] | undefined;
+}
+
+/**
+ * Injectable dependencies. The defaults resolve Drop's runtime config and ACL
+ * manager lazily, so this module can be imported (and unit-tested) outside a
+ * Nuxt/Nitro runtime.
+ */
+export interface PluginManagerOptions {
+  /** Base data directory. Defaults to the server's configured data folder. */
+  dataDir?: string;
+  /** Per-plugin storage factory. Defaults to {@link FilePluginStorage}. */
+  storageFactory?: (pluginId: string) => PluginStorage;
+  /** Auth resolver for dispatched routes. Defaults to Drop's ACL manager. */
+  authResolver?: (event: H3Event) => Promise<PluginAuthContext>;
+}
 
 interface RegisteredRoute {
   method: HttpMethod;
@@ -43,21 +61,29 @@ export class PluginManager {
   private readonly eventBus = new EventEmitter();
   private readonly log: Logger = logger.child({ name: "plugin-manager" });
 
-  constructor() {
+  constructor(private readonly options: PluginManagerOptions = {}) {
     this.eventBus.setMaxListeners(200);
   }
 
-  private getStateFilePath(): string {
-    return path.join(systemConfig.getDataFolder(), "plugins", "_state.json");
+  private async getDataFolder(): Promise<string> {
+    if (this.options.dataDir !== undefined) {
+      return this.options.dataDir;
+    }
+    const { systemConfig } = await import("../config/sys-conf");
+    return systemConfig.getDataFolder();
   }
 
-  private getPluginsDirectory(): string {
-    return path.join(systemConfig.getDataFolder(), "plugins");
+  private async getStateFilePath(): Promise<string> {
+    return path.join(await this.getDataFolder(), "plugins", "_state.json");
+  }
+
+  private async getPluginsDirectory(): Promise<string> {
+    return path.join(await this.getDataFolder(), "plugins");
   }
 
   private async loadState(): Promise<Record<string, PluginStateRecord>> {
     try {
-      const data = await fs.readFile(this.getStateFilePath(), "utf-8");
+      const data = await fs.readFile(await this.getStateFilePath(), "utf-8");
       return JSON.parse(data) as Record<string, PluginStateRecord>;
     } catch {
       return {};
@@ -67,7 +93,7 @@ export class PluginManager {
   private async saveState(
     state: Record<string, PluginStateRecord>,
   ): Promise<void> {
-    const filePath = this.getStateFilePath();
+    const filePath = await this.getStateFilePath();
     await fs.mkdir(path.dirname(filePath), { recursive: true });
     await fs.writeFile(filePath, JSON.stringify(state, null, 2), "utf-8");
   }
@@ -102,10 +128,20 @@ export class PluginManager {
     return capabilities.includes(cap);
   }
 
-  private createPluginContext(plugin: ServerPlugin): PluginContext {
+  private async createStorage(pluginId: string): Promise<PluginStorage> {
+    if (this.options.storageFactory) {
+      return this.options.storageFactory(pluginId);
+    }
+    const { FilePluginStorage } = await import("./storage");
+    return new FilePluginStorage(pluginId);
+  }
+
+  private async createPluginContext(
+    plugin: ServerPlugin,
+  ): Promise<PluginContext> {
     const id = plugin.metadata.id;
     const pluginLogger = this.log.child({ plugin: id });
-    const storage = new FilePluginStorage(id);
+    const storage = await this.createStorage(id);
     const pluginRoutes: RegisteredRoute[] = [];
     this.routes.set(id, pluginRoutes);
 
@@ -169,7 +205,7 @@ export class PluginManager {
     const state = await this.loadState();
     const isExplicitlyDisabled = state[id]?.enabled === false;
 
-    const context = this.createPluginContext(plugin);
+    const context = await this.createPluginContext(plugin);
     const loaded: LoadedPlugin = {
       plugin,
       context,
@@ -244,7 +280,7 @@ export class PluginManager {
       }
     } else {
       if (loaded.status !== "active") {
-        const context = this.createPluginContext(loaded.plugin);
+        const context = await this.createPluginContext(loaded.plugin);
         loaded.context = context;
         try {
           await loaded.plugin.init(context);
@@ -265,7 +301,7 @@ export class PluginManager {
   }
 
   async discoverAndLoadExternalPlugins(): Promise<void> {
-    const pluginsDir = this.getPluginsDirectory();
+    const pluginsDir = await this.getPluginsDirectory();
     try {
       await fs.mkdir(pluginsDir, { recursive: true });
       const entries = await fs.readdir(pluginsDir, { withFileTypes: true });
@@ -376,6 +412,16 @@ export class PluginManager {
     };
   }
 
+  private async resolveAuth(event: H3Event): Promise<PluginAuthContext> {
+    if (this.options.authResolver) {
+      return this.options.authResolver(event);
+    }
+    const { default: aclManager } = await import("../acls");
+    const userId = (await aclManager.getUserIdACL(event, [])) ?? undefined;
+    const allAcls = await aclManager.fetchAllACLs(event);
+    return { userId, userAcls: allAcls ? Array.from(allAcls) : undefined };
+  }
+
   async dispatch(
     pluginId: string,
     method: string,
@@ -432,9 +478,9 @@ export class PluginManager {
     let userId: string | undefined;
     let userAcls: string[] | undefined;
     try {
-      userId = (await aclManager.getUserIdACL(event, [])) ?? undefined;
-      const allAcls = await aclManager.fetchAllACLs(event);
-      userAcls = allAcls ? Array.from(allAcls) : undefined;
+      const auth = await this.resolveAuth(event);
+      userId = auth.userId;
+      userAcls = auth.userAcls;
     } catch {
       // Unauthenticated callers receive undefined userId
     }

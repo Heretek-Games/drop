@@ -1,11 +1,52 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import os from "node:os";
+import path from "node:path";
 import { PluginManager } from "../manager";
 import { DropGseServerPlugin } from "../builtin/drop-gse";
-import type { PluginContext, ServerPlugin } from "../types";
+import type { PluginContext, PluginStorage, ServerPlugin } from "../types";
+
+/**
+ * In-memory storage so tests never touch Drop's runtime config (which is only
+ * available inside a Nuxt/Nitro process).
+ */
+class MemoryStorage implements PluginStorage {
+  private readonly data = new Map<string, unknown>();
+
+  async get<T>(key: string): Promise<T | null> {
+    return this.data.has(key) ? (this.data.get(key) as T) : null;
+  }
+
+  async set<T>(key: string, value: T): Promise<void> {
+    this.data.set(key, value);
+  }
+
+  async delete(key: string): Promise<void> {
+    this.data.delete(key);
+  }
+
+  async listKeys(): Promise<string[]> {
+    return [...this.data.keys()];
+  }
+}
+
+let managerCounter = 0;
+
+/** Build a manager isolated from the Nuxt runtime and the shared plugin dir. */
+function createTestManager(): PluginManager {
+  managerCounter += 1;
+  return new PluginManager({
+    dataDir: path.join(
+      os.tmpdir(),
+      `drop-plugin-test-${process.pid}-${managerCounter}-${Date.now()}`,
+    ),
+    storageFactory: () => new MemoryStorage(),
+    authResolver: async () => ({ userId: undefined }),
+  });
+}
 
 test("PluginManager registers and initializes plugin", async () => {
-  const manager = new PluginManager();
+  const manager = createTestManager();
   let initCalled = false;
 
   const testPlugin: ServerPlugin = {
@@ -29,7 +70,7 @@ test("PluginManager registers and initializes plugin", async () => {
 });
 
 test("PluginManager route registration and pattern matching", async () => {
-  const manager = new PluginManager();
+  const manager = createTestManager();
 
   const testPlugin: ServerPlugin = {
     metadata: {
@@ -92,7 +133,7 @@ test("PluginManager route registration and pattern matching", async () => {
 });
 
 test("PluginManager event bus broadcast and subscribe", async () => {
-  const manager = new PluginManager();
+  const manager = createTestManager();
   let receivedMessage = "";
 
   const unsubscribe = manager.subscribe("chat:general", (data) => {
@@ -108,7 +149,7 @@ test("PluginManager event bus broadcast and subscribe", async () => {
 });
 
 test("DropGseServerPlugin rooms lifecycle", async () => {
-  const manager = new PluginManager();
+  const manager = createTestManager();
   const gsePlugin = new DropGseServerPlugin();
   await manager.registerPlugin(gsePlugin);
 
@@ -138,7 +179,7 @@ test("DropGseServerPlugin rooms lifecycle", async () => {
 });
 
 test("PluginManager togglePlugin enables and disables plugin lifecycle", async () => {
-  const manager = new PluginManager();
+  const manager = createTestManager();
 
   const toggleTestPlugin: ServerPlugin = {
     metadata: {
@@ -205,7 +246,7 @@ test("PluginManager togglePlugin enables and disables plugin lifecycle", async (
 });
 
 test("PluginManager capability sandboxing restricts undeclared capabilities", async () => {
-  const manager = new PluginManager();
+  const manager = createTestManager();
 
   const noRoutesPlugin: ServerPlugin = {
     metadata: {

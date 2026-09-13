@@ -21,6 +21,7 @@ pub mod format;
 pub mod gse_interceptor;
 pub mod interceptor;
 mod parser;
+pub mod peer_source;
 pub mod pipeline;
 pub mod process_handlers;
 pub mod process_manager;
