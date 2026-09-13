@@ -83,14 +83,20 @@ export interface MeshBackend {
   revokeMember(roomId: string, userId: string): Promise<void>;
   /**
    * Authorize a member's node after it has joined the mesh. Returns the address
-   * assigned by the backend, when it can report one.
+   * assigned by the backend, when it can report one. `userId` lets the backend
+   * remember the node id for later revocation.
    */
   authorizeMember?(
     roomId: string,
+    userId: string,
     memberId: string,
   ): Promise<string | undefined>;
-  /** Remove every node/network for the room. */
-  teardown(roomId: string): Promise<void>;
+  /**
+   * Remove every node/network for the room. `mesh` is supplied when available
+   * so teardown works after a coordinator restart (the in-memory room→network
+   * map may be empty).
+   */
+  teardown(roomId: string, mesh?: PublicMeshInfo): Promise<void>;
 }
 
 export function toDiscoverable(room: Room): DiscoverableRoom {

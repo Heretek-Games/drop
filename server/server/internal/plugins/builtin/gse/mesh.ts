@@ -68,12 +68,15 @@ export class InMemoryMeshBackend implements MeshBackend {
 
   async authorizeMember(
     roomId: string,
+    userId: string,
     memberId: string,
   ): Promise<string | undefined> {
+    void userId;
     return roomMemberAddress(roomCidr(roomId), memberId);
   }
 
-  async teardown(roomId: string): Promise<void> {
+  async teardown(roomId: string, mesh?: PublicMeshInfo): Promise<void> {
+    void mesh;
     this.members.delete(roomId);
   }
 
@@ -86,9 +89,9 @@ export class InMemoryMeshBackend implements MeshBackend {
 export type FetchLike = (
   input: string,
   init?: {
-    method?: string;
-    headers?: Record<string, string>;
-    body?: string;
+    method?: string | undefined;
+    headers?: Record<string, string> | undefined;
+    body?: string | undefined;
   },
 ) => Promise<{
   ok: boolean;
@@ -117,6 +120,8 @@ export class ZeroTierBackend implements MeshBackend {
   readonly id = "zerotier" as const;
   private readonly fetchImpl: FetchLike;
   private readonly networks = new Map<string, string>();
+  /** roomId → (userId → member node id), for revocation. */
+  private readonly memberIds = new Map<string, Map<string, string>>();
 
   constructor(private readonly options: ZeroTierControllerOptions) {
     this.fetchImpl = options.fetchImpl ?? (fetch as unknown as FetchLike);
@@ -182,6 +187,7 @@ export class ZeroTierBackend implements MeshBackend {
 
   async authorizeMember(
     roomId: string,
+    userId: string,
     memberId: string,
   ): Promise<string | undefined> {
     const networkId = this.networks.get(roomId);
@@ -199,6 +205,10 @@ export class ZeroTierBackend implements MeshBackend {
         `ZeroTier member authorization failed (${response.status})`,
       );
     }
+    const roomMembers = this.memberIds.get(roomId) ?? new Map<string, string>();
+    roomMembers.set(userId, memberId);
+    this.memberIds.set(roomId, roomMembers);
+
     const member = (await response.json()) as {
       assignedAddresses?: string[];
     };
@@ -208,14 +218,25 @@ export class ZeroTierBackend implements MeshBackend {
   }
 
   async revokeMember(roomId: string, userId: string): Promise<void> {
-    // Member ids are derived from credentials; a real deployment tracks the
-    // mapping. Kept explicit so the contract is stable.
-    void roomId;
-    void userId;
+    const networkId = this.networks.get(roomId);
+    const memberId = this.memberIds.get(roomId)?.get(userId);
+    if (!networkId || !memberId) return;
+    this.memberIds.get(roomId)?.delete(userId);
+    await this.fetchImpl(
+      `${this.options.baseUrl}/network/${networkId}/member/${memberId}`,
+      {
+        method: "POST",
+        headers: this.headers(),
+        body: JSON.stringify({ authorized: false }),
+      },
+    );
   }
 
-  async teardown(roomId: string): Promise<void> {
-    const networkId = this.networks.get(roomId);
+  async teardown(roomId: string, mesh?: PublicMeshInfo): Promise<void> {
+    const networkId =
+      (mesh?.backend === "zerotier" ? mesh.networkId : undefined) ??
+      this.networks.get(roomId);
+    this.memberIds.delete(roomId);
     if (!networkId) return;
     this.networks.delete(roomId);
     await this.fetchImpl(
@@ -268,7 +289,8 @@ export class TailscaleBackend implements MeshBackend {
     // Ephemeral nodes purge themselves; tagged-node removal happens on teardown.
   }
 
-  async teardown(roomId: string): Promise<void> {
+  async teardown(roomId: string, mesh?: PublicMeshInfo): Promise<void> {
+    void mesh;
     await this.provisioner.teardownRoom(roomId);
   }
 }

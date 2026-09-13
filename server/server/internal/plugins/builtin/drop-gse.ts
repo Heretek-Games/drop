@@ -11,6 +11,7 @@ import {
 import type { RoomPersistence } from "./gse/persistence";
 import { PrismaRoomPersistence } from "./gse/prisma-persistence";
 import { RoomStore } from "./gse/room-store";
+import { ZtnetBackend } from "./gse/ztnet";
 import { toDiscoverable } from "./gse/types";
 import type { EmulatorBinding, MeshBackend } from "./gse/types";
 
@@ -67,6 +68,23 @@ export class DropGseServerPlugin implements ServerPlugin {
 
   private resolveBackend(): MeshBackend {
     const selected = (process.env.GSE_MESH_BACKEND ?? "").toLowerCase();
+
+    // ZTNET-managed controller is the default path.
+    const ztnetUrl = process.env.GSE_ZTNET_URL;
+    const ztnetToken = process.env.GSE_ZTNET_TOKEN;
+    const ztnetOrg = process.env.GSE_ZTNET_ORG;
+    if (
+      (selected === "ztnet" || (selected === "" && ztnetUrl)) &&
+      ztnetUrl &&
+      ztnetToken &&
+      ztnetOrg
+    ) {
+      return new ZtnetBackend({
+        baseUrl: ztnetUrl,
+        apiToken: ztnetToken,
+        organizationId: ztnetOrg,
+      });
+    }
 
     const tailscaleKey = process.env.GSE_TAILSCALE_API_KEY;
     const tailnet = process.env.GSE_TAILSCALE_TAILNET;

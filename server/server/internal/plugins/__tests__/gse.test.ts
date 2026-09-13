@@ -9,6 +9,7 @@ import {
 } from "../builtin/gse/mesh";
 import { CompatRegistry, compatFromEnv } from "../builtin/gse/compat";
 import { StorageRoomPersistence } from "../builtin/gse/persistence";
+import { ZtnetBackend } from "../builtin/gse/ztnet";
 import {
   CREDENTIAL_ROTATION_WINDOW_MS,
   HOST_LEASE_MS,
@@ -262,13 +263,140 @@ test("ZeroTierBackend authorizes members and deletes networks", async () => {
   });
 
   await backend.provision("room-9", 1);
-  const address = await backend.authorizeMember("room-9", "member-abc");
+  const address = await backend.authorizeMember(
+    "room-9",
+    "user-1",
+    "member-abc",
+  );
   assert.equal(address, "10.242.5.20");
 
   await backend.teardown("room-9");
   const teardownCall = calls.find((call) => call.method === "DELETE");
   assert.ok(teardownCall);
   assert.match(teardownCall.url, /\/controller\/network\/net-1$/);
+});
+
+test("ZtnetBackend provisions, authorizes and tears down via the org API", async () => {
+  const calls: Array<{
+    url: string;
+    method?: string;
+    body?: string;
+    auth?: string;
+  }> = [];
+  const backend = new ZtnetBackend({
+    baseUrl: "http://ztnet:3000/",
+    apiToken: "org-token",
+    organizationId: "org-1",
+    fetchImpl: async (url, init) => {
+      calls.push({
+        url,
+        method: init?.method,
+        body: init?.body,
+        auth: init?.headers?.["x-ztnet-auth"],
+      });
+      if (url.endsWith("/network") && init?.method === "POST") {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ nwid: "8056c2e21c000001" }),
+          text: async () => "",
+        };
+      }
+      if (url.includes("/member/")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ ipAssignments: ["10.242.196.20"] }),
+          text: async () => "",
+        };
+      }
+      return {
+        ok: true,
+        status: init?.method === "DELETE" ? 204 : 200,
+        json: async () => ({}),
+        text: async () => "",
+      };
+    },
+  });
+
+  const mesh = await backend.provision("room-zt", 1_700_000_000_000);
+  assert.equal(mesh.backend, "zerotier");
+  if (mesh.backend === "zerotier") {
+    assert.equal(mesh.networkId, "8056c2e21c000001");
+    assert.equal(mesh.cidr, roomCidr("room-zt"));
+  }
+
+  const posts = calls.filter((call) => call.method === "POST");
+  assert.ok(posts.length >= 2);
+  assert.equal(posts[0]?.auth, "org-token");
+  const configureBody = JSON.parse(
+    posts.find((call) => call.url.endsWith("8056c2e21c000001"))?.body ?? "{}",
+  ) as {
+    v4AssignMode: { zt: boolean };
+    routes: Array<{ target: string }>;
+  };
+  assert.equal(configureBody.v4AssignMode.zt, true);
+  assert.equal(configureBody.routes[0]?.target, roomCidr("room-zt"));
+
+  const address = await backend.authorizeMember(
+    "room-zt",
+    "user-1",
+    "abcdef01234",
+  );
+  assert.equal(address, "10.242.196.20");
+
+  await backend.revokeMember("room-zt", "user-1");
+  await backend.teardown("room-zt", mesh);
+  assert.ok(
+    calls.some(
+      (call) =>
+        call.method === "DELETE" &&
+        call.url.endsWith("/network/8056c2e21c000001"),
+    ),
+  );
+});
+
+test("ZtnetBackend surfaces API errors", async () => {
+  const backend = new ZtnetBackend({
+    baseUrl: "http://ztnet:3000",
+    apiToken: "t",
+    organizationId: "org-1",
+    fetchImpl: async () => ({
+      ok: false,
+      status: 401,
+      json: async () => ({}),
+      text: async () => "unauthorized",
+    }),
+  });
+  await assert.rejects(() => backend.provision("r", 1), /401/);
+});
+
+test("ZtnetBackend teardown works from a persisted mesh after restart", async () => {
+  const deletes: string[] = [];
+  const backend = new ZtnetBackend({
+    baseUrl: "http://ztnet:3000",
+    apiToken: "t",
+    organizationId: "org-1",
+    fetchImpl: async (url, init) => {
+      if (init?.method === "DELETE") deletes.push(url);
+      return {
+        ok: true,
+        status: 204,
+        json: async () => ({}),
+        text: async () => "",
+      };
+    },
+  });
+
+  await backend.teardown("room-x", {
+    backend: "zerotier",
+    cidr: "10.242.1.0/24",
+    networkId: "nw-persisted",
+    expiresAt: 1,
+  });
+  assert.deepEqual(deletes, [
+    "http://ztnet:3000/api/v1/org/org-1/network/nw-persisted",
+  ]);
 });
 
 test("TailscaleApiProvisioner issues one-off keys and revokes them", async () => {

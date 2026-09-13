@@ -54,7 +54,7 @@ export class RoomStore {
     for (const room of expired) {
       await this.persistence.deleteRoom(room.id);
       await this.persistence.deleteCredentials(room.id);
-      await this.backend.teardown(room.id);
+      await this.backend.teardown(room.id, room.mesh);
     }
     return expired.length;
   }
@@ -157,7 +157,11 @@ export class RoomStore {
     }
 
     if (this.backend.authorizeMember) {
-      const address = await this.backend.authorizeMember(roomId, memberId);
+      const address = await this.backend.authorizeMember(
+        roomId,
+        userId,
+        memberId,
+      );
       if (address) {
         member.meshAddress = address;
         await this.persistence.saveRoom(room);
@@ -189,7 +193,7 @@ export class RoomStore {
     if (room.hostUserId === userId) {
       await this.persistence.deleteRoom(roomId);
       await this.persistence.deleteCredentials(roomId);
-      await this.backend.teardown(roomId);
+      await this.backend.teardown(roomId, room.mesh);
       return { closed: true };
     }
 
