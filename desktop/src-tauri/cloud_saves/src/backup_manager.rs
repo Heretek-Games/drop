@@ -64,9 +64,7 @@ pub trait BackupHandler: Send + Sync {
             .join(self.game_translate(path, game)?))
     }
     fn home_translate(&self, _path: &PathBuf, _game: &GameVersion) -> Result<PathBuf, BackupError> {
-        let c = CommonPath::Home.get().ok_or(BackupError::NotFound);
-        println!("{:?}", c);
-        c
+        CommonPath::Home.get().ok_or(BackupError::NotFound)
     }
     fn store_user_id_translate(
         &self,
@@ -197,9 +195,7 @@ impl BackupHandler for WindowsBackupManager {
         _path: &PathBuf,
         _game: &GameVersion,
     ) -> Result<PathBuf, BackupError> {
-        CommonPath::DataLocalLow
-            .get()
-            .ok_or(BackupError::NotFound)
+        CommonPath::DataLocalLow.get().ok_or(BackupError::NotFound)
     }
     fn win_dir_translate(
         &self,

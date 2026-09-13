@@ -11,6 +11,7 @@ pub mod dll;
 pub mod error;
 pub mod interfaces;
 pub mod patch;
+pub mod path_guard;
 pub mod scanner;
 
 pub use error::EngineError;

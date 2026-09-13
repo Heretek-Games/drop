@@ -10,14 +10,35 @@ use std::path::Path;
 use crate::error::EngineError;
 
 /// Well-known anti-cheat module filenames (case-insensitive match).
+///
+/// Covers Epic Online Services EAC, BattlEye, Riot Vanguard, PunkBuster and
+/// nProtect/GameGuard. Unknown titles can still ship differently-named modules,
+/// so this list is a safety net, not a guarantee.
 pub const ANTICHEAT_MARKERS: &[&str] = &[
     "easyanticheat.exe",
     "easyanticheat_x64.dll",
     "easyanticheat_x86.dll",
     "easyanticheat.so",
+    "easyanticheat.sys",
+    "easyanticheat_eos.exe",
+    "easyanticheat_eos.dll",
+    "easyanticheat_eos_x64.dll",
     "beservice.exe",
+    "beservice_x64.exe",
     "bedaisy.sys",
+    "bedaisy64.sys",
     "battleye.dll",
+    "battleye.sys",
+    "battleye_x64.dll",
+    "vgk.sys",
+    "vgc.exe",
+    "vgtray.exe",
+    "pbsvc.exe",
+    "pnkbstra.exe",
+    "pnkbstrb.exe",
+    "gamemon.des",
+    "xigncode.exe",
+    "npggsvc.exe",
 ];
 
 /// Maximum recursion depth below `game_dir`.
@@ -35,8 +56,13 @@ pub fn detect(game_dir: &Path) -> Result<Option<String>, EngineError> {
 }
 
 fn scan_dir(dir: &Path, depth: usize) -> Result<Option<String>, EngineError> {
+    // Fail closed: a tree deeper than the cap is reported as unscannable rather
+    // than "clear", so a deeply nested anti-cheat module cannot be missed.
     if depth > MAX_SCAN_DEPTH {
-        return Ok(None);
+        return Err(EngineError::ScanFailed(format!(
+            "anti-cheat scan exceeded the maximum depth ({MAX_SCAN_DEPTH}) at {}",
+            dir.display()
+        )));
     }
     let entries = std::fs::read_dir(dir)
         .map_err(|e| EngineError::ScanFailed(format!("{}: {e}", dir.display())))?;
@@ -80,6 +106,22 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         std::fs::write(tmp.path().join("game.exe"), b"x").unwrap();
         assert_eq!(detect(tmp.path()).unwrap(), None);
+    }
+
+    #[test]
+    fn depth_cap_fails_closed_instead_of_reporting_clear() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut dir = tmp.path().to_path_buf();
+        for _ in 0..(MAX_SCAN_DEPTH + 2) {
+            dir.push("d");
+        }
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("game.exe"), b"x").unwrap();
+
+        assert!(matches!(
+            detect(tmp.path()),
+            Err(EngineError::ScanFailed(_))
+        ));
     }
 
     #[test]

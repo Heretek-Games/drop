@@ -34,7 +34,7 @@ impl DatabaseInterface {
         let cache_dir = DATA_ROOT_DIR.join("cache");
         let pfx_dir = DATA_ROOT_DIR.join("pfx");
 
-        debug!("creating data directory at {DATA_ROOT_DIR:?}");
+        debug!("creating data directories");
         create_dir_all(DATA_ROOT_DIR.as_path()).unwrap_or_else(|e| {
             panic!(
                 "Failed to create directory {} with error {}",
@@ -87,7 +87,7 @@ impl DatabaseInterface {
             }
         } else {
             let default = Database::new(games_base_dir, None, cache_dir);
-            debug!("Creating database at path {}", db_path.display());
+            debug!("Creating database");
             DatabaseInterface::create_at_path(&db_path, default)
                 .expect("Database could not be created")
         }
@@ -175,7 +175,7 @@ fn handle_invalid_database(
         base.set_file_name(format!("drop.db.backup-{time}"));
         base
     };
-    info!("old database stored at: {}", new_path.to_string_lossy());
+    info!("old database backed up");
     fs::rename(&db_path, &new_path).unwrap_or_else(|e| {
         panic!(
             "Could not rename database {} to {} with error {}",

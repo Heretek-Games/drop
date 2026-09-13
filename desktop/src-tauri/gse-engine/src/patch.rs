@@ -3,6 +3,7 @@
 use std::path::Path;
 
 use crate::error::EngineError;
+use crate::path_guard;
 use crate::{PatchPlan, anticheat, config::SteamSettings, dll, interfaces};
 
 /// Result of a successful patch.
@@ -42,22 +43,18 @@ pub fn apply_plan(
         if !src.is_file() {
             continue;
         }
-        let dest = game_dir.join(name);
-        if let Some(parent) = dest.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        std::fs::copy(&src, &dest)?;
+        path_guard::copy_to(game_dir, &src, name)?;
         report.patched.push(name.clone());
     }
 
     // Harvest interface names from the pre-patch (original) binaries.
     let mut interface_names = Vec::new();
     for name in &plan.targets {
-        let original = game_dir.join(format!("{name}.orig"));
+        let original = path_guard::safe_join(game_dir, format!("{name}.orig"))?;
         let candidate = if original.is_file() {
             original
         } else {
-            game_dir.join(name)
+            path_guard::safe_join(game_dir, name)?
         };
         if candidate.is_file() {
             interface_names.extend(interfaces::extract(&candidate)?);

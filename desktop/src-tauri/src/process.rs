@@ -71,6 +71,9 @@ pub fn open_process_logs(game_id: String, app_handle: AppHandle) -> Result<(), P
 /// version has no recipe, so the caller can fall back to the legacy setup.
 #[tauri::command]
 pub fn start_pipeline_setup(game_id: String, app_handle: AppHandle) -> Result<(), String> {
+    if ::process::pipeline::pipeline_is_running(&game_id) {
+        return Err(format!("A pipeline is already running for game {game_id}"));
+    }
     let prepared = ::process::pipeline::prepare_pipeline(&game_id)?;
 
     tauri::async_runtime::spawn(async move {

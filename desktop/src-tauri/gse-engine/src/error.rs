@@ -17,6 +17,8 @@ pub enum EngineError {
     MissingEmulatorBinary(String),
     /// An anti-cheat payload was detected; patching is refused.
     AntiCheatDetected(String),
+    /// A path escaped the game directory or traversed a symlink.
+    UnsafePath(String),
     /// Filesystem failure.
     Io(std::io::Error),
     /// Manifest (de)serialization failure.
@@ -45,6 +47,7 @@ impl fmt::Display for EngineError {
                 f,
                 "anti-cheat payload detected ({marker}); patching aborted for safety"
             ),
+            EngineError::UnsafePath(detail) => write!(f, "unsafe path: {detail}"),
             EngineError::Io(err) => write!(f, "io error: {err}"),
             EngineError::Serialization(err) => write!(f, "manifest error: {err}"),
         }
