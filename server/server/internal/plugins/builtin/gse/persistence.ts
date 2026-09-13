@@ -1,5 +1,5 @@
 import type { PluginStorage } from "../../types";
-import { parseCredential, parseRoom } from "./types";
+import { parseCredential, parseRoom, tryParseRoom } from "./types";
 import type { MeshCredential, Room } from "./types";
 
 /**
@@ -48,7 +48,9 @@ export class StorageRoomPersistence implements RoomPersistence {
   }
 
   async listRooms(): Promise<Room[]> {
-    return Object.values(await this.loadRooms()).map(parseRoom);
+    return Object.values(await this.loadRooms())
+      .map(tryParseRoom)
+      .filter((room): room is Room => room !== undefined);
   }
 
   async getRoom(id: string): Promise<Room | undefined> {

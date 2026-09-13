@@ -122,21 +122,24 @@ export class ZtnetBackend implements MeshBackend {
     }
 
     const cidr = roomCidr(roomId);
-    await this.json<ZtnetNetworkResponse>(this.orgUrl(`/${networkId}`), {
-      method: "POST",
-      body: JSON.stringify({
-        name: `drop-gse-${roomId}`,
-        private: true,
-        v4AssignMode: { zt: true },
-        ipAssignmentPools: [
-          {
-            ipRangeStart: cidr.replace(/\.0\/24$/, ".1"),
-            ipRangeEnd: cidr.replace(/\.0\/24$/, ".254"),
-          },
-        ],
-        routes: [{ target: cidr, via: null }],
-      }),
-    });
+    await this.json<ZtnetNetworkResponse>(
+      this.orgUrl(`/${encodeURIComponent(networkId)}`),
+      {
+        method: "POST",
+        body: JSON.stringify({
+          name: `drop-gse-${roomId}`,
+          private: true,
+          v4AssignMode: { zt: true },
+          ipAssignmentPools: [
+            {
+              ipRangeStart: cidr.replace(/\.0\/24$/, ".1"),
+              ipRangeEnd: cidr.replace(/\.0\/24$/, ".254"),
+            },
+          ],
+          routes: [{ target: cidr, via: null }],
+        }),
+      },
+    );
 
     this.networks.set(roomId, networkId);
     return {
@@ -181,7 +184,9 @@ export class ZtnetBackend implements MeshBackend {
     );
 
     const member = await this.json<ZtnetMemberResponse>(
-      this.orgUrl(`/${networkId}/member/${memberId}`),
+      this.orgUrl(
+        `/${encodeURIComponent(networkId)}/member/${encodeURIComponent(memberId)}`,
+      ),
       {
         method: "POST",
         body: JSON.stringify({
@@ -210,9 +215,14 @@ export class ZtnetBackend implements MeshBackend {
     const nodeId = memberId ?? this.memberIds.get(roomId)?.get(userId);
     this.memberIds.get(roomId)?.delete(userId);
     if (!networkId || !nodeId) return;
-    await this.request(this.orgUrl(`/${networkId}/member/${nodeId}`), {
-      method: "DELETE",
-    });
+    await this.request(
+      this.orgUrl(
+        `/${encodeURIComponent(networkId)}/member/${encodeURIComponent(nodeId)}`,
+      ),
+      {
+        method: "DELETE",
+      },
+    );
   }
 
   async teardown(roomId: string, mesh?: PublicMeshInfo): Promise<void> {
@@ -220,6 +230,8 @@ export class ZtnetBackend implements MeshBackend {
     this.memberIds.delete(roomId);
     if (!networkId) return;
     this.networks.delete(roomId);
-    await this.request(this.orgUrl(`/${networkId}`), { method: "DELETE" });
+    await this.request(this.orgUrl(`/${encodeURIComponent(networkId)}`), {
+      method: "DELETE",
+    });
   }
 }

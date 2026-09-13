@@ -581,6 +581,11 @@ test("drop-gse route lifecycle: host, join, credential, member, leave, close", a
     ),
   );
 
+  const broadcasts: Record<string, unknown>[] = [];
+  manager.subscribe("gse:rooms", (event) => {
+    broadcasts.push(event as Record<string, unknown>);
+  });
+
   const created = (await manager.dispatch(
     "drop-gse",
     "POST",
@@ -611,7 +616,7 @@ test("drop-gse route lifecycle: host, join, credential, member, leave, close", a
     "drop-gse",
     "POST",
     `/rooms/${roomId}/member`,
-    jsonEvent("POST", `/rooms/${roomId}/member`, { memberId: "node-guest" }),
+    jsonEvent("POST", `/rooms/${roomId}/member`, { memberId: "abcdef0123" }),
   )) as { address?: string };
   assert.ok(reported.address);
 
@@ -635,6 +640,21 @@ test("drop-gse route lifecycle: host, join, credential, member, leave, close", a
     jsonEvent("DELETE", `/rooms/${roomId}`),
   )) as { closed: boolean };
   assert.equal(left.closed, false);
+
+  // The leave broadcast must use the redacted discovery view: no network id
+  // and no member identities on the public channel.
+  const leaveUpdate = broadcasts
+    .filter((event) => event.type === "room_updated")
+    .at(-1) as {
+    room: {
+      mesh?: { networkId?: string };
+      members?: unknown;
+      memberCount?: number;
+    };
+  };
+  assert.equal(leaveUpdate.room.mesh?.networkId, "");
+  assert.equal(leaveUpdate.room.members, undefined);
+  assert.equal(typeof leaveUpdate.room.memberCount, "number");
 
   currentUser = "host";
   const closed = (await manager.dispatch(

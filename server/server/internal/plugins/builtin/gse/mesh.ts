@@ -160,7 +160,7 @@ export class ZeroTierBackend implements MeshBackend {
   }
 
   async provision(roomId: string, expiresAt: number): Promise<PublicMeshInfo> {
-    const url = `${this.options.baseUrl}/controller/network/${this.options.controllerNodeId}______`;
+    const url = `${this.options.baseUrl}/controller/network/${encodeURIComponent(this.options.controllerNodeId)}______`;
     const cidr = roomCidr(roomId);
     const response = await this.fetchImpl(url, {
       method: "POST",
@@ -229,7 +229,7 @@ export class ZeroTierBackend implements MeshBackend {
     const networkId = this.networkIdFor(roomId, mesh);
     if (!networkId) return undefined;
     const response = await this.fetchImpl(
-      `${this.options.baseUrl}/network/${networkId}/member/${memberId}`,
+      `${this.options.baseUrl}/network/${encodeURIComponent(networkId)}/member/${encodeURIComponent(memberId)}`,
       {
         method: "POST",
         headers: this.headers(),
@@ -264,7 +264,7 @@ export class ZeroTierBackend implements MeshBackend {
     if (!networkId || !nodeId) return;
     this.memberIds.get(roomId)?.delete(userId);
     const response = await this.fetchImpl(
-      `${this.options.baseUrl}/network/${networkId}/member/${nodeId}`,
+      `${this.options.baseUrl}/network/${encodeURIComponent(networkId)}/member/${encodeURIComponent(nodeId)}`,
       {
         method: "POST",
         headers: this.headers(),
@@ -282,7 +282,7 @@ export class ZeroTierBackend implements MeshBackend {
     if (!networkId) return;
     this.networks.delete(roomId);
     const response = await this.fetchImpl(
-      `${this.options.baseUrl}/controller/network/${networkId}`,
+      `${this.options.baseUrl}/controller/network/${encodeURIComponent(networkId)}`,
       { method: "DELETE", headers: this.headers() },
     );
     if (!response.ok) {

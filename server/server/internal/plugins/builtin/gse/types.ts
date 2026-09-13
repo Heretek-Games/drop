@@ -120,6 +120,23 @@ function isMeshInfo(value: unknown): value is PublicMeshInfo {
   return mesh.backend === "zerotier" || mesh.backend === "tailscale";
 }
 
+function isEmulatorBinding(value: unknown): value is EmulatorBinding {
+  if (!value || typeof value !== "object") return false;
+  const emulator = value as Partial<EmulatorBinding>;
+  return (
+    (emulator.flavor === "gbe_fork" || emulator.flavor === "gse_fork") &&
+    typeof emulator.release === "string" &&
+    typeof emulator.releaseDigest === "string"
+  );
+}
+
+/** ZeroTier node ids are exactly 10 lowercase/uppercase hex characters. */
+export const MESH_MEMBER_ID_PATTERN = /^[0-9a-f]{10}$/i;
+
+export function isMeshMemberId(value: unknown): value is string {
+  return typeof value === "string" && MESH_MEMBER_ID_PATTERN.test(value);
+}
+
 /** Runtime shape check for a persisted `Room` payload. */
 export function isRoom(value: unknown): value is Room {
   if (!value || typeof value !== "object") return false;
@@ -137,8 +154,7 @@ export function isRoom(value: unknown): value is Room {
       (member) => !!member && typeof member.userId === "string",
     ) &&
     isMeshInfo(room.mesh) &&
-    !!room.emulator &&
-    (room.emulator.flavor === "gbe_fork" || room.emulator.flavor === "gse_fork")
+    isEmulatorBinding(room.emulator)
   );
 }
 
@@ -147,6 +163,11 @@ export function parseRoom(value: unknown): Room {
     throw new Error("corrupt persisted GseRoom payload");
   }
   return value;
+}
+
+/** Non-throwing variant for list paths: corrupt rows are skipped, not fatal. */
+export function tryParseRoom(value: unknown): Room | undefined {
+  return isRoom(value) ? value : undefined;
 }
 
 /** Runtime shape check for a persisted `MeshCredential` payload. */

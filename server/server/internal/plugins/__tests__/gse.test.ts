@@ -20,7 +20,7 @@ import {
 } from "../builtin/gse/room-store";
 import type { PluginStorage } from "../types";
 import { parseCredential, parseRoom } from "../builtin/gse/types";
-import type { EmulatorBinding } from "../builtin/gse/types";
+import type { EmulatorBinding, MeshBackend } from "../builtin/gse/types";
 
 class MemoryStorage implements PluginStorage {
   private readonly data = new Map<string, unknown>();
@@ -515,7 +515,7 @@ test("RoomStore revokes using persisted node id after a restart", async () => {
     () => 1_000_000,
   );
   await store1.join(room.id, "guest");
-  await store1.registerMember(room.id, "guest", "node-guest");
+  await store1.registerMember(room.id, "guest", "abcdef0123");
 
   // Restart again with a brand-new backend whose in-memory maps are empty.
   const deletes: string[] = [];
@@ -542,7 +542,7 @@ test("RoomStore revokes using persisted node id after a restart", async () => {
   const left = await store2.leave(room.id, "guest");
   assert.equal(left.closed, false);
   assert.ok(
-    deletes.some((url) => url.endsWith("/member/node-guest")),
+    deletes.some((url) => url.endsWith("/member/abcdef0123")),
     "the restarted backend should revoke the persisted node id",
   );
 });
@@ -628,7 +628,7 @@ test("TailscaleApiProvisioner surfaces key deletion failures", async () => {
 test("RoomStore records the address authorized for a member node", async () => {
   const { store } = harness();
   const room = await store.create(createInput("host"));
-  const updated = await store.registerMember(room.id, "host", "node-1");
+  const updated = await store.registerMember(room.id, "host", "1234567890");
   assert.ok(updated.members.find((m) => m.userId === "host")?.meshAddress);
 });
 
@@ -792,4 +792,109 @@ test("RoomStore host close deletes the room and its credentials together", async
   assert.equal(closed.closed, true);
   assert.equal(await persistence.getRoom(room.id), undefined);
   assert.deepEqual(await persistence.getCredentials(room.id), {});
+});
+
+test("RoomStore rejects invalid room input and malformed member ids", async () => {
+  const { store } = harness();
+
+  await assert.rejects(
+    () => store.create({ ...createInput("host"), gameId: "" }),
+    /invalid gameId/,
+  );
+  await assert.rejects(
+    () =>
+      store.create({
+        ...createInput("host"),
+        emulator: { flavor: "bogus" } as unknown as EmulatorBinding,
+      }),
+    /invalid emulator flavor/,
+  );
+  await assert.rejects(
+    () => store.create({ ...createInput("host"), appId: 1.5 }),
+    /invalid appId/,
+  );
+
+  const room = await store.create(createInput("host"));
+  await assert.rejects(
+    () => store.registerMember(room.id, "host", "../../evil"),
+    /invalid mesh member id/,
+  );
+  await assert.rejects(
+    () => store.registerMember(room.id, "host", "not-a-node-id"),
+    /invalid mesh member id/,
+  );
+});
+
+test("RoomStore list skips corrupt persisted rooms", async () => {
+  const storage = new MemoryStorage();
+  await storage.set("rooms", {
+    good: {
+      id: "good",
+      gameId: "game-1",
+      versionId: "v1",
+      emulator: EMULATOR,
+      hostUserId: "host",
+      hostHeartbeatAt: 1_000_000,
+      members: [{ userId: "host", joinedAt: 1_000_000 }],
+      mesh: {
+        backend: "zerotier",
+        cidr: "10.242.1.0/24",
+        networkId: "network-1",
+        expiresAt: 2_000_000,
+      },
+      createdAt: 1_000_000,
+      expiresAt: 2_000_000,
+    },
+    corrupt: { id: "corrupt", emulator: { flavor: "bogus" } },
+  });
+  const store = new RoomStore(
+    new StorageRoomPersistence(storage),
+    new InMemoryMeshBackend(),
+    () => 1_000_000,
+  );
+
+  const rooms = await store.list();
+  assert.equal(rooms.length, 1);
+  assert.equal(rooms[0]?.id, "good");
+
+  // Room creation must keep working despite the corrupt row.
+  const created = await store.create(createInput("host-2"));
+  assert.ok(created.id);
+});
+
+test("pruneExpired retries teardown instead of orphaning rooms", async () => {
+  const storage = new MemoryStorage();
+  const persistence = new StorageRoomPersistence(storage);
+  const base = new InMemoryMeshBackend();
+  let failNext = true;
+  const backend: MeshBackend = {
+    id: base.id,
+    provision: (roomId, expiresAt) => base.provision(roomId, expiresAt),
+    issueCredential: (roomId, userId, mesh) =>
+      base.issueCredential(roomId, userId, mesh),
+    authorizeMember: (roomId, userId, memberId, mesh, used) =>
+      base.authorizeMember!(roomId, userId, memberId, mesh, used),
+    revokeMember: async () => {},
+    teardown: async (roomId, mesh) => {
+      if (failNext) {
+        failNext = false;
+        throw new Error("controller unavailable");
+      }
+      await base.teardown(roomId, mesh);
+    },
+  };
+
+  let now = 1_000_000;
+  const store = new RoomStore(persistence, backend, () => now);
+  const room = await store.create(createInput("host"));
+
+  now += ROOM_TTL_MS + 1;
+  assert.equal(await store.pruneExpired(), 0);
+  assert.ok(
+    await persistence.getRoom(room.id),
+    "failed teardown must keep the row for a later retry",
+  );
+
+  assert.equal(await store.pruneExpired(), 1);
+  assert.equal(await persistence.getRoom(room.id), undefined);
 });

@@ -8,7 +8,7 @@ import type {
   MeshCredential,
   Room,
 } from "./types";
-import { toDiscoverable } from "./types";
+import { isMeshMemberId, toDiscoverable } from "./types";
 
 /** Room lifetime. */
 export const ROOM_TTL_MS = 4 * 60 * 60 * 1000;
@@ -29,6 +29,43 @@ export interface CreateRoomInput {
   appId?: number | undefined;
   emulator: EmulatorBinding;
   hostUserId: string;
+}
+
+const MAX_IDENTIFIER_LENGTH = 128;
+const MAX_BINDING_LENGTH = 256;
+
+function requireIdentifier(value: unknown, field: string): string {
+  if (
+    typeof value !== "string" ||
+    value.length === 0 ||
+    value.length > MAX_IDENTIFIER_LENGTH
+  ) {
+    throw new Error(`invalid ${field}`);
+  }
+  return value;
+}
+
+function requireEmulatorBinding(value: unknown): EmulatorBinding {
+  if (!value || typeof value !== "object") {
+    throw new Error("invalid emulator binding");
+  }
+  const binding = value as Partial<EmulatorBinding>;
+  if (binding.flavor !== "gbe_fork" && binding.flavor !== "gse_fork") {
+    throw new Error("invalid emulator flavor");
+  }
+  if (
+    typeof binding.release !== "string" ||
+    binding.release.length > MAX_BINDING_LENGTH
+  ) {
+    throw new Error("invalid emulator release");
+  }
+  if (
+    typeof binding.releaseDigest !== "string" ||
+    binding.releaseDigest.length > MAX_BINDING_LENGTH
+  ) {
+    throw new Error("invalid emulator release digest");
+  }
+  return binding as EmulatorBinding;
 }
 
 /**
@@ -73,17 +110,37 @@ export class RoomStore {
       const rooms = await this.persistence.listRooms();
       const now = this.now();
       const expired = rooms.filter((room) => room.expiresAt <= now);
+      let pruned = 0;
       for (const room of expired) {
+        try {
+          await this.backend.teardown(room.id, room.mesh);
+        } catch {
+          // Keep the persisted mesh so a later sweep can retry the teardown
+          // instead of orphaning the provisioned network.
+          continue;
+        }
         await this.persistence.deleteRoomData(room.id);
-        await this.backend.teardown(room.id, room.mesh);
+        pruned += 1;
       }
       await this.persistence.deleteExpiredCredentials(now);
-      return expired.length;
+      return pruned;
     });
   }
 
   async create(input: CreateRoomInput): Promise<Room> {
     return this.withLock("__create__", async () => {
+      const gameId = requireIdentifier(input.gameId, "gameId");
+      const versionId = requireIdentifier(input.versionId, "versionId");
+      const emulator = requireEmulatorBinding(input.emulator);
+      if (
+        input.appId !== undefined &&
+        (!Number.isInteger(input.appId) ||
+          input.appId < 0 ||
+          input.appId > 0xffffffff)
+      ) {
+        throw new Error("invalid appId");
+      }
+
       const rooms = await this.persistence.listRooms();
       const now = this.now();
 
@@ -96,7 +153,7 @@ export class RoomStore {
       if (rooms.length >= MAX_ROOMS) {
         throw new Error("global room limit reached");
       }
-      if (this.compat?.isBlocked(input.gameId, input.appId)) {
+      if (this.compat?.isBlocked(gameId, input.appId)) {
         throw new Error("game is known-incompatible with GSE");
       }
 
@@ -106,10 +163,10 @@ export class RoomStore {
 
       const room: Room = {
         id: roomId,
-        gameId: input.gameId,
-        versionId: input.versionId,
+        gameId,
+        versionId,
         appId: input.appId,
-        emulator: input.emulator,
+        emulator,
         hostUserId: input.hostUserId,
         hostHeartbeatAt: now,
         members: [{ userId: input.hostUserId, joinedAt: now }],
@@ -174,6 +231,9 @@ export class RoomStore {
     userId: string,
     memberId: string,
   ): Promise<Room> {
+    if (!isMeshMemberId(memberId)) {
+      throw new Error("invalid mesh member id");
+    }
     return this.withLock(roomId, async () => {
       const room = await this.persistence.getRoom(roomId);
       if (!room || room.expiresAt <= this.now()) {
@@ -230,8 +290,8 @@ export class RoomStore {
       if (!room) return { closed: false };
 
       if (room.hostUserId === userId) {
-        await this.persistence.deleteRoomData(roomId);
         await this.backend.teardown(roomId, room.mesh);
+        await this.persistence.deleteRoomData(roomId);
         return { closed: true };
       }
 

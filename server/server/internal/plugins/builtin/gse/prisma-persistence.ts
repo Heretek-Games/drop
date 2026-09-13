@@ -1,5 +1,5 @@
 import type { RoomPersistence } from "./persistence";
-import { parseCredential, parseRoom } from "./types";
+import { parseCredential, parseRoom, tryParseRoom } from "./types";
 import type { MeshCredential, Room } from "./types";
 
 /**
@@ -17,7 +17,9 @@ export class PrismaRoomPersistence implements RoomPersistence {
   async listRooms(): Promise<Room[]> {
     const prisma = await this.db();
     const rows = await prisma.gseRoom.findMany();
-    return rows.map((row) => parseRoom(row.payload));
+    return rows
+      .map((row) => tryParseRoom(row.payload))
+      .filter((room): room is Room => room !== undefined);
   }
 
   async getRoom(id: string): Promise<Room | undefined> {

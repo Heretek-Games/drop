@@ -12,7 +12,7 @@ import type { RoomPersistence } from "./gse/persistence";
 import { PrismaRoomPersistence } from "./gse/prisma-persistence";
 import { RoomStore } from "./gse/room-store";
 import { ZtnetBackend } from "./gse/ztnet";
-import { toDiscoverable } from "./gse/types";
+import { isMeshMemberId, toDiscoverable } from "./gse/types";
 import type { EmulatorBinding, MeshBackend } from "./gse/types";
 
 export type {
@@ -230,7 +230,12 @@ export class DropGseServerPlugin implements ServerPlugin {
         emulator?: EmulatorBinding;
       }>(event);
 
-      if (!body?.gameId || !body?.versionId) {
+      if (
+        typeof body?.gameId !== "string" ||
+        body.gameId.length === 0 ||
+        typeof body?.versionId !== "string" ||
+        body.versionId.length === 0
+      ) {
         throw createError({
           statusCode: 400,
           statusMessage: "gameId and versionId are required",
@@ -256,7 +261,11 @@ export class DropGseServerPlugin implements ServerPlugin {
       } catch (err) {
         const message = String(err);
         throw createError({
-          statusCode: message.includes("known-incompatible") ? 409 : 429,
+          statusCode: message.includes("known-incompatible")
+            ? 409
+            : message.includes("invalid")
+              ? 400
+              : 429,
           statusMessage: message,
         });
       }
@@ -340,10 +349,10 @@ export class DropGseServerPlugin implements ServerPlugin {
         });
       }
       const body = await readBody<{ memberId?: string }>(event);
-      if (!body?.memberId) {
+      if (!isMeshMemberId(body?.memberId)) {
         throw createError({
           statusCode: 400,
-          statusMessage: "memberId is required",
+          statusMessage: "memberId must be a 10-character hex ZeroTier node id",
         });
       }
       try {
@@ -402,7 +411,10 @@ export class DropGseServerPlugin implements ServerPlugin {
         userId: context.userId,
       });
       if (room) {
-        ctx.broadcast("gse:rooms", { type: "room_updated", room });
+        ctx.broadcast("gse:rooms", {
+          type: "room_updated",
+          room: toDiscoverable(room),
+        });
       }
       return { success: true, closed: false };
     });
