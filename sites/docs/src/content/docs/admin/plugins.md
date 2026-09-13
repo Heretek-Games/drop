@@ -128,6 +128,11 @@ One-time bootstrap (no REST endpoint exists for this):
 4. Set `GSE_ZTNET_ORG` / `GSE_ZTNET_TOKEN` in `.env.ztnet` and re-run the
    compose command.
 
+For local development the helper `server/dev-tools/ztnet-bootstrap.mjs`
+automates steps 1–3 and prints the `GSE_ZTNET_ORG` / `GSE_ZTNET_TOKEN` values;
+the E2E check `server/dev-tools/gse-ztnet-check.ts` then provisions, authorizes
+and tears down a real network.
+
 The desktop host must have **ZeroTier One** installed to join a room network;
 the client shells out to `zerotier-cli` and reports an actionable error when it
 is missing.

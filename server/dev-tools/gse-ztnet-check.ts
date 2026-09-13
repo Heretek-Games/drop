@@ -21,9 +21,9 @@ if (!baseUrl || !apiToken || !organizationId) {
 
 const backend = new ZtnetBackend({ baseUrl, apiToken, organizationId });
 const roomId = `check-${Date.now()}`;
-// A synthetic ZeroTier node id; the API pre-authorizes members that have not
-// joined yet.
-const memberId = "abcdef01234";
+// A synthetic ZeroTier node id (10 hex); the API pre-authorizes members that
+// have not joined yet.
+const memberId = "abcdef0123";
 
 const mesh = await backend.provision(roomId, Date.now() + 60 * 60 * 1000);
 console.log("provisioned", mesh);

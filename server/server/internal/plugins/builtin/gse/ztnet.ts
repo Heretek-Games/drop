@@ -1,4 +1,4 @@
-import { type FetchLike, roomCidr } from "./mesh";
+import { type FetchLike, roomCidr, roomMemberAddress } from "./mesh";
 import type { IssuedCredential, MeshBackend, PublicMeshInfo } from "./types";
 
 export interface ZtnetBackendOptions {
@@ -132,11 +132,19 @@ export class ZtnetBackend implements MeshBackend {
     const networkId = this.networks.get(roomId);
     if (!networkId) return undefined;
 
+    // Assign a deterministic address from the room pool at authorization time;
+    // the controller does not auto-assign until the node actually joins, and
+    // peers need known addresses for `custom_broadcasts.txt`.
+    const assigned = roomMemberAddress(roomCidr(roomId), memberId);
+
     const member = await this.json<ZtnetMemberResponse>(
       this.orgUrl(`/${networkId}/member/${memberId}`),
       {
         method: "POST",
-        body: JSON.stringify({ authorized: true }),
+        body: JSON.stringify({
+          authorized: true,
+          ...(assigned ? { ipAssignments: [assigned] } : {}),
+        }),
       },
     );
 
@@ -145,7 +153,7 @@ export class ZtnetBackend implements MeshBackend {
     this.memberIds.set(roomId, roomMembers);
 
     // ZTNET returns plain IPs (no CIDR suffix).
-    return member.ipAssignments?.[0];
+    return member.ipAssignments?.[0] ?? assigned;
   }
 
   async revokeMember(roomId: string, userId: string): Promise<void> {

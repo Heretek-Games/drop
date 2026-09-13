@@ -44,8 +44,10 @@ services:
       - "9993:9993/udp"
 
   # ZTNET's own database (separate from Drop's).
+  # Pinned: the `postgres:alpine` tag is now v18, whose entrypoint expects the
+  # data directory at /var/lib/postgresql (not .../data). ZTNET documents v15.
   ztnet-postgres:
-    image: postgres:alpine
+    image: postgres:15-alpine
     container_name: drop-ztnet-postgres
     restart: unless-stopped
     environment:
@@ -78,6 +80,11 @@ services:
       NEXTAUTH_URL: ${NEXTAUTH_URL:-http://localhost:3001}
       NEXTAUTH_URL_INTERNAL: http://ztnet:3000
       NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:?set NEXTAUTH_SECRET in .env.ztnet}
+      # Controller address; without this ZTNET reports a null controller.
+      ZT_ADDR: http://zerotier:9993
+      # ZT_SECRET defaults to the shared volume's authtoken.secret. Uncomment
+      # and set it if the container cannot read that file:
+      # ZT_SECRET: ${ZT_SECRET}
       # Room teardown can burst beyond the 50/min default.
       RATE_LIMIT_API_MAX_REQUESTS: 500
 

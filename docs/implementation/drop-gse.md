@@ -265,5 +265,8 @@ The checklists above are authoritative. Summary:
 
 **Verification:** `pnpm --filter drop run test` (server tests), `cargo test -p
 gse-engine` (19), `cargo check -p process --tests` and `-p drop-app`, plus
-`nuxt typecheck` — all green. The Prisma room store was also run against a live
-Postgres (`prisma migrate deploy` + `dev-tools/gse-prisma-check.ts`).
+`nuxt typecheck` — all green. The Prisma room store was run against a live
+Postgres (`prisma migrate deploy` + `dev-tools/gse-prisma-check.ts`), and the
+ZTNET backend was verified end-to-end against a live ZTNET + ZeroTier controller
+(`dev-tools/ztnet-bootstrap.mjs` then `dev-tools/gse-ztnet-check.ts` →
+provision/authorize/teardown OK, member assigned `10.242.x.x`).
