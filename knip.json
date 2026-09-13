@@ -11,7 +11,10 @@
         "prettier-plugin-sort-json"
       ]
     },
-    "desktop": {},
+    "desktop": {
+      "entry": ["build.mjs"],
+      "ignore": ["main/**"]
+    },
     "libraries/base": {},
     "server": {
       "entry": [
@@ -20,12 +23,23 @@
         "nuxt.config.ts",
         "plugins/**/*.{ts,js}",
         "middleware/**/*.{ts,js}",
-        "layouts/**/*.vue"
+        "layouts/**/*.vue",
+        "composables/**/*.{ts,js}",
+        "utils/**/*.{ts,js}",
+        "**/__tests__/**/*.{ts,js}",
+        "dev-tools/**/*.{ts,js,mjs}",
+        "i18n/**/*.{ts,js}",
+        "rules/**/*.{ts,mts}",
+        "deploy-template/**/*.mjs"
       ],
       "ignore": [".nuxt/**", ".output/**", ".data/**", "build/**"],
+      "ignoreDependencies": ["vue-i18n"],
       "project": ["**/*.{ts,js,mjs,vue}"]
     },
     "sites/docs": {},
-    "sites/promo": {}
+    "sites/promo": {
+      "entry": ["content-collections.ts"],
+      "ignoreDependencies": ["content-collections"]
+    }
   }
 }
