@@ -1,5 +1,6 @@
 use std::{
     io::Error,
+    path::PathBuf,
     sync::{Arc, LazyLock},
 };
 
@@ -8,7 +9,7 @@ use axum::{
     body::Body,
     extract::{Path, State},
     http::HeaderMap,
-    response::IntoResponse,
+    response::{IntoResponse, Response},
 };
 use bytes::Bytes;
 use dashmap::{DashMap, mapref::one::RefMut};
@@ -17,14 +18,18 @@ use droplet_rs::{
     versions::types::{MinimumFileObject, VersionFile},
 };
 use futures_util::{Stream, StreamExt, stream};
-use log::{error, info};
+use log::{error, info, warn};
 use pin_project_lite::pin_project;
 use reqwest::StatusCode;
-use tokio::sync::{Semaphore, SemaphorePermit};
+use tokio::{
+    io::AsyncWriteExt,
+    sync::{Semaphore, SemaphorePermit},
+};
 use tokio_util::io::ReaderStream;
 
 use crate::{
-    DownloadContext, GLOBAL_CONTEXT_SEMAPHORE, downloads::download::create_download_context,
+    DownloadContext, GLOBAL_CONTEXT_SEMAPHORE,
+    downloads::{cache::ChunkCache, download::create_download_context},
     state::AppState,
 };
 
@@ -71,7 +76,7 @@ static FILE_SEMAPHORE: LazyLock<Semaphore> = LazyLock::new(|| Semaphore::new(*SE
 pub async fn serve_file(
     State(state): State<Arc<AppState>>,
     Path((game_id, version_name, chunk_id)): Path<(String, String, String)>,
-) -> Result<impl IntoResponse, StatusCode> {
+) -> Result<Response, StatusCode> {
     let context_cache = &state.context_cache;
 
     let mut context = get_or_create_context(&state, context_cache, game_id, version_name).await?;
@@ -81,12 +86,25 @@ pub async fn serve_file(
     if chunk_data.files.len() >= *SEMPAHORE_COUNT {
         return Err(StatusCode::INSUFFICIENT_STORAGE);
     }
+
+    // Read-through cache: hits skip source storage entirely; misses fill the
+    // cache best-effort and fall back to direct streaming on any failure.
+    if state.chunk_cache.enabled() {
+        if let Some(path) = state.chunk_cache.hit(&chunk_data.checksum) {
+            return serve_from_file(&path, &context, &chunk_data).await;
+        }
+
+        if let Some(path) = fill_cache(&state.chunk_cache, &mut context, &chunk_data).await {
+            return serve_from_file(&path, &context, &chunk_data).await;
+        }
+    }
+
     let permit = FILE_SEMAPHORE
         .acquire_many(chunk_data.files.len().try_into().unwrap())
         .await
         .map_err(|_| StatusCode::INSUFFICIENT_STORAGE)?;
     let mut streams = Vec::with_capacity(chunk_data.files.len());
-    let mut content_length = 0;
+    let mut content_length = 0usize;
 
     for file_entry in &chunk_data.files {
         let reader = get_file_reader(
@@ -103,7 +121,109 @@ pub async fn serve_file(
     }
 
     let stream = stream::iter(streams).flatten();
-    let mut cipher = Aes128Ctr64LE::new(&context.manifest.key.into(), &chunk_data.iv.into());
+    Ok(encrypted_response(
+        stream,
+        content_length,
+        context.manifest.key,
+        chunk_data.iv,
+        permit,
+    ))
+}
+
+/// Serves a chunk straight from the content-addressed cache file.
+async fn serve_from_file(
+    path: &std::path::Path,
+    context: &RefMut<'_, (String, String), DownloadContext>,
+    chunk_data: &ChunkData,
+) -> Result<Response, StatusCode> {
+    let file = tokio::fs::File::open(path)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let content_length = chunk_data.files.iter().map(|f| f.length).sum();
+    let permit = FILE_SEMAPHORE
+        .acquire()
+        .await
+        .map_err(|_| StatusCode::INSUFFICIENT_STORAGE)?;
+
+    Ok(encrypted_response(
+        ReaderStream::new(file),
+        content_length,
+        context.manifest.key,
+        chunk_data.iv,
+        permit,
+    ))
+}
+
+/// Fills the cache with the plaintext chunk bytes. Returns the published cache
+/// path on success, or `None` (leaving the caller to stream directly).
+async fn fill_cache(
+    cache: &ChunkCache,
+    context: &mut RefMut<'_, (String, String), DownloadContext>,
+    chunk_data: &ChunkData,
+) -> Option<PathBuf> {
+    let guard = cache.reserve(&chunk_data.checksum)?;
+    let mut file = tokio::fs::File::create(&guard.temp_path).await.ok()?;
+
+    let expected: u64 = chunk_data.files.iter().map(|f| f.length as u64).sum();
+    let mut written: u64 = 0;
+
+    for file_entry in &chunk_data.files {
+        let mut reader = context
+            .backend
+            .reader(
+                &VersionFile {
+                    relative_filename: file_entry.filename.clone(),
+                    permission: 0,
+                    size: 0,
+                },
+                file_entry.start as u64,
+                (file_entry.start + file_entry.length) as u64,
+            )
+            .await
+            .ok()?;
+
+        match tokio::io::copy(&mut reader, &mut file).await {
+            Ok(bytes) => written += bytes,
+            Err(e) => {
+                warn!("chunk cache fill copy failed: {e}");
+                return None;
+            }
+        }
+    }
+
+    if file.flush().await.is_err() {
+        return None;
+    }
+    drop(file);
+
+    if written != expected {
+        warn!(
+            "chunk cache fill size mismatch for {}: wrote {written}, expected {expected}",
+            chunk_data.checksum
+        );
+        return None;
+    }
+
+    if guard.commit(written) {
+        cache.hit(&chunk_data.checksum)
+    } else {
+        None
+    }
+}
+
+/// Applies the manifest AES-CTR keystream to a plaintext byte stream and builds
+/// the encrypted HTTP response. The permit is held for the lifetime of the body.
+fn encrypted_response<S>(
+    stream: S,
+    content_length: usize,
+    key: [u8; 16],
+    iv: [u8; 16],
+    permit: SemaphorePermit<'static>,
+) -> Response
+where
+    S: Stream<Item = Result<Bytes, Error>> + Send + 'static,
+{
+    let mut cipher = Aes128Ctr64LE::new(&key.into(), &iv.into());
     let encrypted_stream = stream.chunks(16).map(move |raw| -> Result<Bytes, Error> {
         let data: Result<Vec<Bytes>, Error> = raw.into_iter().collect();
         let mut data = data?.concat();
@@ -119,7 +239,7 @@ pub async fn serve_file(
     headers.insert("Content-Type", "application/octet-stream".parse().unwrap());
     headers.insert("Content-Length", content_length.into());
 
-    Ok((headers, body))
+    (headers, body).into_response()
 }
 async fn acquire_permit<'a>() -> SemaphorePermit<'a> {
     return GLOBAL_CONTEXT_SEMAPHORE

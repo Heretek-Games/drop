@@ -1,5 +1,6 @@
 use std::{
     env::set_current_dir,
+    path::PathBuf,
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -13,12 +14,16 @@ use log::info;
 use simple_logger::SimpleLogger;
 use tokio::{runtime::Handle, spawn, time};
 use torrential::{
-    downloads::{handlers, serve},
+    downloads::{cache::ChunkCache, handlers, serve},
     server::create_drop_server,
     state::AppState,
 };
 
 const CONTEXT_TTL: u64 = 10 * 60;
+
+/// Default cache budget when `CHUNK_CACHE_DIR` is set but
+/// `CHUNK_CACHE_MAX_BYTES` is not (20 GiB).
+const DEFAULT_CACHE_MAX_BYTES: u64 = 20 * 1024 * 1024 * 1024;
 
 #[tokio::main]
 async fn main() {
@@ -36,9 +41,12 @@ async fn main() {
         .await
         .expect("failed to connect to drop server");
 
+    let chunk_cache = build_chunk_cache();
+
     let shared_state = Arc::new(AppState {
         context_cache: DashMap::new(),
         server,
+        chunk_cache,
     });
 
     let interval_shared_state = shared_state.clone();
@@ -99,4 +107,26 @@ fn initialise_logger() {
         .with_level(log::LevelFilter::Info)
         .init()
         .expect("failed to init logger");
+}
+
+/// Builds the optional chunk cache from environment configuration. Caching is
+/// opt-in: when `CHUNK_CACHE_DIR` is unset (or empty) the cache is disabled and
+/// the depot serves directly from source storage.
+fn build_chunk_cache() -> ChunkCache {
+    let dir = std::env::var("CHUNK_CACHE_DIR")
+        .ok()
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from);
+
+    if dir.is_none() {
+        info!("chunk cache disabled (CHUNK_CACHE_DIR not set)");
+        return ChunkCache::new(None, 0);
+    }
+
+    let max_bytes = std::env::var("CHUNK_CACHE_MAX_BYTES")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .unwrap_or(DEFAULT_CACHE_MAX_BYTES);
+
+    ChunkCache::new(dir, max_bytes)
 }

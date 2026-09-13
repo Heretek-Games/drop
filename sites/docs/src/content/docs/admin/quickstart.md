@@ -47,3 +47,30 @@ services:
 :::tip
 If you want to, you can generate a more secure PostgreSQL username & password.
 :::
+
+:::tip Optional: depot chunk cache
+If your game storage is slow (spinning disks, network storage) and you have a
+fast local tier (SSD/NVMe/tmpfs), you can enable Drop's read-through chunk
+cache. Chunks are content-addressed by their SHA-256 plaintext checksum, so
+repeated requests are served from the fast tier and your storage disks are
+protected from repeated reads.
+
+Mount the fast disk into the container and set the cache environment variables:
+
+```yaml
+drop:
+  volumes:
+    - ./library:/library
+    - ./data:/data
+    - /mnt/fast-block:/fast-block
+  environment:
+    - DATABASE_URL=postgres://drop:drop@postgres:5432/drop
+    - CHUNK_CACHE_DIR=/fast-block/drop-chunk-cache
+    - CHUNK_CACHE_MAX_BYTES=500000000000 # evict above this size (bytes)
+```
+
+The cache is **off unless `CHUNK_CACHE_DIR` is set**, is best-effort (a cache
+failure never fails a download), and stores **plaintext game data unencrypted
+at rest** on that disk. Make sure `CHUNK_CACHE_MAX_BYTES` leaves headroom on
+the mount.
+:::
