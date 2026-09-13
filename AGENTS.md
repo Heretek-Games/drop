@@ -148,13 +148,13 @@ Source: `desktop/src-tauri/process/src/interceptor.rs`, `gse_interceptor.rs`
 
 ## 4. Quality gates
 
-| Layer               | When       | What                                                                          |
-| :------------------ | :--------- | :---------------------------------------------------------------------------- |
-| Editor hooks        | every edit | format-on-edit (advisory)                                                     |
-| lefthook pre-commit | commit     | prettier + eslint --fix (staged), ast-grep scan, gitleaks                     |
-| lefthook pre-push   | push       | server typecheck, `clippy-changed.sh` (Rust), golangci-lint, knip report      |
-| GitHub Actions      | PR/push    | typecheck/lint/clippy, gitleaks history, cargo-audit ×7 crates, golangci-lint |
-| GitHub Actions      | weekly     | semgrep deep scan → Code Scanning                                             |
+| Layer               | When       | What                                                                                      |
+| :------------------ | :--------- | :---------------------------------------------------------------------------------------- |
+| Editor hooks        | every edit | format-on-edit (advisory)                                                                 |
+| lefthook pre-commit | commit     | prettier + eslint --fix (staged), ast-grep scan, gitleaks                                 |
+| lefthook pre-push   | push       | server typecheck, `clippy-changed.sh` (Rust), golangci-lint, knip report                  |
+| GitHub Actions      | PR/push    | typecheck/lint/clippy, gitleaks history, cargo-audit ×7 crates, cargo-deny, golangci-lint |
+| GitHub Actions      | weekly     | semgrep deep scan → Code Scanning                                                         |
 
 Hooks are early feedback; **CI is the authority**. If a hook fails, read the
 output and fix the root cause. The documented escape hatches exist but must not
@@ -173,11 +173,11 @@ LEFTHOOK=0 git commit    # same via env var
 - **golangci-lint**: `--new-from-rev=origin/develop` (new issues only). Baseline:
   2 legacy issues in `core/database.go`.
 - **ast-grep**: rules at `severity: warning`; promote per-rule after cleanup.
-- **`torrential` clippy (pre-push)**: currently **red at baseline** — ~227
-  pre-existing errors, mostly the checked-in generated `src/proto/version.rs`
-  and `build.rs`. Torrential CI does **not** run clippy (build + test only), so
-  this local gate can only be bypassed with `--no-verify` until the generated
-  code is excluded or the crate is cleaned up.
+- **`torrential` clippy**: `cargo clippy --all-targets --all-features -- -D warnings`
+  is clean. Generated rust-protobuf output is built into `OUT_DIR` by `build.rs`
+  and included through `src/proto/mod.rs`, which applies
+  `#[allow(clippy::all, clippy::pedantic)]`, so generated code never trips the
+  crate lints. `torrential-ci.yml` runs fmt + clippy + build + test.
 - **Desktop frontend typecheck**: `desktop/main` is not a root workspace member
   and is not gated; `pnpm -C desktop/main run typecheck` currently reports
   pre-existing errors. Don't introduce new ones.
@@ -224,6 +224,8 @@ Native binaries not installable via pnpm:
 
 - `gitleaks` — `brew install gitleaks`
 - `cargo-audit` — `cargo install cargo-audit`
+- `cargo-deny` — `cargo install cargo-deny` (policy config at `deny.toml`;
+  run from a crate dir, e.g. `cd torrential && cargo deny check`)
 - `golangci-lint` — `go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest`
   (must be built with the same Go version as `backend/go.work`)
 - `libarchive-devel` — required to build `torrential` (Fedora) / `libarchive-dev` (Debian)

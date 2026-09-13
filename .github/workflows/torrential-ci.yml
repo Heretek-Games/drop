@@ -38,6 +38,8 @@ jobs:
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@7c8d7d138f5c09cef361f8214cf96882cd029cdb # dtolnay/rust-toolchain@nightly
+        with:
+          components: clippy, rustfmt
 
       - name: Rust cache
         uses: swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # swatinem/rust-cache@v2
@@ -49,6 +51,12 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libarchive-dev
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Run Clippy (lint)
+        run: cargo clippy --all-targets --all-features -- -D warnings
 
       - name: Build
         run: cargo build --all-targets --verbose
