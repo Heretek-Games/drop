@@ -32,3 +32,14 @@ throttle_my_fn = "0.2.6"
 tokio = { version = "*", features = ["rt", "sync"] }
 tokio-util = { version = "*", features = ["io"] }
 utils = { path = "../utils", version = "0.1.0" }
+
+[package.metadata.cargo-machete]
+# Used through macros/features that cargo-machete cannot see. Reviewed 2026-09.
+ignored = [
+    "async-scoped",
+    "atomic-instant-full",
+    "crossbeam-channel",
+    "rayon",
+    "reqwest",
+    "throttle_my_fn",
+]

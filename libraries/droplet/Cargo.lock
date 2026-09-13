@@ -229,7 +229,6 @@ dependencies = [
  "libarchive-drop",
  "rcgen",
  "ring",
- "serde",
  "sha2",
  "test-generator",
  "time",

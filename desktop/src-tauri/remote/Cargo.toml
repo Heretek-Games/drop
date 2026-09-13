@@ -32,3 +32,7 @@ serde_with = "3.15.0"
 tauri = "*"
 url = "2.5.7"
 utils = { path = "../utils", version = "0.1.0" }
+
+[package.metadata.cargo-machete]
+# Used through macros/features that cargo-machete cannot see. Reviewed 2026-09.
+ignored = ["bytes", "chrono"]

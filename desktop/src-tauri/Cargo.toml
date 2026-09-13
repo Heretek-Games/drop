@@ -155,3 +155,51 @@ opt-level = 1
 [profile.dev]
 # Turn on a small amount of optimisation in Development mode.
 opt-level = 1
+
+[package.metadata.cargo-machete]
+# Dependencies reached only through macros, feature flags, build scripts or
+# target-specific code, which cargo-machete cannot always see. Reviewed 2026-09.
+ignored = [
+    "atomic-instant-full",
+    "bytes",
+    "cacache",
+    "chrono",
+    "deranged",
+    "dirs",
+    "filetime",
+    "futures-core",
+    "gethostname",
+    "hex",
+    "http",
+    "http-serde",
+    "humansize",
+    "known-folders",
+    "md5",
+    "native_model",
+    "page_size",
+    "parking_lot",
+    "rand",
+    "rayon",
+    "regex",
+    "reqwest",
+    "reqwest-middleware",
+    "rustbreak",
+    "rustix",
+    "schemars",
+    "serde_with",
+    "sha1",
+    "shared_child",
+    "sysinfo",
+    "tar",
+    "tempfile",
+    "throttle_my_fn",
+    "tokio-util",
+    "umu-wrapper-lib",
+    "urlencoding",
+    "uuid",
+    "walkdir",
+    "webbrowser",
+    "whoami",
+    "wry",
+    "zstd",
+]

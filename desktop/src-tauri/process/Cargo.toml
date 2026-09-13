@@ -27,3 +27,7 @@ walkdir = "2.5"
 
 [dev-dependencies]
 tempfile = "3"
+
+[package.metadata.cargo-machete]
+# Used through macros/features that cargo-machete cannot see. Reviewed 2026-09.
+ignored = ["utils"]

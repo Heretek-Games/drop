@@ -18,3 +18,7 @@ default = ["bincode_1_3"]
 bincode_1_3 = ["serde", "native_model/bincode_1_3"]
 bincode_2 = ["serde", "native_model/bincode_2", "bincode"]
 postcard_1_0 = ["serde", "native_model/postcard_1_0", "postcard"]
+
+[package.metadata.cargo-machete]
+# Feature-gated optional dependency; used when the postcard_1_0 feature is on.
+ignored = ["postcard"]

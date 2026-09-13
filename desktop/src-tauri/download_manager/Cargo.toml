@@ -18,3 +18,7 @@ tauri = "*"
 throttle_my_fn = "0.2.6"
 tokio = { version = "1.48.0", features = ["sync"] }
 utils = { version = "0.1.0", path = "../utils" }
+
+[package.metadata.cargo-machete]
+# Used through macros/features that cargo-machete cannot see. Reviewed 2026-09.
+ignored = ["parking_lot", "throttle_my_fn"]

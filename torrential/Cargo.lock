@@ -585,7 +585,6 @@ dependencies = [
  "libarchive-drop",
  "rcgen",
  "ring",
- "serde",
  "sha2",
  "test-generator",
  "time",
@@ -2302,7 +2301,6 @@ version = "0.1.0"
 dependencies = [
  "aes",
  "anyhow",
- "async-trait",
  "axum",
  "bytes",
  "criterion",
