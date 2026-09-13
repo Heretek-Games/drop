@@ -12,19 +12,19 @@ need() { command -v "$1" >/dev/null 2>&1 || { echo "missing command: $1" >&2; ex
 need curl; need jq
 
 # Fetch release info for tag 'alpha'
-rel="$(curl -fsSL ${GITHUB_TOKEN:+-H "Authorization: Bearer $GITHUB_TOKEN"} \
+rel="$(curl -fsSL --proto '=https' --tlsv1.2 ${GITHUB_TOKEN:+-H "Authorization: Bearer $GITHUB_TOKEN"} \
   "https://api.github.com/repos/${repo}/releases/tags/alpha" 2>/dev/null || true)"
 
 if [ -z "$rel" ] || [ "$(jq -r '.id // empty' <<<"$rel")" = "" ]; then
   # Fallback to querying recent releases matching alpha
-  releases="$(curl -fsSL ${GITHUB_TOKEN:+-H "Authorization: Bearer $GITHUB_TOKEN"} \
+  releases="$(curl -fsSL --proto '=https' --tlsv1.2 ${GITHUB_TOKEN:+-H "Authorization: Bearer $GITHUB_TOKEN"} \
     "https://api.github.com/repos/${repo}/releases?per_page=20" 2>/dev/null || true)"
   rel="$(jq -c '[.[] | select(.tag_name | test("^alpha"))] | sort_by(.published_at) | last // empty' <<<"${releases:-[]}")"
 fi
 
 if [ -z "$rel" ]; then
   # Initial fallback before first alpha run: resolve latest v0.4.0 with alpha suffix
-  releases="$(curl -fsSL ${GITHUB_TOKEN:+-H "Authorization: Bearer $GITHUB_TOKEN"} \
+  releases="$(curl -fsSL --proto '=https' --tlsv1.2 ${GITHUB_TOKEN:+-H "Authorization: Bearer $GITHUB_TOKEN"} \
     "https://api.github.com/repos/${repo}/releases?per_page=5")"
   rel="$(jq -c '[.[] | select(.draft == false)] | sort_by(.published_at) | last // empty' <<<"$releases")"
 fi

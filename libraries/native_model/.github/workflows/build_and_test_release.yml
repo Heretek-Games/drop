@@ -16,14 +16,14 @@ jobs:
         os: [ubuntu-latest, windows-latest, macOS-latest]
         toolchain: [stable]
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # actions/checkout@v7
       - name: Setup Rust
-        uses: actions-rs/toolchain@v1
+        uses: actions-rs/toolchain@16499b5e05bf2e26879000db0c1d13f7e13fa3af # actions-rs/toolchain@v1
         with:
           toolchain: ${{ matrix.toolchain }}
           override: true
-      - uses: extractions/setup-just@v3
-      - uses: hustcer/setup-nu@v3.23
+      - uses: extractions/setup-just@f8a3cce218d9f83db3a2ecd90e41ac3de6cdfd9b # extractions/setup-just@v3
+      - uses: hustcer/setup-nu@92c296ba1ba2ba04cc948ab64ddefe192dc13f0c # hustcer/setup-nu@v3.23
         with:
           version: "0.105.1"
       - name: Just version
@@ -42,18 +42,18 @@ jobs:
       packages: write
     steps:
       - name: Checkout code
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # actions/checkout@v7
         with:
           ref: main
           fetch-depth: 0
 
       - name: install npm
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # actions/setup-node@v7
         with:
           node-version: "20"
 
       - name: Semantic Release
-        uses: cycjimmy/semantic-release-action@v4
+        uses: cycjimmy/semantic-release-action@16ca923e6ccbb50770c415a0ccd43709a8c5f7a4 # cycjimmy/semantic-release-action@v4
         with:
           dry_run: ${{ github.event_name != 'workflow_dispatch' }}
           extra_plugins: |

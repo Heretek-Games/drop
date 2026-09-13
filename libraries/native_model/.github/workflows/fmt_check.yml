@@ -15,11 +15,11 @@ jobs:
   fmt_check:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # actions/checkout@v7
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
-      - uses: extractions/setup-just@v3
-      - uses: hustcer/setup-nu@v3.23
+        uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # dtolnay/rust-toolchain@stable
+      - uses: extractions/setup-just@f8a3cce218d9f83db3a2ecd90e41ac3de6cdfd9b # extractions/setup-just@v3
+      - uses: hustcer/setup-nu@92c296ba1ba2ba04cc948ab64ddefe192dc13f0c # hustcer/setup-nu@v3.23
         with:
           version: "0.105.1"
         env:

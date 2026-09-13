@@ -11,8 +11,6 @@ on:
 # Allow this job to clone the repo and create a page deployment
 permissions:
   contents: read
-  pages: write
-  id-token: write
 
 jobs:
   build:
@@ -29,6 +27,9 @@ jobs:
         # build-cmd: pnpm run build # The command to run to build your site. Runs the package build script/task by default. (optional)
 
   deploy:
+    permissions:
+      pages: write
+      id-token: write
     needs: build
     runs-on: ubuntu-latest
     environment:

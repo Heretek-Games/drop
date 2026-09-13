@@ -11,7 +11,7 @@ repo="Heretek-Games/drop"
 need() { command -v "$1" >/dev/null 2>&1 || { echo "missing command: $1" >&2; exit 1; }; }
 need curl; need jq
 
-releases="$(curl -fsSL ${GITHUB_TOKEN:+-H "Authorization: Bearer $GITHUB_TOKEN"} \
+releases="$(curl -fsSL --proto '=https' --tlsv1.2 ${GITHUB_TOKEN:+-H "Authorization: Bearer $GITHUB_TOKEN"} \
   "https://api.github.com/repos/${repo}/releases?per_page=50")"
 
 # Filter for stable releases (non-draft, tagged vX.Y.Z, excluding alpha/beta/nightly)
