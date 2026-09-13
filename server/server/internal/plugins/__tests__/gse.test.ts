@@ -8,6 +8,7 @@ import {
 } from "../builtin/gse/mesh";
 import { CompatRegistry, compatFromEnv } from "../builtin/gse/compat";
 import {
+  CREDENTIAL_ROTATION_WINDOW_MS,
   HOST_LEASE_MS,
   MAX_ROOMS_PER_HOST,
   ROOM_TTL_MS,
@@ -310,6 +311,17 @@ test("RoomStore rejects known-incompatible games and pins AppID", async () => {
   });
   assert.equal(room.appId, 999);
   assert.equal((await store.list())[0]?.appId, 999);
+});
+
+test("RoomStore rotates credentials near expiry", async () => {
+  const h = harness();
+  const room = await h.store.create(createInput("host"));
+  const first = await h.store.credential(room.id, "host");
+
+  // Move to within the rotation window of the room's expiry.
+  h.setNow(room.expiresAt - CREDENTIAL_ROTATION_WINDOW_MS + 1);
+  const second = await h.store.credential(room.id, "host");
+  assert.ok(second.issuedAt > first.issuedAt);
 });
 
 test("compatFromEnv parses blocked app and game lists", () => {

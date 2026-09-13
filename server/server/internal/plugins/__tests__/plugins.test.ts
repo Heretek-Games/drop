@@ -414,6 +414,57 @@ test("HelloWorldPlugin proves the platform is not GSE-shaped", async () => {
   assert.equal(res.pong, true);
 });
 
+test("PluginManager routes WebSocket messages and enforces the capability", async () => {
+  const manager = createTestManager();
+  let received: unknown;
+
+  const plugin: ServerPlugin = {
+    metadata: {
+      id: "ws-plugin",
+      name: "WS Plugin",
+      version: "1.0.0",
+      capabilities: ["websocket"],
+    },
+    init: (ctx: PluginContext) => {
+      ctx.registerWebSocket("ws:test", (message, socket) => {
+        received = message;
+        socket.send({ ok: true });
+      });
+    },
+  };
+  await manager.registerPlugin(plugin);
+
+  const sent: unknown[] = [];
+  const handled = await manager.dispatchWebSocket(
+    "ws:test",
+    { hello: 1 },
+    { send: (data) => sent.push(data) },
+  );
+  assert.equal(handled, true);
+  assert.deepEqual(received, { hello: 1 });
+  assert.deepEqual(sent, [{ ok: true }]);
+  assert.equal(
+    await manager.dispatchWebSocket("ws:missing", {}, { send: () => {} }),
+    false,
+  );
+
+  // Missing capability fails closed at registration.
+  const bad: ServerPlugin = {
+    metadata: {
+      id: "no-ws",
+      name: "No WS",
+      version: "1.0.0",
+      capabilities: ["routes"],
+    },
+    init: (ctx: PluginContext) => {
+      ctx.registerWebSocket("x", () => {});
+    },
+  };
+  await assert.rejects(() => manager.registerPlugin(bad), {
+    name: "PluginCapabilityError",
+  });
+});
+
 test("discovery verifies external bundle checksums", async () => {
   const dataDir = tmpDataDir();
   const pluginDir = path.join(dataDir, "plugins", "external-demo");

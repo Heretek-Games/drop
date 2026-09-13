@@ -42,10 +42,12 @@ tracks:
 - **API version** — `PLUGIN_API_VERSION` (`server/internal/plugins/types.ts`).
   Plugins declare `metadata.apiVersion`; a mismatch is rejected at registration
   with `PluginApiVersionError`. Manifest files should always set it.
-- **Capabilities** — `routes`, `storage`, `events`, `network` are enforced
-  fail-closed: using an undeclared capability throws `PluginCapabilityError`
-  (routes/events are checked at call time; storage is a guarded wrapper; network
-  gates `ctx.fetch`). `websocket` is reserved until a plugin WS API exists.
+- **Capabilities** — `routes`, `storage`, `events`, `network`, `websocket` are
+  enforced fail-closed: using an undeclared capability throws
+  `PluginCapabilityError` (routes/events are checked at call time; storage is a
+  guarded wrapper; network gates `ctx.fetch`; websocket gates
+  `ctx.registerWebSocket`, whose handlers the `/api/v1/plugins/ws` gateway
+  dispatches to via `PluginManager.dispatchWebSocket`).
 - **Trust** — only `trust: "trusted"` is supported: external plugins run
   in-process with server privileges. `trust: "sandboxed"` is rejected with
   `PluginTrustError` until an isolated runtime exists (M4/P6). Treat third-party
@@ -149,9 +151,10 @@ Owner: TBD · Depends on: M0, M2
       host lease (heartbeat 15s / expiry 45s, first-writer-wins migration) in
       `builtin/gse/room-store.ts`. **Deviation:** used plugin storage instead of
       additive Prisma models (no core migration; still durable on disk).
-- [~] **B3** Membership-gated credential issuance, cached per member, never in
-  the public room view (`room-store.credential`). Rotation and WS push of
-  credentials still pending.
+- [x] **B3** Membership-gated credential issuance, cached per member, rotated
+      10 min before expiry, never in the public room view. A `credential_available`
+      event is broadcast on the room channel; the secret itself is only returned
+      from the authenticated endpoint.
 - [x] **B4** `ZeroTierBackend` creates networks (per-room /24, `enableBroadcast`),
       authorizes a joined member and returns its assigned address, and deletes
       the network on teardown (mock-fetch tests). Per-user revoke still a stub.

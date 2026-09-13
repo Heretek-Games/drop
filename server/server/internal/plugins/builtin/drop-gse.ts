@@ -43,7 +43,7 @@ export class DropGseServerPlugin implements ServerPlugin {
     apiVersion: PLUGIN_API_VERSION,
     trust: "trusted",
     storageVersion: 1,
-    capabilities: ["routes", "events", "storage", "network"],
+    capabilities: ["routes", "events", "storage", "network", "websocket"],
     enabled: true,
   };
 
@@ -76,6 +76,21 @@ export class DropGseServerPlugin implements ServerPlugin {
       this.store.pruneExpired().catch(() => {});
     }, PRUNE_INTERVAL_MS);
     this.pruneTimer.unref?.();
+
+    // WebSocket: host lease renewal / liveness over the plugin WS gateway.
+    ctx.registerWebSocket("gse:heartbeat", async (message, wsCtx) => {
+      const payload = (message ?? {}) as { roomId?: string };
+      if (!payload.roomId || !wsCtx.userId) {
+        wsCtx.send({ ok: false, error: "roomId and authentication required" });
+        return;
+      }
+      try {
+        const room = await this.store.heartbeat(payload.roomId, wsCtx.userId);
+        wsCtx.send({ ok: true, hostUserId: room.hostUserId });
+      } catch {
+        wsCtx.send({ ok: false, error: "room not found" });
+      }
+    });
 
     // Route: GET /compat — known-incompatible games/AppIDs.
     ctx.registerRoute("GET", "/compat", () => compat.info());
@@ -299,6 +314,14 @@ export class DropGseServerPlugin implements ServerPlugin {
         }
 
         const room = await this.store.get(context.params.id);
+        // Notify members a credential is available; the secret itself is only
+        // ever returned over this authenticated, membership-checked call.
+        ctx.broadcast(`gse:room:${context.params.id}`, {
+          type: "credential_available",
+          roomId: context.params.id,
+          userId: context.userId,
+          expiresAt: credential.expiresAt,
+        });
         return {
           credential: {
             mesh: room?.mesh,

@@ -17,6 +17,8 @@ export const ROOM_TTL_MS = 4 * 60 * 60 * 1000;
 export const HOST_HEARTBEAT_MS = 15_000;
 /** Host lease expires after this much silence. */
 export const HOST_LEASE_MS = 45_000;
+/** Re-issue a credential when this close to expiry. */
+export const CREDENTIAL_ROTATION_WINDOW_MS = 10 * 60 * 1000;
 /** Per-host concurrent room cap. */
 export const MAX_ROOMS_PER_HOST = 5;
 /** Global room cap. */
@@ -246,7 +248,11 @@ export class RoomStore {
     const credentials = await this.loadCredentials();
     const roomCredentials = credentials[roomId] ?? {};
     const existing = roomCredentials[userId];
-    if (existing && existing.expiresAt > this.now()) {
+    // Return a cached credential unless it is close to expiry (rotate).
+    if (
+      existing &&
+      existing.expiresAt - this.now() > CREDENTIAL_ROTATION_WINDOW_MS
+    ) {
       return existing;
     }
 

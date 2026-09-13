@@ -78,6 +78,18 @@ export interface PluginStorage {
   setSchemaVersion(version: number): Promise<void>;
 }
 
+/** Caller identity + reply sink for a plugin WebSocket message. */
+export interface WebSocketContext {
+  userId?: string | undefined;
+  userAcls?: string[] | undefined;
+  send: (data: unknown) => void;
+}
+
+export type WebSocketHandler = (
+  message: unknown,
+  context: WebSocketContext,
+) => Promise<void> | void;
+
 export interface PluginContext {
   id: string;
   logger: Logger;
@@ -89,6 +101,11 @@ export interface PluginContext {
   ): void;
   broadcast(channel: string, event: unknown): void;
   subscribe(channel: string, listener: (event: unknown) => void): () => void;
+  /**
+   * Handle client messages on a WebSocket channel. Requires the `websocket`
+   * capability. Channel names are global; a channel may only be claimed once.
+   */
+  registerWebSocket(channel: string, handler: WebSocketHandler): void;
   /** Network egress. Requires the `network` capability. */
   fetch(input: string | URL, init?: RequestInit): Promise<Response>;
 }

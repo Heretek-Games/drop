@@ -25,6 +25,8 @@ import type {
   RouteHandler,
   RouteHandlerContext,
   ServerPlugin,
+  WebSocketContext,
+  WebSocketHandler,
 } from "./types";
 
 /** Resolved caller identity passed to route handlers. */
@@ -65,6 +67,10 @@ interface LoadedPlugin {
 export class PluginManager {
   private readonly plugins = new Map<string, LoadedPlugin>();
   private readonly routes = new Map<string, RegisteredRoute[]>();
+  private readonly webSockets = new Map<
+    string,
+    { pluginId: string; handler: WebSocketHandler }
+  >();
   private readonly eventBus = new EventEmitter();
   private readonly log: Logger = logger.child({ name: "plugin-manager" });
 
@@ -233,6 +239,22 @@ export class PluginManager {
           this.eventBus.off(channel, listener);
         };
       },
+      registerWebSocket: (channel: string, handler: WebSocketHandler) => {
+        if (!this.hasCapability(capabilities, "websocket")) {
+          throw new PluginCapabilityError(
+            id,
+            "websocket",
+            `registerWebSocket(${channel})`,
+          );
+        }
+        const existing = this.webSockets.get(channel);
+        if (existing && existing.pluginId !== id) {
+          throw new Error(
+            `WebSocket channel '${channel}' is already claimed by plugin '${existing.pluginId}'`,
+          );
+        }
+        this.webSockets.set(channel, { pluginId: id, handler });
+      },
       fetch: async (input: string | URL, init?: RequestInit) => {
         if (!this.hasCapability(capabilities, "network")) {
           throw new PluginCapabilityError(id, "network", "fetch");
@@ -366,6 +388,11 @@ export class PluginManager {
 
     this.plugins.delete(id);
     this.routes.delete(id);
+    for (const [channel, entry] of this.webSockets) {
+      if (entry.pluginId === id) {
+        this.webSockets.delete(channel);
+      }
+    }
     this.log.info(`Plugin ${id} unregistered`);
   }
 
@@ -531,6 +558,22 @@ export class PluginManager {
     return () => {
       this.eventBus.off(channel, listener);
     };
+  }
+
+  /** Route a client WebSocket message to the plugin that claimed the channel. */
+  async dispatchWebSocket(
+    channel: string,
+    message: unknown,
+    context: WebSocketContext,
+  ): Promise<boolean> {
+    const entry = this.webSockets.get(channel);
+    if (!entry) return false;
+    await entry.handler(message, context);
+    return true;
+  }
+
+  webSocketChannels(): string[] {
+    return Array.from(this.webSockets.keys());
   }
 
   private async resolveAuth(event: H3Event): Promise<PluginAuthContext> {

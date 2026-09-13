@@ -6,7 +6,7 @@ export default defineWebSocketHandler({
   open(peer) {
     clientSubscriptions.set(peer.id, []);
   },
-  message(peer, message) {
+  async message(peer, message) {
     try {
       const text =
         typeof message.text === "function" ? message.text() : String(message);
@@ -17,6 +17,29 @@ export default defineWebSocketHandler({
           peer.send(JSON.stringify({ channel: data.channel, data: event }));
         });
         clientSubscriptions.get(peer.id)?.push(unsubscribe);
+        return;
+      }
+
+      if (data.type === "message" && typeof data.channel === "string") {
+        const handled = await pluginManager.dispatchWebSocket(
+          data.channel,
+          data.data,
+          {
+            userId: undefined,
+            send: (payload) =>
+              peer.send(
+                JSON.stringify({ channel: data.channel, data: payload }),
+              ),
+          },
+        );
+        if (!handled) {
+          peer.send(
+            JSON.stringify({
+              channel: data.channel,
+              error: "no plugin handler for channel",
+            }),
+          );
+        }
       }
     } catch {
       // Ignore non-JSON or invalid messages
