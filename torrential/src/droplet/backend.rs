@@ -1,7 +1,4 @@
-use std::{
-    path::Path,
-    sync::Arc,
-};
+use std::{path::Path, sync::Arc};
 
 use anyhow::anyhow;
 use droplet_rs::versions::types::VersionBackend;
@@ -18,6 +15,12 @@ use crate::{
     server::DropServer,
 };
 
+/// Answers whether a depot backend can be constructed for the requested path.
+///
+/// # Errors
+///
+/// Returns an error when the query cannot be parsed or the response cannot be
+/// sent.
 pub async fn has_backend_rpc(
     server: Arc<DropServer>,
     message: TorrentialBound,
@@ -45,7 +48,7 @@ pub async fn has_backend_rpc(
     Ok(())
 }
 
-fn create_backend(path: &String) -> Result<Box<dyn VersionBackend + Send + Sync>, anyhow::Error> {
+fn create_backend(path: &str) -> Result<Box<dyn VersionBackend + Send + Sync>, anyhow::Error> {
     let backend_constructor = droplet_rs::versions::create_backend_constructor(Path::new(path))
         .ok_or(anyhow!("backend doesn't exist at path {path}"))?;
     let backend = backend_constructor()?;
@@ -53,13 +56,19 @@ fn create_backend(path: &String) -> Result<Box<dyn VersionBackend + Send + Sync>
     Ok(backend)
 }
 
+/// Lists every file held by the depot backend at the requested path.
+///
+/// # Errors
+///
+/// Returns an error when the query cannot be parsed, the backend cannot be
+/// constructed, listing fails, or the response cannot be sent.
 pub async fn list_files_rpc(
     server: Arc<DropServer>,
     message: TorrentialBound,
 ) -> Result<(), anyhow::Error> {
     let query = ListFilesQuery::parse_from_bytes(&message.data)?;
 
-    let mut backend = create_backend(&query.path)?;
+    let backend = create_backend(&query.path)?;
 
     let files = backend.list_files().await?;
 
@@ -77,13 +86,19 @@ pub async fn list_files_rpc(
     Ok(())
 }
 
+/// Returns metadata for a single file in the depot backend.
+///
+/// # Errors
+///
+/// Returns an error when the query cannot be parsed, the backend cannot be
+/// constructed, the peek fails, or the response cannot be sent.
 pub async fn peek_file_rpc(
     server: Arc<DropServer>,
     message: TorrentialBound,
 ) -> Result<(), anyhow::Error> {
     let query = PeekFileQuery::parse_from_bytes(&message.data)?;
 
-    let mut backend = create_backend(&query.path)?;
+    let backend = create_backend(&query.path)?;
     let file_peek = backend.peek_file(query.filename).await?;
 
     let mut response = PeekFileResponse::new();

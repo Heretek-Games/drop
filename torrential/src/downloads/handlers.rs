@@ -1,7 +1,13 @@
+// axum requires every route handler to be `async`, even when it performs no
+// awaits, so `unused_async` is not actionable in this module.
+#![allow(clippy::unused_async)]
+
 use std::{
     collections::HashMap,
+    io,
+    pin::Pin,
     sync::Arc,
-    task::Poll,
+    task::{Context, Poll},
 };
 
 use axum::{
@@ -11,16 +17,15 @@ use axum::{
     http::{HeaderMap, HeaderValue},
     response::IntoResponse,
 };
-use bytes::BufMut;
 use reqwest::{StatusCode, header::CONTENT_TYPE};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use std::io::Write;
-use tokio::io::AsyncRead;
+use tokio::io::{AsyncRead, ReadBuf};
 use tokio_util::io::ReaderStream;
 
 use crate::{server::download::fetch_instance_games, state::AppState};
 
+#[must_use]
 pub async fn healthcheck() -> StatusCode {
     StatusCode::OK
 }
@@ -31,6 +36,7 @@ pub struct InvalidateBody {
     version: String,
 }
 
+#[must_use]
 pub async fn invalidate(
     State(state): State<Arc<AppState>>,
     Json(payload): Json<InvalidateBody>,
@@ -44,46 +50,51 @@ struct SpeedtestStream {
 }
 
 impl SpeedtestStream {
-    pub fn new() -> Self {
+    fn new() -> Self {
         SpeedtestStream {
             remaining: 1024 * 1024 * 50,
         }
     }
+
     fn content_length(&self) -> usize {
         self.remaining
     }
 }
+
 const ZERO: [u8; 1024] = [0u8; _];
+
 impl AsyncRead for SpeedtestStream {
     fn poll_read(
-        mut self: std::pin::Pin<&mut Self>,
-        _cx: &mut std::task::Context<'_>,
-        buf: &mut tokio::io::ReadBuf<'_>,
-    ) -> Poll<std::io::Result<()>> {
-        if self.remaining > 0 {
-            let mut writer = buf.writer();
-
-            let amount = writer.write(&ZERO);
-            match amount {
-                Ok(amount) => self.remaining -= amount,
-                Err(err) => return Poll::Ready(Err(err)),
-            }
+        mut self: Pin<&mut Self>,
+        _cx: &mut Context<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<io::Result<()>> {
+        if buf.remaining() == 0 || self.remaining == 0 {
+            return Poll::Ready(Ok(()));
         }
+
+        let amount = buf.remaining().min(self.remaining).min(ZERO.len());
+        buf.put_slice(&ZERO[..amount]);
+        self.remaining -= amount;
+
         Poll::Ready(Ok(()))
     }
 }
 
-pub async fn speedtest() -> Result<impl IntoResponse, StatusCode> {
+/// Streams a fixed 50 MiB of zeroes for clients to measure download speed.
+pub async fn speedtest() -> impl IntoResponse {
     let speedtest = SpeedtestStream::new();
-    let ct = speedtest.content_length();
-    let speedtest_stream = ReaderStream::new(speedtest);
-    let body = Body::from_stream(speedtest_stream);
+    let content_length = speedtest.content_length();
+    let body = Body::from_stream(ReaderStream::new(speedtest));
 
     let mut headers = HeaderMap::new();
-    headers.insert("Content-Type", "application/octet-stream".parse().unwrap());
-    headers.insert("Content-Length", ct.into());
+    headers.insert(
+        CONTENT_TYPE,
+        HeaderValue::from_static("application/octet-stream"),
+    );
+    headers.insert("Content-Length", content_length.into());
 
-    Ok((headers, body))
+    (headers, body)
 }
 
 #[derive(Serialize)]
@@ -98,6 +109,12 @@ struct Manifest {
     content: HashMap<String, Vec<GameData>>,
 }
 
+/// Returns the depot's manifest of available games and versions as JSON.
+///
+/// # Errors
+///
+/// Returns `INTERNAL_SERVER_ERROR` when the connected Drop server cannot be
+/// queried for the instance games.
 pub async fn manifest(State(state): State<Arc<AppState>>) -> Result<impl IntoResponse, StatusCode> {
     let games = fetch_instance_games(&state).await?;
 
@@ -119,4 +136,29 @@ pub async fn manifest(State(state): State<Arc<AppState>>) -> Result<impl IntoRes
     headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
 
     Ok((headers, json!(Manifest { content }).to_string()))
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use tokio::io::AsyncReadExt;
+
+    use super::SpeedtestStream;
+
+    #[tokio::test]
+    async fn speedtest_stream_produces_bounded_zeroes() {
+        let mut stream = SpeedtestStream::new();
+        let mut buf = [0u8; 1024];
+
+        let mut total = 0;
+        while total < 2048 {
+            let read = stream.read(&mut buf).await.unwrap();
+            assert!(read > 0);
+            assert!(buf[..read].iter().all(|byte| *byte == 0));
+            total += read;
+        }
+
+        assert_eq!(total, 2048);
+        assert_eq!(stream.content_length(), 50 * 1024 * 1024 - 2048);
+    }
 }

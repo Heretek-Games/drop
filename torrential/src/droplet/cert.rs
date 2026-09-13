@@ -11,6 +11,11 @@ use crate::{
     server::DropServer,
 };
 
+/// Generates a new root CA and streams it back to the Drop server.
+///
+/// # Errors
+///
+/// Returns an error when CA generation fails or the response cannot be sent.
 pub async fn generate_root_ca_rpc(
     server: Arc<DropServer>,
     message: TorrentialBound,
@@ -37,6 +42,13 @@ pub async fn generate_root_ca_rpc(
     Ok(())
 }
 
+/// Generates a client certificate signed by the supplied root CA and streams it
+/// back to the Drop server.
+///
+/// # Errors
+///
+/// Returns an error when the query cannot be parsed, certificate generation
+/// fails, or the response cannot be sent.
 pub async fn generate_client_cert_rpc(
     server: Arc<DropServer>,
     message: TorrentialBound,

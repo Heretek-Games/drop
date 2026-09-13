@@ -10,7 +10,7 @@ use axum::{
     routing::{get, post},
 };
 use dashmap::DashMap;
-use log::info;
+use log::{info, warn};
 use simple_logger::SimpleLogger;
 use tokio::{runtime::Handle, spawn, time};
 use torrential::{
@@ -26,20 +26,18 @@ const CONTEXT_TTL: u64 = 10 * 60;
 const DEFAULT_CACHE_MAX_BYTES: u64 = 20 * 1024 * 1024 * 1024;
 
 #[tokio::main]
-async fn main() {
-    initialise_logger();
+async fn main() -> anyhow::Result<()> {
+    initialise_logger()?;
 
     if let Ok(working_directory) = std::env::var("WORKING_DIRECTORY") {
         info!("moving to working directory {working_directory}");
-        set_current_dir(working_directory).expect("failed to change working directory");
+        set_current_dir(&working_directory)?;
     }
 
     let metrics = Handle::current().metrics();
     info!("using {} threads", metrics.num_workers());
 
-    let server = create_drop_server()
-        .await
-        .expect("failed to connect to drop server");
+    let server = create_drop_server().await?;
 
     let chunk_cache = build_chunk_cache();
 
@@ -78,7 +76,9 @@ async fn main() {
 
     let app = setup_app(shared_state);
 
-    serve(app).await.expect("failed to serve app");
+    serve(app).await?;
+
+    Ok(())
 }
 
 fn setup_app(shared_state: Arc<AppState>) -> Router {
@@ -95,18 +95,15 @@ fn setup_app(shared_state: Arc<AppState>) -> Router {
 }
 
 async fn serve(app: Router) -> Result<(), std::io::Error> {
-    let listener = tokio::net::TcpListener::bind("0.0.0.0:5000")
-        .await
-        .expect("failed to bind tcp server");
+    let listener = tokio::net::TcpListener::bind("0.0.0.0:5000").await?;
     info!("started depot server");
     axum::serve(listener, app).await
 }
 
-fn initialise_logger() {
+fn initialise_logger() -> Result<(), log::SetLoggerError> {
     SimpleLogger::new()
         .with_level(log::LevelFilter::Info)
         .init()
-        .expect("failed to init logger");
 }
 
 /// Builds the optional chunk cache from environment configuration. Caching is
@@ -123,10 +120,24 @@ fn build_chunk_cache() -> ChunkCache {
         return ChunkCache::new(None, 0);
     }
 
-    let max_bytes = std::env::var("CHUNK_CACHE_MAX_BYTES")
-        .ok()
-        .and_then(|value| value.parse::<u64>().ok())
-        .unwrap_or(DEFAULT_CACHE_MAX_BYTES);
+    let max_bytes = match std::env::var("CHUNK_CACHE_MAX_BYTES") {
+        Ok(value) => match value.parse::<u64>() {
+            Ok(0) => {
+                warn!(
+                    "CHUNK_CACHE_MAX_BYTES=0 would leave the cache unbounded; using {DEFAULT_CACHE_MAX_BYTES} bytes"
+                );
+                DEFAULT_CACHE_MAX_BYTES
+            }
+            Ok(parsed) => parsed,
+            Err(err) => {
+                warn!(
+                    "invalid CHUNK_CACHE_MAX_BYTES '{value}' ({err}); using {DEFAULT_CACHE_MAX_BYTES} bytes"
+                );
+                DEFAULT_CACHE_MAX_BYTES
+            }
+        },
+        Err(_) => DEFAULT_CACHE_MAX_BYTES,
+    };
 
     ChunkCache::new(dir, max_bytes)
 }

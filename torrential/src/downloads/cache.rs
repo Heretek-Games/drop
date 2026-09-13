@@ -22,6 +22,19 @@ use log::{info, warn};
 
 const PARTIAL_EXTENSION: &str = "partial";
 
+/// Creates a directory tree readable only by the current user. The cache stores
+/// decrypted game data, so it must not be world-readable.
+fn create_private_dir_all(path: &Path) -> std::io::Result<()> {
+    let mut builder = std::fs::DirBuilder::new();
+    builder.recursive(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt;
+        builder.mode(0o700);
+    }
+    builder.create(path)
+}
+
 struct Entry {
     size: u64,
     last_access: Instant,
@@ -52,6 +65,9 @@ pub struct FillGuard<'a> {
 
 impl ChunkCache {
     /// Creates a cache rooted at `dir`. Pass `None` to disable caching.
+    ///
+    /// A `max_bytes` of `0` disables eviction, so the cache can grow without
+    /// bound; callers should pass a positive budget.
     #[must_use]
     pub fn new(dir: Option<PathBuf>, max_bytes: u64) -> Self {
         let cache = Self {
@@ -79,7 +95,7 @@ impl ChunkCache {
         let Some(dir) = &self.dir else {
             return;
         };
-        if let Err(e) = std::fs::create_dir_all(dir) {
+        if let Err(e) = create_private_dir_all(dir) {
             warn!(
                 "chunk cache disabled: failed to create {}: {e}",
                 dir.display()
@@ -194,7 +210,7 @@ impl ChunkCache {
         }
 
         if let Some(parent) = final_path.parent()
-            && let Err(e) = std::fs::create_dir_all(parent)
+            && let Err(e) = create_private_dir_all(parent)
         {
             warn!("chunk cache reserve failed to create shard: {e}");
             self.inflight
@@ -220,14 +236,16 @@ impl ChunkCache {
             .inner
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        inner.total += size;
-        inner.entries.insert(
+        if let Some(previous) = inner.entries.insert(
             checksum,
             Entry {
                 size,
                 last_access: Instant::now(),
             },
-        );
+        ) {
+            inner.total = inner.total.saturating_sub(previous.size);
+        }
+        inner.total += size;
         self.evict(&mut inner);
     }
 
@@ -258,6 +276,7 @@ impl ChunkCache {
 impl FillGuard<'_> {
     /// Atomically publishes the filled temp file. Returns `false` on failure
     /// (the temp file is cleaned up on drop).
+    #[must_use]
     pub fn commit(mut self, size: u64) -> bool {
         if std::fs::rename(&self.temp_path, &self.final_path).is_err() {
             warn!("chunk cache commit failed to rename temp file");
@@ -353,11 +372,37 @@ mod tests {
         assert!(inner.total <= 10);
     }
 
+    #[test]
+    fn reinserting_same_checksum_does_not_double_count() {
+        let temp = tempfile::tempdir().unwrap();
+        let cache = cache(temp.path(), 1024 * 1024);
+
+        cache.insert("aa11bb22".to_string(), 6);
+        cache.insert("aa11bb22".to_string(), 6);
+
+        assert_eq!(cache.inner.lock().unwrap().total, 6);
+    }
+
+    #[test]
+    fn hit_drops_stale_entry_when_file_is_missing() {
+        let temp = tempfile::tempdir().unwrap();
+        let cache = cache(temp.path(), 1024 * 1024);
+
+        let guard = cache.reserve("c0ffee00").unwrap();
+        std::fs::write(&guard.temp_path, b"data").unwrap();
+        assert!(guard.commit(4));
+
+        let path = cache.hit("c0ffee00").unwrap();
+        std::fs::remove_file(&path).unwrap();
+
+        assert!(cache.hit("c0ffee00").is_none());
+        assert!(!cache.inner.lock().unwrap().entries.contains_key("c0ffee00"));
+    }
+
     impl ChunkCache {
         fn temp_path_exists(&self, checksum: &str) -> bool {
             self.path_for(checksum)
-                .map(|p| p.with_extension(PARTIAL_EXTENSION).exists())
-                .unwrap_or(false)
+                .is_some_and(|p| p.with_extension(PARTIAL_EXTENSION).exists())
         }
     }
 }
