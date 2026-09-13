@@ -6,6 +6,7 @@ import {
   ZeroTierBackend,
   roomCidr,
 } from "../builtin/gse/mesh";
+import { CompatRegistry, compatFromEnv } from "../builtin/gse/compat";
 import {
   HOST_LEASE_MS,
   MAX_ROOMS_PER_HOST,
@@ -268,4 +269,54 @@ test("RoomStore records the address authorized for a member node", async () => {
   const room = await store.create(createInput("host"));
   const updated = await store.registerMember(room.id, "host", "node-1");
   assert.ok(updated.members.find((m) => m.userId === "host")?.meshAddress);
+});
+
+test("RoomStore rejects known-incompatible games and pins AppID", async () => {
+  const store = new RoomStore(
+    new MemoryStorage(),
+    new InMemoryMeshBackend(),
+    () => 1_000_000,
+    new CompatRegistry({ blockedAppIds: [1234], blockedGameIds: ["bad-game"] }),
+  );
+
+  await assert.rejects(
+    () =>
+      store.create({
+        gameId: "game-1",
+        versionId: "v1",
+        appId: 1234,
+        emulator: EMULATOR,
+        hostUserId: "host",
+      }),
+    /incompatible/,
+  );
+  await assert.rejects(
+    () =>
+      store.create({
+        gameId: "bad-game",
+        versionId: "v1",
+        emulator: EMULATOR,
+        hostUserId: "host",
+      }),
+    /incompatible/,
+  );
+
+  const room = await store.create({
+    gameId: "good-game",
+    versionId: "v1",
+    appId: 999,
+    emulator: EMULATOR,
+    hostUserId: "host",
+  });
+  assert.equal(room.appId, 999);
+  assert.equal((await store.list())[0]?.appId, 999);
+});
+
+test("compatFromEnv parses blocked app and game lists", () => {
+  const info = compatFromEnv({
+    GSE_BLOCKED_APP_IDS: "1, 2, x",
+    GSE_BLOCKED_GAME_IDS: "a, b",
+  });
+  assert.deepEqual(info.blockedAppIds, [1, 2]);
+  assert.deepEqual(info.blockedGameIds, ["a", "b"]);
 });

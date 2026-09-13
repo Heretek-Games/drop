@@ -15,6 +15,8 @@ export type MeshBackend = "tailscale" | "zerotier" | "byo";
 export interface ActiveRoom {
   roomId: string;
   backend: MeshBackend;
+  /** Steam AppID pinned to `steam_appid.txt`, when known. */
+  appId?: number;
   /** Mesh addresses of room peers, written to `custom_broadcasts.txt`. */
   peers: string[];
   /** This node's address inside the room mesh, when known. */
@@ -39,6 +41,7 @@ export function roomToActiveRoom(room: GseRoom): ActiveRoom {
   return {
     roomId: room.id,
     backend: room.mesh.backend,
+    appId: room.appId,
     peers,
     selfAddress: undefined,
     credentialExpiresAt: room.expiresAt,

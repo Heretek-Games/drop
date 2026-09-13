@@ -262,7 +262,11 @@ pub async fn plugin_request(
 }
 
 #[tauri::command]
-pub fn gse_write_room_config(install_dir: String, peer_ips: Vec<String>) -> Result<(), String> {
+pub fn gse_write_room_config(
+    install_dir: String,
+    peer_ips: Vec<String>,
+    app_id: Option<u32>,
+) -> Result<(), String> {
     let path = std::path::Path::new(&install_dir);
     if !path.is_dir() {
         return Err("Game install directory does not exist".to_string());
@@ -271,6 +275,12 @@ pub fn gse_write_room_config(install_dir: String, peer_ips: Vec<String>) -> Resu
     let settings_dir = path.join("steam_settings");
     if let Err(e) = std::fs::create_dir_all(&settings_dir) {
         return Err(format!("Failed to create steam_settings dir: {e}"));
+    }
+
+    // Pin the room's AppID so the emulator namespaces lobbies correctly.
+    if let Some(app_id) = app_id {
+        std::fs::write(settings_dir.join("steam_appid.txt"), app_id.to_string())
+            .map_err(|e| format!("Failed to write steam_appid.txt: {e}"))?;
     }
 
     let broadcasts_file = settings_dir.join("custom_broadcasts.txt");

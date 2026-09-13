@@ -1,6 +1,7 @@
 import { createError, readBody } from "h3";
 import { PLUGIN_API_VERSION } from "../types";
 import type { PluginContext, PluginMetadata, ServerPlugin } from "../types";
+import { CompatRegistry, compatFromEnv } from "./gse/compat";
 import { InMemoryMeshBackend, ZeroTierBackend } from "./gse/mesh";
 import { RoomStore } from "./gse/room-store";
 import type { EmulatorBinding, MeshBackend } from "./gse/types";
@@ -62,13 +63,22 @@ export class DropGseServerPlugin implements ServerPlugin {
 
   init(ctx: PluginContext): void {
     this.ctx = ctx;
-    this.store = new RoomStore(ctx.storage, this.resolveBackend());
+    const compat = new CompatRegistry(compatFromEnv());
+    this.store = new RoomStore(
+      ctx.storage,
+      this.resolveBackend(),
+      Date.now,
+      compat,
+    );
 
     // B7: periodic TTL sweep. unref so tests/CLI don't hang on the timer.
     this.pruneTimer = setInterval(() => {
       this.store.pruneExpired().catch(() => {});
     }, PRUNE_INTERVAL_MS);
     this.pruneTimer.unref?.();
+
+    // Route: GET /compat — known-incompatible games/AppIDs.
+    ctx.registerRoute("GET", "/compat", () => compat.info());
 
     // Route: GET /rooms
     ctx.registerRoute("GET", "/rooms", async (_event, context) => {
@@ -92,6 +102,7 @@ export class DropGseServerPlugin implements ServerPlugin {
       const body = await readBody<{
         gameId?: string;
         versionId?: string;
+        appId?: number;
         emulator?: EmulatorBinding;
       }>(event);
 
@@ -106,6 +117,7 @@ export class DropGseServerPlugin implements ServerPlugin {
         const room = await this.store.create({
           gameId: body.gameId,
           versionId: body.versionId,
+          appId: body.appId,
           emulator: body.emulator ?? DEFAULT_EMULATOR,
           hostUserId: context.userId,
         });
@@ -115,7 +127,11 @@ export class DropGseServerPlugin implements ServerPlugin {
         );
         return { room };
       } catch (err) {
-        throw createError({ statusCode: 429, statusMessage: String(err) });
+        const message = String(err);
+        throw createError({
+          statusCode: message.includes("known-incompatible") ? 409 : 429,
+          statusMessage: message,
+        });
       }
     });
 

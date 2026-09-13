@@ -40,6 +40,10 @@ pub struct Game {
     pub id: String,
     #[serde(rename = "type")]
     pub game_type: String,
+    #[serde(default)]
+    pub metadata_source: String,
+    #[serde(default)]
+    pub metadata_id: String,
     pub m_name: String,
     pub m_short_description: String,
     pub m_description: String,

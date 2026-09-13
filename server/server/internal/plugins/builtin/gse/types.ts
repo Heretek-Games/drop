@@ -22,6 +22,8 @@ export interface Room {
   id: string;
   gameId: string;
   versionId: string;
+  /** Pinned Steam AppID written to `steam_appid.txt`, when known. */
+  appId?: number | undefined;
   emulator: EmulatorBinding;
   hostUserId: string;
   /** Last host heartbeat (ms). Used for lease expiry/migration. */
@@ -37,6 +39,7 @@ export interface DiscoverableRoom {
   id: string;
   gameId: string;
   versionId: string;
+  appId?: number | undefined;
   emulator: EmulatorBinding;
   mesh: PublicMeshInfo;
   memberCount: number;
@@ -95,6 +98,7 @@ export function toDiscoverable(room: Room): DiscoverableRoom {
     id: room.id,
     gameId: room.gameId,
     versionId: room.versionId,
+    appId: room.appId,
     emulator: room.emulator,
     mesh: room.mesh,
     memberCount: room.members.length,

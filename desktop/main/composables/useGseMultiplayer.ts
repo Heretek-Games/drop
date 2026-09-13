@@ -21,6 +21,7 @@ export interface GseRoom {
   id: string;
   gameId: string;
   versionId: string;
+  appId?: number;
   emulator: EmulatorBinding;
   hostUserId?: string;
   members?: RoomMember[];
@@ -74,6 +75,7 @@ export const useGseMultiplayer = (gameId: string) => {
   async function hostRoom(
     versionId: string,
     backend: "tailscale" | "zerotier" = "tailscale",
+    appId?: number,
   ): Promise<GseRoom | null> {
     isLoading.value = true;
     error.value = null;
@@ -86,6 +88,7 @@ export const useGseMultiplayer = (gameId: string) => {
           gameId,
           versionId,
           backend,
+          appId,
           emulator: {
             flavor: "gbe_fork",
             release: "latest",
@@ -203,6 +206,7 @@ export const useGseMultiplayer = (gameId: string) => {
     await invoke("gse_write_room_config", {
       installDir,
       peerIps: activeRoom.peers,
+      appId: activeRoom.appId,
     });
   }
 

@@ -131,10 +131,22 @@
             multiplayer sessions to friends.
           </p>
 
+          <label class="flex items-start gap-x-2 text-[11px] text-zinc-400">
+            <input
+              v-model="consent"
+              type="checkbox"
+              class="mt-0.5 rounded border-zinc-600 bg-zinc-900 text-purple-600 focus:ring-purple-500"
+            />
+            <span>
+              I understand this patches the game's Steam files and restores them
+              on exit.
+            </span>
+          </label>
+
           <button
             type="button"
             @click="handleHostRoom"
-            :disabled="isLoading"
+            :disabled="isLoading || !consent"
             class="w-full inline-flex justify-center items-center gap-x-2 rounded-md bg-purple-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-purple-500 disabled:opacity-50 transition"
           >
             <PlusIcon class="size-4" />
@@ -197,7 +209,7 @@
               <button
                 type="button"
                 @click="() => handleJoinRoom(room.id)"
-                :disabled="isLoading"
+                :disabled="isLoading || !consent"
                 class="rounded bg-zinc-800 px-3 py-1.5 text-xs font-medium text-purple-300 hover:bg-purple-600 hover:text-white transition disabled:opacity-50"
               >
                 Join
@@ -238,6 +250,7 @@ const props = defineProps<{
   gameName: string;
   versionId: string;
   installDir: string;
+  appId?: number;
 }>();
 
 const emit = defineEmits<{
@@ -246,6 +259,7 @@ const emit = defineEmits<{
 
 const isOpen = defineModel<boolean>({ default: false });
 const selectedBackend = ref<"tailscale" | "zerotier">("tailscale");
+const consent = ref(false);
 
 const {
   rooms,
@@ -270,7 +284,7 @@ watch(
 );
 
 async function handleHostRoom() {
-  await hostRoom(props.versionId, selectedBackend.value);
+  await hostRoom(props.versionId, selectedBackend.value, props.appId);
   if (currentRoom.value && props.installDir) {
     await syncRoomConfigToDisk(props.installDir, currentRoom.value);
   }

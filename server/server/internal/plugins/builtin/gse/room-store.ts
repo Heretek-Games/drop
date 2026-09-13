@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { PluginStorage } from "../../types";
+import type { CompatRegistry } from "./compat";
 import type {
   DiscoverableRoom,
   EmulatorBinding,
@@ -31,6 +32,7 @@ interface CredentialMap {
 export interface CreateRoomInput {
   gameId: string;
   versionId: string;
+  appId?: number | undefined;
   emulator: EmulatorBinding;
   hostUserId: string;
 }
@@ -47,6 +49,7 @@ export class RoomStore {
     private readonly storage: PluginStorage,
     private readonly backend: MeshBackend,
     private readonly now: () => number = Date.now,
+    private readonly compat?: CompatRegistry,
   ) {}
 
   private async loadRooms(): Promise<Record<string, Room>> {
@@ -91,6 +94,9 @@ export class RoomStore {
     if (Object.keys(rooms).length >= MAX_ROOMS) {
       throw new Error("global room limit reached");
     }
+    if (this.compat?.isBlocked(input.gameId, input.appId)) {
+      throw new Error("game is known-incompatible with GSE");
+    }
 
     const roomId = randomUUID();
     const expiresAt = now + ROOM_TTL_MS;
@@ -101,6 +107,7 @@ export class RoomStore {
       id: roomId,
       gameId: input.gameId,
       versionId: input.versionId,
+      appId: input.appId,
       emulator: input.emulator,
       hostUserId: input.hostUserId,
       hostHeartbeatAt: now,

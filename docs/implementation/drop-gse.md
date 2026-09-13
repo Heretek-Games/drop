@@ -129,8 +129,13 @@ Owner: TBD · Depends on: M1
       hit anti-cheat gating or install mutation
 - [x] **A8** Crash-recovery startup sweep: restore stale `.orig` backups for all
       installed dirs at client startup (`recover_interrupted_sessions`)
-- [ ] **A9** AppID pinning + Proton prefix resolution via installed-version records
-- [ ] **A10** Server compatibility DB + user consent UI
+- [x] **A9** AppID pinning end-to-end: rooms carry an optional `appId` (derived
+      from `metadataSource === "Steam"` / `metadataId`), `gse_write_room_config`
+      writes `steam_appid.txt`, and the A↔B contract carries it. Proton launches
+      reuse Drop's resolved `install_dir` (no separate prefix logic needed).
+- [x] **A10** Server compat registry (`GSE_BLOCKED_APP_IDS` /
+      `GSE_BLOCKED_GAME_IDS`, `GET /compat`, room creation rejected with 409) and
+      a consent checkbox gating host/join in the GSE modal.
 
 **Acceptance:** non-opted games launch byte-identically; anti-cheat titles
 blocked only when opted in; kill mid-patch restores on next startup.

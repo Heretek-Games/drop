@@ -613,6 +613,7 @@
     :game-name="game.mName"
     :version-id="installedData.version_id"
     :install-dir="installedData.install_dir"
+    :app-id="gseAppId"
     @launch="() => launch()"
   />
 
@@ -742,6 +743,13 @@ const { game, status, version } = await useGame(id);
 const { currentRoom } = useGseMultiplayer(id);
 const installedData = computed(() =>
   status.value?.type === "Installed" ? status.value : undefined,
+);
+
+// Steam AppID, pinned into steam_appid.txt for the emulator when known.
+const gseAppId = computed(() =>
+  game.metadataSource === "Steam" && /^\d+$/.test(game.metadataId)
+    ? Number.parseInt(game.metadataId, 10)
+    : undefined,
 );
 
 const bannerUrl = await useObject(game.mBannerObjectId);

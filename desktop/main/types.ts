@@ -31,6 +31,8 @@ export type AppState = {
 export type Game = {
   id: string;
   type: "Game" | "Executor" | "Redist";
+  metadataSource: string;
+  metadataId: string;
   mName: string;
   mShortDescription: string;
   mDescription: string;
