@@ -65,6 +65,18 @@
             </div>
           </div>
 
+          <div
+            class="flex items-center justify-between rounded bg-zinc-900/60 px-2.5 py-1 text-xs"
+          >
+            <span class="text-zinc-500">Your mesh address</span>
+            <span
+              class="font-mono"
+              :class="meshReady ? 'text-emerald-400' : 'text-amber-400'"
+            >
+              {{ selfAddress ?? "waiting for mesh..." }}
+            </span>
+          </div>
+
           <div>
             <span class="text-xs text-zinc-500">
               Connected Peers ({{ currentRoom.members?.length || 1 }}):
@@ -264,6 +276,8 @@ const consent = ref(false);
 const {
   rooms,
   currentRoom,
+  selfAddress,
+  meshReady,
   isLoading,
   error,
   fetchRooms,

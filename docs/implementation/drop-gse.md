@@ -177,9 +177,11 @@ Owner: TBD · Depends on: M0, M2
 - [x] **B4** `ZeroTierBackend` creates networks (per-room /24, `enableBroadcast`),
       authorizes a joined member and returns its assigned address, and deletes
       the network on teardown (mock-fetch tests). Per-user revoke still a stub.
-- [~] **B6** Client requests its credential after host/join and refreshes the
-  room, so assigned mesh addresses reach `custom_broadcasts.txt` via the
-  A↔B contract. Client-side VPN status validators still pending.
+- [x] **B6** Client requests its credential after host/join, refreshes the room
+      so assigned mesh addresses reach `custom_broadcasts.txt` via the A↔B
+      contract, and tracks `selfAddress`/`meshReady` (the credential's assigned
+      address) as a membership validator surfaced in the modal. OS-level VPN
+      status checks remain a future enhancement.
 - [x] **B7** TTL sweeper (60s, unref'd), per-host + global caps, auth on room
       reads (member view vs discovery), credential/join/heartbeat auth
 

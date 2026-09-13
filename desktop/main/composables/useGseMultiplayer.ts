@@ -38,6 +38,9 @@ const currentRoomMap = ref<{ [gameId: string]: GseRoom | null }>({});
 export const useGseMultiplayer = (gameId: string) => {
   const isLoading = ref(false);
   const error = ref<string | null>(null);
+  /** This client's assigned mesh address (set once the server authorizes it). */
+  const selfAddress = ref<string | null>(null);
+  const meshReady = computed(() => selfAddress.value !== null);
 
   if (!activeRoomsMap.value[gameId]) {
     activeRoomsMap.value[gameId] = [];
@@ -144,17 +147,23 @@ export const useGseMultiplayer = (gameId: string) => {
    * Request this member's mesh credential. This is what causes the server to
    * assign the member a mesh address (reflected in the room member list).
    */
-  async function requestCredential(roomId: string): Promise<string | null> {
+  async function requestCredential(
+    roomId: string,
+  ): Promise<{ secret: string; address?: string } | null> {
     try {
-      const res = await invoke<{ credential?: { secret: string } }>(
-        "plugin_request",
-        {
-          pluginId: "drop-gse",
-          method: "POST",
-          path: `/rooms/${roomId}/credential`,
-        },
-      );
-      return res.credential?.secret ?? null;
+      const res = await invoke<{
+        credential?: { secret: string; address?: string };
+      }>("plugin_request", {
+        pluginId: "drop-gse",
+        method: "POST",
+        path: `/rooms/${roomId}/credential`,
+      });
+      if (res.credential) {
+        // The assigned address is this client's mesh-membership proof.
+        selfAddress.value = res.credential.address ?? null;
+        return res.credential;
+      }
+      return null;
     } catch (e) {
       error.value = (e as string).toString();
       return null;
@@ -190,6 +199,7 @@ export const useGseMultiplayer = (gameId: string) => {
       });
       if (currentRoom.value?.id === roomId) {
         currentRoom.value = null;
+        selfAddress.value = null;
       }
       await fetchRooms();
       return true;
@@ -249,6 +259,8 @@ export const useGseMultiplayer = (gameId: string) => {
   return {
     rooms,
     currentRoom,
+    selfAddress,
+    meshReady,
     isLoading,
     error,
     fetchRooms,

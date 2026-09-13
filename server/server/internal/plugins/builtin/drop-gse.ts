@@ -336,6 +336,7 @@ export class DropGseServerPlugin implements ServerPlugin {
           credential: {
             mesh: room?.mesh,
             secret: credential.secret,
+            address: credential.address,
             expiresAt: credential.expiresAt,
           },
         };
