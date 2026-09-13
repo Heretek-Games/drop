@@ -97,17 +97,3 @@ pub fn reclaim_pipeline_space(game_id: String) -> Result<u64, String> {
     ::process::pipeline::reclaim_pipeline_space_for_game(&game_id)
 }
 
-/// Join a ZeroTier room network via the local ZeroTier One service.
-///
-/// Returns this node's 10-hex ZeroTier address so the caller can report it to
-/// the room coordinator for authorization (`POST /rooms/:id/member`).
-#[tauri::command]
-pub fn gse_mesh_join(network_id: String) -> Result<String, String> {
-    ::process::zerotier::join_network(&network_id)
-}
-
-/// Leave a ZeroTier room network via the local ZeroTier One service.
-#[tauri::command]
-pub fn gse_mesh_leave(network_id: String) -> Result<(), String> {
-    ::process::zerotier::leave_network(&network_id)
-}

@@ -1371,7 +1371,6 @@ dependencies = [
  "futures-util",
  "games",
  "gethostname",
- "gse-engine",
  "hex",
  "http",
  "http-serde",
@@ -2139,18 +2138,6 @@ dependencies = [
  "glib-sys",
  "libc",
  "system-deps",
-]
-
-[[package]]
-name = "gse-engine"
-version = "0.1.0"
-dependencies = [
- "regex",
- "serde",
- "serde_json",
- "sha2",
- "tempfile",
- "walkdir",
 ]
 
 [[package]]
@@ -4194,7 +4181,6 @@ dependencies = [
  "database",
  "dynfmt",
  "games",
- "gse-engine",
  "keyvalues-parser",
  "log",
  "page_size",

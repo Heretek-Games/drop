@@ -1,26 +1,36 @@
-//! Symlink-resistant filesystem helpers for untrusted game directories.
-//!
-//! A release archive can ship symlinks or `..` names that redirect writes
-//! outside the install directory. Every recursive write/extract path in the
-//! engine funnels through these helpers so an existing symlink component is
-//! rejected, and files are published atomically (temp file + rename) rather
-//! than written through a pre-existing destination link.
-//!
-//! The checks are lexical plus `symlink_metadata` on every existing component.
-//! Roots are canonicalized first so a legitimate symlinked install path (e.g.
-//! `/tmp` on macOS) is not mistaken for an escape.
-
+use std::fmt;
 use std::fs::{self, File, OpenOptions};
-use std::io::Write as _;
+use std::io::{self, Write};
 use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use crate::error::EngineError;
-
 static TMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 
-fn unsafe_path(detail: impl Into<String>) -> EngineError {
-    EngineError::UnsafePath(detail.into())
+#[derive(Debug)]
+pub enum PathGuardError {
+    UnsafePath(String),
+    Io(io::Error),
+}
+
+impl fmt::Display for PathGuardError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            PathGuardError::UnsafePath(msg) => write!(f, "unsafe path: {msg}"),
+            PathGuardError::Io(err) => write!(f, "{err}"),
+        }
+    }
+}
+
+impl std::error::Error for PathGuardError {}
+
+impl From<io::Error> for PathGuardError {
+    fn from(err: io::Error) -> Self {
+        PathGuardError::Io(err)
+    }
+}
+
+fn unsafe_path(detail: impl Into<String>) -> PathGuardError {
+    PathGuardError::UnsafePath(detail.into())
 }
 
 /// Whether `path` currently exists and is a symlink (does not follow it).
@@ -30,7 +40,7 @@ pub fn is_symlink(path: &Path) -> bool {
         .unwrap_or(false)
 }
 
-fn canonical_root(root: &Path) -> Result<PathBuf, EngineError> {
+fn canonical_root(root: &Path) -> Result<PathBuf, PathGuardError> {
     fs::canonicalize(root).map_err(|e| {
         unsafe_path(format!(
             "cannot resolve install directory {}: {e}",
@@ -41,7 +51,7 @@ fn canonical_root(root: &Path) -> Result<PathBuf, EngineError> {
 
 /// Resolve `candidate` (relative to `root`) while rejecting absolute paths,
 /// `..`/prefix components, and any existing symlinked component.
-pub fn safe_join(root: &Path, candidate: impl AsRef<Path>) -> Result<PathBuf, EngineError> {
+pub fn safe_join(root: &Path, candidate: impl AsRef<Path>) -> Result<PathBuf, PathGuardError> {
     let root = canonical_root(root)?;
     let candidate = candidate.as_ref();
     let mut current = root.clone();
@@ -76,7 +86,7 @@ pub fn safe_join(root: &Path, candidate: impl AsRef<Path>) -> Result<PathBuf, En
 
 /// Create `candidate` as a directory (and parents) inside `root`, rejecting
 /// symlinked components. Returns the created path.
-pub fn ensure_dir(root: &Path, candidate: impl AsRef<Path>) -> Result<PathBuf, EngineError> {
+pub fn ensure_dir(root: &Path, candidate: impl AsRef<Path>) -> Result<PathBuf, PathGuardError> {
     let dir = safe_join(root, candidate)?;
     fs::create_dir_all(&dir)?;
     if is_symlink(&dir) {
@@ -88,7 +98,7 @@ pub fn ensure_dir(root: &Path, candidate: impl AsRef<Path>) -> Result<PathBuf, E
     Ok(dir)
 }
 
-fn temp_path_for(target: &Path) -> Result<PathBuf, EngineError> {
+fn temp_path_for(target: &Path) -> Result<PathBuf, PathGuardError> {
     let parent = target
         .parent()
         .ok_or_else(|| unsafe_path(format!("path {} has no parent", target.display())))?;
@@ -102,9 +112,9 @@ fn temp_path_for(target: &Path) -> Result<PathBuf, EngineError> {
 
 /// Write to a temp file in the destination's directory, then atomically rename
 /// it over the destination so an existing symlink is replaced, not followed.
-fn atomic_replace<F>(target: &Path, fill: F) -> Result<(), EngineError>
+fn atomic_replace<F>(target: &Path, fill: F) -> Result<(), PathGuardError>
 where
-    F: FnOnce(&mut File) -> Result<(), EngineError>,
+    F: FnOnce(&mut File) -> Result<(), PathGuardError>,
 {
     let parent = target
         .parent()
@@ -114,7 +124,7 @@ where
     fs::create_dir_all(parent)?;
     let tmp = temp_path_for(target)?;
 
-    let filled = (|| -> Result<(), EngineError> {
+    let filled = (|| -> Result<(), PathGuardError> {
         let mut file = OpenOptions::new().write(true).create_new(true).open(&tmp)?;
         fill(&mut file)?;
         file.sync_all()?;
@@ -135,7 +145,7 @@ where
 
     fs::rename(&tmp, target).map_err(|e| {
         let _ = fs::remove_file(&tmp);
-        EngineError::Io(e)
+        PathGuardError::Io(e)
     })
 }
 
@@ -144,7 +154,7 @@ pub fn write_file(
     root: &Path,
     candidate: impl AsRef<Path>,
     bytes: &[u8],
-) -> Result<(), EngineError> {
+) -> Result<(), PathGuardError> {
     let target = safe_join(root, candidate)?;
     atomic_replace(&target, |file| {
         file.write_all(bytes)?;
@@ -154,7 +164,7 @@ pub fn write_file(
 
 /// Copy `src` (a trusted local path) to `candidate` inside `root` without
 /// following symlinks at the destination.
-pub fn copy_to(root: &Path, src: &Path, candidate: impl AsRef<Path>) -> Result<(), EngineError> {
+pub fn copy_to(root: &Path, src: &Path, candidate: impl AsRef<Path>) -> Result<(), PathGuardError> {
     let target = safe_join(root, candidate)?;
     atomic_replace(&target, |file| {
         let mut reader = File::open(src)?;
@@ -165,7 +175,7 @@ pub fn copy_to(root: &Path, src: &Path, candidate: impl AsRef<Path>) -> Result<(
 
 /// Remove a regular file (or symlink, which is unlinked, never followed) under
 /// `root`. Missing paths are a no-op.
-pub fn remove_file(root: &Path, candidate: impl AsRef<Path>) -> Result<(), EngineError> {
+pub fn remove_file(root: &Path, candidate: impl AsRef<Path>) -> Result<(), PathGuardError> {
     let path = safe_join(root, candidate)?;
     match fs::symlink_metadata(&path) {
         Ok(meta) if meta.is_dir() && !meta.file_type().is_symlink() => Err(unsafe_path(format!(
@@ -177,13 +187,13 @@ pub fn remove_file(root: &Path, candidate: impl AsRef<Path>) -> Result<(), Engin
             Ok(())
         }
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(e) => Err(EngineError::Io(e)),
+        Err(e) => Err(PathGuardError::Io(e)),
     }
 }
 
 /// Recursively remove a directory under `root`. A symlink is unlinked rather
 /// than traversed. Missing paths are a no-op.
-pub fn remove_dir_all(root: &Path, candidate: impl AsRef<Path>) -> Result<(), EngineError> {
+pub fn remove_dir_all(root: &Path, candidate: impl AsRef<Path>) -> Result<(), PathGuardError> {
     let path = safe_join(root, candidate)?;
     match fs::symlink_metadata(&path) {
         Ok(meta) if meta.file_type().is_symlink() => {
@@ -199,7 +209,7 @@ pub fn remove_dir_all(root: &Path, candidate: impl AsRef<Path>) -> Result<(), En
             Ok(())
         }
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(e) => Err(EngineError::Io(e)),
+        Err(e) => Err(PathGuardError::Io(e)),
     }
 }
 

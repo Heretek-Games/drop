@@ -29,7 +29,7 @@ use ::client::{
 };
 use ::download_manager::DownloadManagerWrapper;
 use ::games::scan::scan_install_dirs;
-use ::process::{ProcessManagerWrapper, gse_interceptor::GseLaunchInterceptor};
+use ::process::ProcessManagerWrapper;
 use ::remote::{
     auth::{self, HandshakeRequestBody, HandshakeResponse, generate_authorization_header},
     cache::clear_cached_object,
@@ -111,9 +111,6 @@ async fn setup(handle: AppHandle) -> AppState {
     log4rs::init_config(config).expect("Failed to initialise log4rs");
 
     ProcessManagerWrapper::init(handle.clone());
-    ProcessManagerWrapper::register_global_interceptor(std::sync::Arc::new(
-        GseLaunchInterceptor::new(),
-    ));
     DownloadManagerWrapper::init(handle.clone());
 
     debug!("checking if database is set up");
@@ -161,13 +158,6 @@ async fn setup(handle: AppHandle) -> AppState {
                 }
             }
         }
-    }
-
-    // Crash recovery: restore Steam API binaries from any interrupted GSE run.
-    let recovered =
-        ::process::gse_interceptor::recover_interrupted_sessions(&installed_dirs);
-    if recovered > 0 {
-        info!("GSE crash recovery restored {recovered} game(s)");
     }
 
     info!("detected games missing: {missing_games:?}");
@@ -260,8 +250,6 @@ pub fn run() {
             plugin_request,
             plugin_subscribe,
             plugin_request_ws,
-            gse_fetch_release,
-            gse_write_room_config,
             // Library
             fetch_library,
             fetch_game,
@@ -290,8 +278,6 @@ pub fn run() {
             start_pipeline_setup,
             cancel_pipeline_setup,
             reclaim_pipeline_space,
-            gse_mesh_join,
-            gse_mesh_leave,
             #[cfg(target_os = "linux")]
             ::process::compat::fetch_proton_paths,
             #[cfg(target_os = "linux")]

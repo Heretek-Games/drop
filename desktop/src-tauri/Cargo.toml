@@ -13,7 +13,6 @@ members = [
   "database",
   "download_manager",
   "games",
-  "gse-engine",
   "process",
   "remote",
   "utils",
@@ -47,7 +46,6 @@ futures-core = "0.3.31"
 futures-lite = "2.6.0"
 futures-util = "0.3.31"
 games = { path = "./games", version = "0.1.0" } # games
-gse-engine = { path = "./gse-engine", version = "0.1.0" } # GSE emulator engine
 gethostname = "1.0.1"
 hex = "0.4.3"
 http = "1.1.0"

@@ -300,12 +300,12 @@ pub fn materialize_setup_script(
         return Err("refusing to write an unsafe setup script name".to_string());
     }
 
-    gse_engine::path_guard::write_file(install_dir, &name, script.as_bytes())
+    crate::path_guard::write_file(install_dir, &name, script.as_bytes())
         .map_err(|e| format!("failed to write {name}: {e}"))?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        let path = gse_engine::path_guard::safe_join(install_dir, &name)
+        let path = crate::path_guard::safe_join(install_dir, &name)
             .map_err(|e| format!("failed to resolve {name}: {e}"))?;
         if let Err(e) = fs::set_permissions(&path, fs::Permissions::from_mode(0o755)) {
             warn!("failed to mark {name} executable: {e}");
@@ -564,7 +564,7 @@ async fn execute_pipeline(
     // Remove the temporary extraction directory in every outcome: on success it
     // is no longer needed, and on failure/cancellation leaving it behind wastes
     // disk and can confuse a later run.
-    if let Err(err) = gse_engine::path_guard::remove_dir_all(install_dir, ".drop_iso_tmp") {
+    if let Err(err) = crate::path_guard::remove_dir_all(install_dir, ".drop_iso_tmp") {
         debug!("failed to remove temporary extraction directory: {err}");
     }
 
@@ -624,7 +624,7 @@ async fn execute_extract_rar(
 
     let archive_path = match archive_name {
         Some(name) if !name.contains(['*', '?']) => {
-            gse_engine::path_guard::safe_join(install_dir, name).map_err(|e| e.to_string())?
+            crate::path_guard::safe_join(install_dir, name).map_err(|e| e.to_string())?
         }
         _ => find_primary_rar(install_dir)
             .ok_or_else(|| "No primary RAR archive found in game directory".to_string())?,
@@ -643,7 +643,7 @@ async fn execute_extract_rar(
         .and_then(|v| v.as_str())
         .unwrap_or(".drop_iso_tmp");
 
-    let output_dir = gse_engine::path_guard::ensure_dir(install_dir, output_sub)
+    let output_dir = crate::path_guard::ensure_dir(install_dir, output_sub)
         .map_err(|e| format!("Refusing unsafe output directory '{output_sub}': {e}"))?;
 
     let mut cmd = tokio::process::Command::new(tool);
@@ -685,7 +685,7 @@ async fn execute_extract_iso(
         .get("outputDir")
         .and_then(|v| v.as_str())
         .unwrap_or(".");
-    let output_dir = gse_engine::path_guard::ensure_dir(install_dir, output_sub)
+    let output_dir = crate::path_guard::ensure_dir(install_dir, output_sub)
         .map_err(|e| format!("Refusing unsafe output directory '{output_sub}': {e}"))?;
 
     // Recipes provide `sourceGlob` (e.g. ".drop_iso_tmp/*.iso"); fall back to
@@ -702,7 +702,7 @@ async fn execute_extract_iso(
             dirs.push(if rel == "." || rel.is_empty() {
                 install_dir.to_path_buf()
             } else {
-                gse_engine::path_guard::safe_join(install_dir, rel).map_err(|e| e.to_string())?
+                crate::path_guard::safe_join(install_dir, rel).map_err(|e| e.to_string())?
             });
         }
         let iso_dir_sub = step
@@ -710,7 +710,7 @@ async fn execute_extract_iso(
             .get("isoDir")
             .and_then(|v| v.as_str())
             .unwrap_or(".drop_iso_tmp");
-        if let Ok(dir) = gse_engine::path_guard::safe_join(install_dir, iso_dir_sub) {
+        if let Ok(dir) = crate::path_guard::safe_join(install_dir, iso_dir_sub) {
             dirs.push(dir);
         }
         dirs.push(install_dir.to_path_buf());
@@ -792,11 +792,11 @@ async fn execute_extract_archive(
         .get("outputDir")
         .and_then(|v| v.as_str())
         .unwrap_or(".");
-    let output_dir = gse_engine::path_guard::ensure_dir(install_dir, output_sub)
+    let output_dir = crate::path_guard::ensure_dir(install_dir, output_sub)
         .map_err(|e| format!("Refusing unsafe output directory '{output_sub}': {e}"))?;
 
     let archive_path =
-        gse_engine::path_guard::safe_join(install_dir, archive_name).map_err(|e| e.to_string())?;
+        crate::path_guard::safe_join(install_dir, archive_name).map_err(|e| e.to_string())?;
     let mut cmd = tokio::process::Command::new(tool);
     cmd.arg("x")
         .arg("-y")
@@ -842,11 +842,11 @@ async fn execute_innoextract(
         .get("outputDir")
         .and_then(|v| v.as_str())
         .unwrap_or("app");
-    let output_dir = gse_engine::path_guard::ensure_dir(install_dir, output_sub)
+    let output_dir = crate::path_guard::ensure_dir(install_dir, output_sub)
         .map_err(|e| format!("Refusing unsafe output directory '{output_sub}': {e}"))?;
 
     let setup_path =
-        gse_engine::path_guard::safe_join(install_dir, setup_exe).map_err(|e| e.to_string())?;
+        crate::path_guard::safe_join(install_dir, setup_exe).map_err(|e| e.to_string())?;
     let mut cmd = tokio::process::Command::new(tool);
     cmd.arg("-e")
         .arg("-d")
@@ -968,10 +968,10 @@ pub fn overlay_directory(src_dir: &Path, dest_dir: &Path) -> Result<(), String> 
             .map_err(|e| format!("Strip prefix error: {e}"))?;
 
         if entry.file_type().is_dir() {
-            gse_engine::path_guard::ensure_dir(dest_dir, rel_path)
+            crate::path_guard::ensure_dir(dest_dir, rel_path)
                 .map_err(|e| format!("Failed to create dir {}: {e}", rel_path.display()))?;
         } else if entry.file_type().is_file() {
-            gse_engine::path_guard::copy_to(dest_dir, entry.path(), rel_path).map_err(|e| {
+            crate::path_guard::copy_to(dest_dir, entry.path(), rel_path).map_err(|e| {
                 format!(
                     "Failed to copy {} to {}: {e}",
                     entry.path().display(),
@@ -988,7 +988,7 @@ pub fn overlay_directory(src_dir: &Path, dest_dir: &Path) -> Result<(), String> 
 /// existing directory. Absolute paths, `..` escapes and symlinked components
 /// are rejected.
 fn confined_dir(install_dir: &Path, candidate: &str) -> Option<PathBuf> {
-    gse_engine::path_guard::safe_join(install_dir, candidate)
+    crate::path_guard::safe_join(install_dir, candidate)
         .ok()
         .filter(|path| path.is_dir())
 }
@@ -999,7 +999,7 @@ async fn execute_cleanup_step(step: &PipelineStep, install_dir: &Path) -> Result
             if let Some(pattern) = t.as_str() {
                 // Targets without a wildcard may be directories (e.g. .drop_iso_tmp).
                 if !pattern.contains(['*', '?', '[']) {
-                    let dir = match gse_engine::path_guard::safe_join(install_dir, pattern) {
+                    let dir = match crate::path_guard::safe_join(install_dir, pattern) {
                         Ok(dir) => dir,
                         Err(e) => {
                             warn!("Refusing cleanup target: {e}");
@@ -1007,7 +1007,7 @@ async fn execute_cleanup_step(step: &PipelineStep, install_dir: &Path) -> Result
                         }
                     };
                     if dir.is_dir() {
-                        if let Err(e) = gse_engine::path_guard::remove_dir_all(install_dir, pattern)
+                        if let Err(e) = crate::path_guard::remove_dir_all(install_dir, pattern)
                         {
                             warn!(
                                 "Failed to remove temporary directory {}: {}",
@@ -1262,7 +1262,7 @@ pub fn reclaim_pipeline_space(
     }
 
     // Remove any leftover temporary folders
-    if let Err(err) = gse_engine::path_guard::remove_dir_all(install_dir, ".drop_iso_tmp") {
+    if let Err(err) = crate::path_guard::remove_dir_all(install_dir, ".drop_iso_tmp") {
         debug!("failed to remove temporary extraction directory: {err}");
     }
 
@@ -1310,7 +1310,7 @@ fn delete_pattern(base_dir: &Path, pattern: &str) -> u64 {
             if let Ok(meta) = entry.metadata() {
                 if meta.is_file() {
                     let len = meta.len();
-                    if gse_engine::path_guard::remove_file(base_dir, &name).is_ok() {
+                    if crate::path_guard::remove_file(base_dir, &name).is_ok() {
                         deleted += len;
                         info!("Reclaimed space: deleted {}", entry.path().display());
                     }
@@ -1348,10 +1348,10 @@ fn resolve_command_program(install_dir: &Path, program: &str) -> Result<PathBuf,
     }
     let path = Path::new(program);
     if path.is_absolute() || program.contains(['/', '\\']) {
-        return gse_engine::path_guard::safe_join(install_dir, program)
+        return crate::path_guard::safe_join(install_dir, program)
             .map_err(|e| format!("refusing command '{program}': {e}"));
     }
-    let candidate = gse_engine::path_guard::safe_join(install_dir, program)
+    let candidate = crate::path_guard::safe_join(install_dir, program)
         .map_err(|e| format!("refusing command '{program}': {e}"))?;
     if candidate.is_file() {
         Ok(candidate)
@@ -1476,11 +1476,11 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let base = temp.path();
 
-        assert!(gse_engine::path_guard::safe_join(base, "sub/file.dll").is_ok());
-        assert!(gse_engine::path_guard::safe_join(base, ".").is_ok());
-        assert!(gse_engine::path_guard::safe_join(base, "../outside").is_err());
-        assert!(gse_engine::path_guard::safe_join(base, "sub/../../outside").is_err());
-        assert!(gse_engine::path_guard::safe_join(base, "/etc/passwd").is_err());
+        assert!(crate::path_guard::safe_join(base, "sub/file.dll").is_ok());
+        assert!(crate::path_guard::safe_join(base, ".").is_ok());
+        assert!(crate::path_guard::safe_join(base, "../outside").is_err());
+        assert!(crate::path_guard::safe_join(base, "sub/../../outside").is_err());
+        assert!(crate::path_guard::safe_join(base, "/etc/passwd").is_err());
     }
 
     #[test]

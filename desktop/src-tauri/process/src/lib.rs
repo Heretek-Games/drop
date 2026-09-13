@@ -18,14 +18,12 @@ pub static PROCESS_MANAGER: ProcessManagerWrapper = ProcessManagerWrapper::new()
 pub mod compat;
 pub mod error;
 pub mod format;
-pub mod gse_interceptor;
 pub mod interceptor;
 mod parser;
-pub mod peer_source;
+pub mod path_guard;
 pub mod pipeline;
 pub mod process_handlers;
 pub mod process_manager;
-pub mod zerotier;
 
 pub struct ProcessManagerWrapper(OnceLock<Mutex<ProcessManager<'static>>>);
 impl ProcessManagerWrapper {

@@ -81,24 +81,6 @@
           >
             Update <ArrowDownTrayIcon class="size-5" />
           </button>
-          <button
-            v-if="
-              installedData &&
-              installedData.install_type.type !=
-                InstalledType.PartiallyInstalled
-            "
-            class="transition-transform duration-300 hover:scale-105 active:scale-95 inline-flex items-center gap-x-2 rounded-md bg-purple-600/80 px-5 font-semibold text-white shadow-xl backdrop-blur-sm hover:bg-purple-600 uppercase font-display"
-            @click="multiplayerModalOpen = true"
-          >
-            <UserGroupIcon class="size-5" />
-            <span>Multiplayer</span>
-            <span
-              v-if="currentRoom"
-              class="ml-1 inline-flex items-center px-1.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40"
-            >
-              {{ currentRoom.members?.length || 1 }}
-            </span>
-          </button>
           <NuxtLink
             class="transition-transform duration-300 hover:scale-105 active:scale-95 inline-flex items-center rounded-md bg-zinc-800/50 px-6 font-semibold text-white shadow-xl backdrop-blur-sm hover:bg-zinc-800/80 uppercase font-display"
             :to="{
@@ -604,20 +586,6 @@
     :game-id="game.id"
   />
 
-  <GseMultiplayerModal
-    v-if="
-      installedData &&
-      installedData.install_type.type != InstalledType.PartiallyInstalled
-    "
-    v-model="multiplayerModalOpen"
-    :game-id="game.id"
-    :game-name="game.mName"
-    :version-id="installedData.version_id"
-    :install-dir="installedData.install_dir"
-    :app-id="gseAppId"
-    @launch="() => launch()"
-  />
-
   <GameSetupModal
     v-if="installedData"
     v-model="setupModalOpen"
@@ -724,7 +692,6 @@ import {
   PhotoIcon,
   PlayIcon,
   InformationCircleIcon,
-  UserGroupIcon,
 } from "@heroicons/vue/20/solid";
 import { BuildingStorefrontIcon } from "@heroicons/vue/24/outline";
 import {
@@ -737,23 +704,14 @@ import {
 import { invoke } from "@tauri-apps/api/core";
 import { micromark } from "micromark";
 import { InstalledType } from "~/types";
-import { useGseMultiplayer } from "~/composables/useGseMultiplayer";
 
 const route = useRoute();
 const router = useRouter();
 const id = route.params.id?.toString() ?? "";
 
 const { game, status, version } = await useGame(id);
-const { currentRoom } = useGseMultiplayer(id);
 const installedData = computed(() =>
   status.value?.type === "Installed" ? status.value : undefined,
-);
-
-// Steam AppID, pinned into steam_appid.txt for the emulator when known.
-const gseAppId = computed(() =>
-  game.metadataSource === "Steam" && /^\d+$/.test(game.metadataId)
-    ? Number.parseInt(game.metadataId, 10)
-    : undefined,
 );
 
 const bannerUrl = await useObject(game.mBannerObjectId);
@@ -761,7 +719,6 @@ const bannerUrl = await useObject(game.mBannerObjectId);
 const htmlDescription = micromark(game.mDescription);
 
 const installFlowOpen = ref(false);
-const multiplayerModalOpen = ref(false);
 const versionOptions = ref<undefined | Array<VersionOption>>();
 const installDirs = ref<undefined | Array<string>>();
 const currentImageIndex = ref(0);
