@@ -1,0 +1,121 @@
+name: Static analysis (report-only)
+
+# Rollout phase: every job is `continue-on-error` so it reports findings
+# without blocking. Promote a job to blocking once its baseline is clean.
+on:
+  push:
+    branches: [develop]
+  pull_request:
+    branches: [develop]
+  schedule:
+    - cron: "17 5 * * 1" # weekly Monday 05:17 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  actionlint:
+    name: actionlint
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # actions/checkout@v7
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # actions/setup-go@v5
+        with:
+          go-version: "stable"
+      - name: Install actionlint
+        run: go install github.com/rhysd/actionlint/cmd/actionlint@latest
+      - name: Lint workflows
+        run: actionlint -color
+
+  zizmor:
+    name: zizmor (Actions security)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # actions/checkout@v7
+      - name: Install zizmor
+        run: pipx install zizmor
+      - name: Audit workflows
+        run: zizmor --format plain .github/workflows
+
+  shellcheck:
+    name: shellcheck
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # actions/checkout@v7
+      - name: Shellcheck scripts
+        run: |
+          mapfile -t files < <(git ls-files '*.sh')
+          if [ "${#files[@]}" -eq 0 ]; then
+            echo "No shell scripts found."
+            exit 0
+          fi
+          shellcheck "${files[@]}"
+
+  hadolint:
+    name: hadolint
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # actions/checkout@v7
+      - name: Lint Dockerfile
+        run: docker run --rm -i hadolint/hadolint:latest < Dockerfile
+
+  pnpm-audit:
+    name: pnpm audit
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # actions/checkout@v7
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # pnpm/action-setup@v6
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # actions/setup-node@v7
+        with:
+          node-version: lts/*
+          cache: "pnpm"
+      - name: Install dependencies
+        run: pnpm install --ignore-scripts
+      - name: Audit
+        run: pnpm audit --audit-level high
+
+  govulncheck:
+    name: govulncheck
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # actions/checkout@v7
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # actions/setup-go@v5
+        with:
+          go-version-file: backend/go.work
+      - name: Install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@latest
+      - name: Scan backend
+        working-directory: backend
+        run: govulncheck ./core/...
+
+  desktop:
+    name: desktop frontend (typecheck + knip)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # actions/checkout@v7
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # pnpm/action-setup@v6
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # actions/setup-node@v7
+        with:
+          node-version: lts/*
+          cache: "pnpm"
+      - name: Install root dependencies
+        run: pnpm install --ignore-scripts
+      - name: Install desktop/main dependencies
+        run: pnpm -C desktop/main install --ignore-scripts
+      - name: Typecheck desktop/main
+        run: pnpm -C desktop/main run typecheck
+      - name: Knip report (desktop/main)
+        run: pnpm exec knip --directory desktop/main --reporter json > desktop-knip-report.json || true
+      - name: Upload knip report
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # actions/upload-artifact@v7
+        with:
+          name: desktop-knip-report
+          path: desktop-knip-report.json
