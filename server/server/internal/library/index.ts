@@ -18,10 +18,11 @@ import { createHash } from "node:crypto";
 import type { WorkingLibrarySource } from "~/server/api/v1/admin/library/sources/index.get";
 import gameSizeManager from "~/server/internal/gamesize";
 import type { ImportVersion } from "~/server/api/v1/admin/import/version/index.post";
-import { GameType, type Platform } from "~/prisma/client/enums";
+import { GameType, Platform } from "~/prisma/client/enums";
 import { castManifest } from "./manifest/utils";
 import { Shescape } from "shescape";
 import type { Prisma } from "~/prisma/client/client";
+import { classifyDistribution, generatePipelineRecipe } from "./pipeline";
 
 export function createGameImportTaskId(libraryId: string, libraryPath: string) {
   return createHash("sha256")
@@ -379,6 +380,30 @@ class LibraryManager {
       }
     }
 
+    const baseDir =
+      (library as unknown as { config?: { baseDir?: string } }).config
+        ?.baseDir ?? "";
+    const classification = classifyDistribution(
+      versionIdentifier.type === "local"
+        ? path.join(baseDir, game.libraryPath, versionIdentifier.identifier)
+        : "",
+      game.mName,
+      files,
+    );
+    const recipe = generatePipelineRecipe(classification, game.mName);
+
+    if (
+      recipe.targetExecutable &&
+      !options.some((o) => o.filename === recipe.targetExecutable)
+    ) {
+      options.unshift({
+        type: "platform",
+        filename: recipe.targetExecutable,
+        platform: Platform.Windows,
+        match: 100,
+      });
+    }
+
     const sortedOptions = options.sort((a, b) => b.match - a.match);
 
     return sortedOptions;
@@ -537,7 +562,27 @@ class LibraryManager {
               displayName: metadata.displayName ?? null,
 
               versionPath,
-              dropletManifest: manifest,
+              dropletManifest: (() => {
+                const libBase =
+                  (library as unknown as { config?: { baseDir?: string } })
+                    .config?.baseDir ?? "";
+                const classification = classifyDistribution(
+                  versionPath
+                    ? path.join(libBase, game.libraryPath, versionPath)
+                    : "",
+                  game.mName,
+                  fileList ?? [],
+                );
+                const recipe = generatePipelineRecipe(
+                  classification,
+                  game.mName,
+                );
+                const obj =
+                  typeof manifest === "object" && manifest !== null
+                    ? { ...manifest, recipe }
+                    : manifest;
+                return obj as unknown as Prisma.InputJsonValue;
+              })(),
               fileList,
               versionIndex: currentIndex,
               delta: metadata.delta,
@@ -545,10 +590,38 @@ class LibraryManager {
               onlySetup: metadata.onlySetup,
               setups: {
                 createMany: {
-                  data: metadata.setups.map((v) => ({
-                    command: v.launch,
-                    platform: v.platform,
-                  })),
+                  data: (() => {
+                    const data = metadata.setups.map((v) => ({
+                      command: v.launch,
+                      platform: v.platform,
+                    }));
+                    if (data.length === 0) {
+                      const libBase =
+                        (
+                          library as unknown as {
+                            config?: { baseDir?: string };
+                          }
+                        ).config?.baseDir ?? "";
+                      const classification = classifyDistribution(
+                        versionPath
+                          ? path.join(libBase, game.libraryPath, versionPath)
+                          : "",
+                        game.mName,
+                        fileList ?? [],
+                      );
+                      const recipe = generatePipelineRecipe(
+                        classification,
+                        game.mName,
+                      );
+                      if (recipe.setupCommand) {
+                        data.push({
+                          command: recipe.setupCommand,
+                          platform: Platform.Windows,
+                        });
+                      }
+                    }
+                    return data;
+                  })(),
                 },
               },
 

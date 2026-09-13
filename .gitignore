@@ -4,3 +4,5 @@ mitm_mcp_traffic.db
 /sonarcloud-drop2-issues.json
 /scripts/sonar-fix/
 .pnpm-store/
+__pycache__/
+*.pyc
