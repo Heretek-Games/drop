@@ -1,0 +1,154 @@
+//! Emulator release staging with SHA-256 verification.
+//!
+//! Releases are fetched at runtime (never vendored). A staged release directory
+//! carries a `release.json` manifest mapping each payload file to its SHA-256;
+//! files are verified before being copied into a game directory.
+
+use std::collections::BTreeMap;
+use std::path::Path;
+
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+
+use crate::EmulatorFlavor;
+use crate::error::EngineError;
+
+/// Release manifest filename inside a staged release directory.
+pub const RELEASE_MANIFEST: &str = "release.json";
+
+fn to_hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// SHA-256 of a file as lowercase hex.
+pub fn sha256_file(path: &Path) -> Result<String, EngineError> {
+    let data = std::fs::read(path)?;
+    Ok(to_hex(&Sha256::digest(&data)))
+}
+
+/// Pinned release descriptor.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReleaseSpec {
+    pub flavor: EmulatorFlavor,
+    pub tag: String,
+    /// Expected SHA-256 of each payload file, relative to the release dir.
+    pub files: BTreeMap<String, String>,
+}
+
+/// Verify every payload file in `release_dir` against `spec`.
+pub fn verify_release(release_dir: &Path, spec: &ReleaseSpec) -> Result<(), EngineError> {
+    for (name, expected) in &spec.files {
+        let path = release_dir.join(name);
+        let found = sha256_file(&path)?;
+        if found != *expected {
+            return Err(EngineError::ManifestMismatch {
+                path: name.clone(),
+                expected: expected.clone(),
+                found,
+            });
+        }
+    }
+    Ok(())
+}
+
+/// Load a release manifest (`release.json`) from a staged directory.
+pub fn load_spec(release_dir: &Path) -> Result<ReleaseSpec, EngineError> {
+    let raw = std::fs::read_to_string(release_dir.join(RELEASE_MANIFEST))?;
+    Ok(serde_json::from_str(&raw)?)
+}
+
+/// Verify `release_dir` and copy its payload files into `dest`.
+pub fn stage_release(release_dir: &Path, dest: &Path) -> Result<(), EngineError> {
+    let spec = load_spec(release_dir)?;
+    verify_release(release_dir, &spec)?;
+    std::fs::create_dir_all(dest)?;
+    for name in spec.files.keys() {
+        let file_name = Path::new(name)
+            .file_name()
+            .ok_or_else(|| EngineError::ScanFailed(format!("invalid release file name: {name}")))?;
+        std::fs::copy(release_dir.join(name), dest.join(file_name))?;
+    }
+    Ok(())
+}
+
+/// Serialize a `EmulatorFlavor` for JSON.
+impl Serialize for EmulatorFlavor {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(match self {
+            EmulatorFlavor::GbeFork => "gbe_fork",
+            EmulatorFlavor::GseFork => "gse_fork",
+        })
+    }
+}
+
+impl<'de> Deserialize<'de> for EmulatorFlavor {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = String::deserialize(deserializer)?;
+        match value.as_str() {
+            "gbe_fork" => Ok(EmulatorFlavor::GbeFork),
+            "gse_fork" => Ok(EmulatorFlavor::GseFork),
+            other => Err(serde::de::Error::unknown_variant(
+                other,
+                &["gbe_fork", "gse_fork"],
+            )),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn write_release(dir: &Path, payload: &[(&str, &[u8])]) -> ReleaseSpec {
+        let mut files = BTreeMap::new();
+        for (name, bytes) in payload {
+            let path = dir.join(name);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(&path, bytes).unwrap();
+            files.insert((*name).to_string(), sha256_file(&path).unwrap());
+        }
+        let spec = ReleaseSpec {
+            flavor: EmulatorFlavor::GbeFork,
+            tag: "test".into(),
+            files,
+        };
+        std::fs::write(
+            dir.join(RELEASE_MANIFEST),
+            serde_json::to_string_pretty(&spec).unwrap(),
+        )
+        .unwrap();
+        spec
+    }
+
+    #[test]
+    fn stages_verified_release() {
+        let release = tempfile::tempdir().unwrap();
+        write_release(release.path(), &[("steam_api64.dll", b"emulator")]);
+        let dest = tempfile::tempdir().unwrap();
+
+        stage_release(release.path(), dest.path()).unwrap();
+        assert_eq!(
+            std::fs::read(dest.path().join("steam_api64.dll")).unwrap(),
+            b"emulator"
+        );
+    }
+
+    #[test]
+    fn rejects_tampered_release() {
+        let release = tempfile::tempdir().unwrap();
+        write_release(release.path(), &[("steam_api64.dll", b"emulator")]);
+        std::fs::write(release.path().join("steam_api64.dll"), b"tampered").unwrap();
+        let dest = tempfile::tempdir().unwrap();
+
+        assert!(matches!(
+            stage_release(release.path(), dest.path()),
+            Err(EngineError::ManifestMismatch { .. })
+        ));
+    }
+}

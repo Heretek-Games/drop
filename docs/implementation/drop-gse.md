@@ -90,15 +90,15 @@ sides.
 
 Owner: TBD · Depends on: M0
 
-- [ ] **A1** Scanner for `steam_api*.dll` / `libsteam_api.so` / `steamclient*.dll`
-      (depth-limited, prefix-aware)
-- [ ] **A2** Replace `desktop/src-tauri/process/src/gse_interceptor.rs` backup/
-      restore logic with the tested `gse-engine/dll.rs`
-- [ ] **A3** Interface extractor → `steam_interfaces.txt`
-- [ ] **A4** Patcher/replacer + digest verify + rollback (`PatchPlan` executor)
-- [ ] **A5** Per-flavor config generation (`configs.main.ini`, `steam_appid.txt`,
-      `steam_interfaces.txt`, `custom_broadcasts.txt`)
-- [ ] **A6** Emulator release manager (pinned + SHA-256, fetched at runtime)
+- [x] **A1** Scanner for `steam_api*.dll` / `libsteam_api.so` / `steamclient*.dll`
+      (depth-limited, prefix-aware) — `gse-engine/src/scanner.rs`
+- [x] **A2** Replaced `process/src/gse_interceptor.rs` backup/restore + anti-cheat
+      with the tested `gse-engine` crate
+- [x] **A3** Interface extractor → `steam_interfaces.txt` (`interfaces.rs`)
+- [x] **A4** Patcher/replacer + digest verify + rollback (`patch.rs`/`dll.rs`)
+- [x] **A5** Per-flavor config generation (`config.rs`)
+- [x] **A6** Emulator release manager: release.json + SHA-256 verify/stage (`dist.rs`).
+      Runtime HTTP fetch still to be wired to a cache directory.
 - [ ] **P5/P7/P9** Bundle format + install/update UI + a second trivial plugin to
       prove generality
 
@@ -186,4 +186,8 @@ Delivered in the working tree:
   `ctx.fetch`; storage schema migrations; version/trust validation. Tests cover
   each (10 plugin tests + 7 pipeline tests pass).
 
-M0 complete once accumulated in CI. Next: M1 (Part A GSE engine).
+M0 complete. **M1 engine (A1–A6) landed** as the `desktop/src-tauri/gse-engine`
+crate (18 unit tests pass) and the `process` interceptor now delegates to it.
+Remaining in M1: P5/P7/P9 packaging, and wiring a real emulator payload.
+
+Next: M2 (opt-in interceptor + consent/compat + AppID/Proton).
