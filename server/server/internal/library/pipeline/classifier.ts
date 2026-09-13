@@ -37,33 +37,81 @@ const SCENE_GROUP_REGEX = new RegExp(
   "i",
 );
 
-export function classifyDistribution(
-  dirPath: string,
-  gameName: string,
-  knownFiles?: string[],
-): ClassificationResult {
-  let fileList: string[] = [];
+const ARCHIVE_EXTENSIONS = [".7z", ".zip", ".rar", ".tar", ".gz"];
 
+interface ClassificationContext {
+  gameName: string;
+  fileList: string[];
+  allFilesWithSubdirs: string[];
+  folderName: string;
+  lowerFolder: string;
+  lowerFiles: string[];
+  releaseGroup: string | undefined;
+  nfoFile: string | undefined;
+  rars: string[];
+  hasSfvs: boolean;
+  hasIso: boolean;
+}
+
+type DistributionClassifier = (
+  ctx: ClassificationContext,
+) => ClassificationResult | undefined;
+
+function resolveFileList(dirPath: string, knownFiles?: string[]): string[] {
   if (knownFiles && knownFiles.length > 0) {
-    fileList = knownFiles;
-  } else if (fs.existsSync(dirPath)) {
-    try {
-      const stats = fs.statSync(dirPath);
-      if (stats.isDirectory()) {
-        fileList = fs.readdirSync(dirPath);
-      } else {
-        fileList = [path.basename(dirPath)];
-      }
-    } catch {
-      fileList = [];
-    }
+    return knownFiles;
   }
+  if (!fs.existsSync(dirPath)) {
+    return [];
+  }
+  try {
+    const stats = fs.statSync(dirPath);
+    return stats.isDirectory()
+      ? fs.readdirSync(dirPath)
+      : [path.basename(dirPath)];
+  } catch {
+    return [];
+  }
+}
 
-  const folderName = path.basename(dirPath);
-  const lowerFolder = folderName.toLowerCase();
-  const lowerFiles = fileList.map((f) => f.toLowerCase());
+/** Lists shallow subdirectory entries (e.g. CD1, CD2, Disc1, DVD1). */
+function collectFilesWithSubdirs(
+  dirPath: string,
+  fileList: string[],
+): string[] {
+  const allFilesWithSubdirs = [...fileList];
+  if (!fs.existsSync(dirPath)) {
+    return allFilesWithSubdirs;
+  }
+  try {
+    const stats = fs.statSync(dirPath);
+    if (!stats.isDirectory()) {
+      return allFilesWithSubdirs;
+    }
+    for (const entry of fileList) {
+      const subPath = path.join(dirPath, entry);
+      try {
+        if (fs.statSync(subPath).isDirectory()) {
+          const subEntries = fs.readdirSync(subPath);
+          for (const sub of subEntries) {
+            allFilesWithSubdirs.push(`${entry}/${sub}`);
+          }
+        }
+      } catch {
+        // Ignore unreadable subdirectories
+      }
+    }
+  } catch {
+    // Ignore unreadable directory
+  }
+  return allFilesWithSubdirs;
+}
 
-  // Detect Scene Group from folder or NFO
+/** Detects the scene group from the folder name or a sibling NFO. */
+function resolveReleaseGroup(
+  fileList: string[],
+  folderName: string,
+): { releaseGroup: string | undefined; nfoFile: string | undefined } {
   let releaseGroup: string | undefined;
   const folderMatch = folderName.match(SCENE_GROUP_REGEX);
   if (folderMatch) {
@@ -78,214 +126,283 @@ export function classifyDistribution(
     }
   }
 
-  // Also scan shallow subdirectories (e.g. CD1, CD2, Disc1, DVD1)
-  const allFilesWithSubdirs = [...fileList];
-  if (fs.existsSync(dirPath)) {
-    try {
-      const stats = fs.statSync(dirPath);
-      if (stats.isDirectory()) {
-        for (const entry of fileList) {
-          const subPath = path.join(dirPath, entry);
-          try {
-            if (fs.statSync(subPath).isDirectory()) {
-              const subEntries = fs.readdirSync(subPath);
-              for (const sub of subEntries) {
-                allFilesWithSubdirs.push(`${entry}/${sub}`);
-              }
-            }
-          } catch {
-            // Ignore unreadable subdirectories
-          }
-        }
-      }
-    } catch {
-      // Ignore unreadable directory
-    }
-  }
+  return { releaseGroup, nfoFile };
+}
 
-  // Check for multi-part scene RARs
-  const rars = allFilesWithSubdirs.filter((f) => {
-    const l = f.toLowerCase();
-    return (
-      l.endsWith(".rar") || /\.r\d{2}$/i.test(l) || /\.part\d+\.rar$/i.test(l)
-    );
-  });
-
-  const hasSfvs = allFilesWithSubdirs.some((f) =>
-    f.toLowerCase().endsWith(".sfv"),
+function isRarPart(file: string): boolean {
+  const lower = file.toLowerCase();
+  return (
+    lower.endsWith(".rar") ||
+    /\.r\d{2}$/i.test(lower) ||
+    /\.part\d+\.rar$/i.test(lower)
   );
-  const hasIso = allFilesWithSubdirs.some((f) =>
-    f.toLowerCase().endsWith(".iso"),
-  );
+}
 
-  // Check for updates
-  const isUpdate =
+function detectUpdateRelease(fileList: string[], folderName: string): boolean {
+  return (
     /([-_.]update|patch)[-_.]/i.test(folderName) ||
-    fileList.some((f) => /([-_.]update|patch)[-_.]/i.test(f));
+    fileList.some((f) => /([-_.]update|patch)[-_.]/i.test(f))
+  );
+}
 
-  if (isUpdate && (rars.length > 0 || releaseGroup)) {
-    return {
-      type: DistributionType.PatchUpdate,
-      confidence: 0.95,
-      releaseGroup,
-      nfoPath: nfoFile,
-      multipartRars: rars,
-      detectedExecutables: scoreExecutables(fileList, gameName),
-      summary: `Game patch/update release (${releaseGroup ?? "Unknown Group"})`,
-    };
+function baseResult(
+  ctx: ClassificationContext,
+  type: DistributionType,
+  confidence: number,
+  summary: string,
+): ClassificationResult {
+  return {
+    type,
+    confidence,
+    detectedExecutables: scoreExecutables(ctx.fileList, ctx.gameName),
+    summary,
+  };
+}
+
+const classifyPatchUpdate: DistributionClassifier = (ctx) => {
+  const isUpdate = detectUpdateRelease(ctx.fileList, ctx.folderName);
+  if (!isUpdate || (ctx.rars.length === 0 && !ctx.releaseGroup)) {
+    return undefined;
   }
+  return {
+    ...baseResult(
+      ctx,
+      DistributionType.PatchUpdate,
+      0.95,
+      `Game patch/update release (${ctx.releaseGroup ?? "Unknown Group"})`,
+    ),
+    releaseGroup: ctx.releaseGroup,
+    nfoPath: ctx.nfoFile,
+    multipartRars: ctx.rars,
+  };
+};
 
-  // 1. Scene Multi-part RAR / ISO Release
-  if (
-    rars.length > 1 ||
-    (rars.length === 1 && (hasSfvs || releaseGroup || hasIso))
-  ) {
-    const primaryRar =
-      fileList.find((f) => /\.part0*1\.rar$/i.test(f)) ||
-      fileList.find((f) => f.toLowerCase().endsWith(".rar")) ||
-      rars[0];
-
-    return {
-      type: DistributionType.SceneRelease,
-      confidence: 0.95,
-      releaseGroup,
-      nfoPath: nfoFile,
-      primaryArchive: primaryRar,
-      multipartRars: rars,
-      detectedExecutables: scoreExecutables(fileList, gameName),
-      summary: `Scene release in multi-part RAR archives (${releaseGroup ?? "Scene"})`,
-    };
+const classifySceneRar: DistributionClassifier = (ctx) => {
+  const isMultipartRar =
+    ctx.rars.length > 1 ||
+    (ctx.rars.length === 1 &&
+      (ctx.hasSfvs || !!ctx.releaseGroup || ctx.hasIso));
+  if (!isMultipartRar) {
+    return undefined;
   }
+  const primaryRar =
+    ctx.fileList.find((f) => /\.part0*1\.rar$/i.test(f)) ||
+    ctx.fileList.find((f) => f.toLowerCase().endsWith(".rar")) ||
+    ctx.rars[0];
 
-  // 2. Direct Scene ISO
-  if (hasIso && (releaseGroup || hasSfvs || nfoFile)) {
-    const isoFile = fileList.find((f) => f.toLowerCase().endsWith(".iso"));
-    return {
-      type: DistributionType.SceneRelease,
-      confidence: 0.9,
-      releaseGroup,
-      nfoPath: nfoFile,
-      primaryArchive: isoFile,
-      detectedExecutables: scoreExecutables(fileList, gameName),
-      summary: `Scene release standalone ISO disc image (${releaseGroup ?? "Scene"})`,
-    };
+  return {
+    ...baseResult(
+      ctx,
+      DistributionType.SceneRelease,
+      0.95,
+      `Scene release in multi-part RAR archives (${ctx.releaseGroup ?? "Scene"})`,
+    ),
+    releaseGroup: ctx.releaseGroup,
+    nfoPath: ctx.nfoFile,
+    primaryArchive: primaryRar,
+    multipartRars: ctx.rars,
+  };
+};
+
+const classifyDirectIso: DistributionClassifier = (ctx) => {
+  if (!ctx.hasIso || (!ctx.releaseGroup && !ctx.hasSfvs && !ctx.nfoFile)) {
+    return undefined;
   }
+  const isoFile = ctx.fileList.find((f) => f.toLowerCase().endsWith(".iso"));
+  return {
+    ...baseResult(
+      ctx,
+      DistributionType.SceneRelease,
+      0.9,
+      `Scene release standalone ISO disc image (${ctx.releaseGroup ?? "Scene"})`,
+    ),
+    releaseGroup: ctx.releaseGroup,
+    nfoPath: ctx.nfoFile,
+    primaryArchive: isoFile,
+  };
+};
 
-  // 3. FitGirl Repack
+const classifyFitGirl: DistributionClassifier = (ctx) => {
   const hasFitGirlSignature =
-    lowerFolder.includes("[fitgirl repack]") ||
-    lowerFolder.includes("fitgirl") ||
-    fileList.some((f) => /^fg-.*\.bin$/i.test(f)) ||
-    (lowerFiles.includes("setup.exe") &&
-      lowerFiles.some((f) => f.includes("verify bin files")));
-
-  if (hasFitGirlSignature) {
-    const setupExe =
-      fileList.find((f) => f.toLowerCase() === "setup.exe") ?? "setup.exe";
-    const binChunks = fileList.filter((f) => /^fg-.*\.bin$/i.test(f));
-
-    return {
-      type: DistributionType.FitGirlRepack,
-      confidence: 0.99,
-      releaseGroup: "FitGirl",
-      installerExe: setupExe,
-      binChunks,
-      detectedExecutables: scoreExecutables(fileList, gameName),
-      summary: `FitGirl Repack installer (${binChunks.length} data bins)`,
-    };
+    ctx.lowerFolder.includes("[fitgirl repack]") ||
+    ctx.lowerFolder.includes("fitgirl") ||
+    ctx.fileList.some((f) => /^fg-.*\.bin$/i.test(f)) ||
+    (ctx.lowerFiles.includes("setup.exe") &&
+      ctx.lowerFiles.some((f) => f.includes("verify bin files")));
+  if (!hasFitGirlSignature) {
+    return undefined;
   }
+  const setupExe =
+    ctx.fileList.find((f) => f.toLowerCase() === "setup.exe") ?? "setup.exe";
+  const binChunks = ctx.fileList.filter((f) => /^fg-.*\.bin$/i.test(f));
 
-  // 4. KaOs Repack
+  return {
+    ...baseResult(
+      ctx,
+      DistributionType.FitGirlRepack,
+      0.99,
+      `FitGirl Repack installer (${binChunks.length} data bins)`,
+    ),
+    releaseGroup: "FitGirl",
+    installerExe: setupExe,
+    binChunks,
+  };
+};
+
+const classifyKaOs: DistributionClassifier = (ctx) => {
   const hasKaosSignature =
-    lowerFolder.includes("repack-kaos") ||
-    lowerFolder.includes("[kaos repack]") ||
-    fileList.some((f) => /^kaos-.*\.bin$/i.test(f)) ||
-    fileList.some((f) => f.toLowerCase() === "kaos.nfo");
-
-  if (hasKaosSignature) {
-    const installExe =
-      fileList.find((f) => f.toLowerCase() === "install.exe") ??
-      fileList.find((f) => f.toLowerCase() === "setup.exe") ??
-      "Install.exe";
-    const binChunks = fileList.filter((f) => /^kaos-.*\.bin$/i.test(f));
-
-    return {
-      type: DistributionType.KaOsRepack,
-      confidence: 0.99,
-      releaseGroup: "KaOs",
-      installerExe: installExe,
-      binChunks,
-      detectedExecutables: scoreExecutables(fileList, gameName),
-      summary: `KaOs Krew Repack installer (${binChunks.length} data bins)`,
-    };
+    ctx.lowerFolder.includes("repack-kaos") ||
+    ctx.lowerFolder.includes("[kaos repack]") ||
+    ctx.fileList.some((f) => /^kaos-.*\.bin$/i.test(f)) ||
+    ctx.fileList.some((f) => f.toLowerCase() === "kaos.nfo");
+  if (!hasKaosSignature) {
+    return undefined;
   }
+  const installExe =
+    ctx.fileList.find((f) => f.toLowerCase() === "install.exe") ??
+    ctx.fileList.find((f) => f.toLowerCase() === "setup.exe") ??
+    "Install.exe";
+  const binChunks = ctx.fileList.filter((f) => /^kaos-.*\.bin$/i.test(f));
 
-  // 5. DODI Repack
+  return {
+    ...baseResult(
+      ctx,
+      DistributionType.KaOsRepack,
+      0.99,
+      `KaOs Krew Repack installer (${binChunks.length} data bins)`,
+    ),
+    releaseGroup: "KaOs",
+    installerExe: installExe,
+    binChunks,
+  };
+};
+
+const classifyDodi: DistributionClassifier = (ctx) => {
   const hasDodiSignature =
-    lowerFolder.includes("[dodi repack]") ||
-    lowerFolder.includes("dodi") ||
-    fileList.some((f) => /^data\d+\.doi$/i.test(f));
-
-  if (hasDodiSignature) {
-    const setupExe =
-      fileList.find((f) => f.toLowerCase() === "setup.exe") ?? "setup.exe";
-    return {
-      type: DistributionType.DodiRepack,
-      confidence: 0.95,
-      releaseGroup: "DODI",
-      installerExe: setupExe,
-      detectedExecutables: scoreExecutables(fileList, gameName),
-      summary: "DODI Repack installer",
-    };
+    ctx.lowerFolder.includes("[dodi repack]") ||
+    ctx.lowerFolder.includes("dodi") ||
+    ctx.fileList.some((f) => /^data\d+\.doi$/i.test(f));
+  if (!hasDodiSignature) {
+    return undefined;
   }
+  const setupExe =
+    ctx.fileList.find((f) => f.toLowerCase() === "setup.exe") ?? "setup.exe";
 
-  // 6. GOG Offline Multi-bin Installer
-  const gogSetupExe = fileList.find(
+  return {
+    ...baseResult(
+      ctx,
+      DistributionType.DodiRepack,
+      0.95,
+      "DODI Repack installer",
+    ),
+    releaseGroup: "DODI",
+    installerExe: setupExe,
+  };
+};
+
+const classifyGog: DistributionClassifier = (ctx) => {
+  const gogSetupExe = ctx.fileList.find(
     (f) =>
       f.toLowerCase().startsWith("setup_") && f.toLowerCase().endsWith(".exe"),
   );
-  const hasGogBin = fileList.some((f) => /^setup_.*-\d+\.bin$/i.test(f));
-  const hasGogInName = lowerFolder.includes("gog");
+  const hasGogBin = ctx.fileList.some((f) => /^setup_.*-\d+\.bin$/i.test(f));
+  const hasGogInName = ctx.lowerFolder.includes("gog");
+  if (!gogSetupExe && !(hasGogBin && hasGogInName)) {
+    return undefined;
+  }
+  const binChunks = ctx.fileList.filter((f) => /^setup_.*-\d+\.bin$/i.test(f));
 
-  if (gogSetupExe || (hasGogBin && hasGogInName)) {
-    const binChunks = fileList.filter((f) => /^setup_.*-\d+\.bin$/i.test(f));
+  return {
+    ...baseResult(
+      ctx,
+      DistributionType.GogInstaller,
+      0.98,
+      `GOG Offline Installer (${binChunks.length} data bins)`,
+    ),
+    releaseGroup: "GOG",
+    installerExe: gogSetupExe,
+    binChunks,
+  };
+};
 
-    return {
-      type: DistributionType.GogInstaller,
-      confidence: 0.98,
-      releaseGroup: "GOG",
-      installerExe: gogSetupExe,
-      binChunks,
-      detectedExecutables: scoreExecutables(fileList, gameName),
-      summary: `GOG Offline Installer (${binChunks.length} data bins)`,
-    };
+const classifyArchiveBundle: DistributionClassifier = (ctx) => {
+  const archives = ctx.fileList.filter((f) =>
+    ARCHIVE_EXTENSIONS.includes(path.extname(f).toLowerCase()),
+  );
+  if (archives.length === 0 || ctx.fileList.length > archives.length + 3) {
+    return undefined;
   }
 
-  // 7. Standalone Compressed Archive Bundle (.7z, .zip, .rar)
-  const archives = fileList.filter((f) => {
-    const ext = path.extname(f).toLowerCase();
-    return [".7z", ".zip", ".rar", ".tar", ".gz"].includes(ext);
-  });
+  return {
+    ...baseResult(
+      ctx,
+      DistributionType.ArchiveBundle,
+      0.9,
+      `Compressed archive bundle (${archives.map((a) => path.extname(a)).join(", ")})`,
+    ),
+    primaryArchive: archives[0],
+  };
+};
 
-  if (archives.length > 0 && fileList.length <= archives.length + 3) {
-    return {
-      type: DistributionType.ArchiveBundle,
-      confidence: 0.9,
-      primaryArchive: archives[0],
-      detectedExecutables: scoreExecutables(fileList, gameName),
-      summary: `Compressed archive bundle (${archives.map((a) => path.extname(a)).join(", ")})`,
-    };
+const classifyLoosePortable: DistributionClassifier = (ctx) => {
+  const executableCandidates = scoreExecutables(ctx.fileList, ctx.gameName);
+  if (executableCandidates.length === 0) {
+    return undefined;
   }
+  return {
+    type: DistributionType.LoosePortable,
+    confidence: 0.85,
+    detectedExecutables: executableCandidates,
+    summary: `Loose portable game directory with ${executableCandidates.length} candidate executable(s)`,
+  };
+};
 
-  // 8. Loose Portable Game
-  const executableCandidates = scoreExecutables(fileList, gameName);
-  if (executableCandidates.length > 0) {
-    return {
-      type: DistributionType.LoosePortable,
-      confidence: 0.85,
-      detectedExecutables: executableCandidates,
-      summary: `Loose portable game directory with ${executableCandidates.length} candidate executable(s)`,
-    };
+/**
+ * Classification runs in priority order; the first matching classifier wins.
+ * Keeping each format in its own function keeps the branching shallow and the
+ * rules independently testable.
+ */
+const CLASSIFIERS: DistributionClassifier[] = [
+  classifyPatchUpdate,
+  classifySceneRar,
+  classifyDirectIso,
+  classifyFitGirl,
+  classifyKaOs,
+  classifyDodi,
+  classifyGog,
+  classifyArchiveBundle,
+  classifyLoosePortable,
+];
+
+export function classifyDistribution(
+  dirPath: string,
+  gameName: string,
+  knownFiles?: string[],
+): ClassificationResult {
+  const fileList = resolveFileList(dirPath, knownFiles);
+  const allFilesWithSubdirs = collectFilesWithSubdirs(dirPath, fileList);
+  const folderName = path.basename(dirPath);
+  const lowerFolder = folderName.toLowerCase();
+  const lowerFiles = fileList.map((f) => f.toLowerCase());
+  const { releaseGroup, nfoFile } = resolveReleaseGroup(fileList, folderName);
+
+  const ctx: ClassificationContext = {
+    gameName,
+    fileList,
+    allFilesWithSubdirs,
+    folderName,
+    lowerFolder,
+    lowerFiles,
+    releaseGroup,
+    nfoFile,
+    rars: allFilesWithSubdirs.filter(isRarPart),
+    hasSfvs: allFilesWithSubdirs.some((f) => f.toLowerCase().endsWith(".sfv")),
+    hasIso: allFilesWithSubdirs.some((f) => f.toLowerCase().endsWith(".iso")),
+  };
+
+  for (const classify of CLASSIFIERS) {
+    const result = classify(ctx);
+    if (result) return result;
   }
 
   return {

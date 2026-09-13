@@ -479,25 +479,23 @@ export class PCGamingWikiProvider implements MetadataProvider {
     // TODO: replace with company logo
     const icon = createObject(jdenticon.toPng(query, 512));
 
-    for (const item of res.cargoquery) {
-      const company = item.title;
+    const item = res.cargoquery[0];
+    if (!item) return undefined;
 
-      const fixedCompanyName =
-        this.parseWikiStringArray(company.PageName)[0] ?? company.PageName;
+    const company = item.title;
 
-      const metadata: CompanyMetadata = {
-        id: company.PageID,
-        name: fixedCompanyName,
-        shortDescription: "",
-        description: "",
-        website: this.parseWebsitesGetFirst(company?.Website),
+    const fixedCompanyName =
+      this.parseWikiStringArray(company.PageName)[0] ?? company.PageName;
 
-        logo: icon,
-        banner: icon,
-      };
-      return metadata;
-    }
+    return {
+      id: company.PageID,
+      name: fixedCompanyName,
+      shortDescription: "",
+      description: "",
+      website: this.parseWebsitesGetFirst(company?.Website),
 
-    return undefined;
+      logo: icon,
+      banner: icon,
+    };
   }
 }

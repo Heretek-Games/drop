@@ -337,14 +337,14 @@ function ProjectTable({
   const sections = projects
     .map((e) => Object.keys(e.features))
     .flat()
-    .filter(onlyUnique)
+    .filter((value, index, array) => onlyUnique(value, index, array))
   const features: { [key: string]: string[] } = {}
   for (const section of sections) {
     const uniqueFeatures = projects
       .filter((e) => e.features[section])
       .map((e) => Object.keys(e.features[section]))
       .flat()
-      .filter(onlyUnique)
+      .filter((value, index, array) => onlyUnique(value, index, array))
     features[section] = uniqueFeatures
   }
   return (

@@ -256,6 +256,7 @@
       v-if="showCreateGroup"
       class="fixed inset-0 z-50 flex items-center justify-center bg-zinc-950/70"
       @click.self="showCreateGroup = false"
+      @keydown.escape="showCreateGroup = false"
     >
       <div
         class="rounded-lg border border-zinc-700 bg-zinc-900 p-6 shadow-xl w-full max-w-md"
@@ -318,6 +319,7 @@
       v-if="groupToDelete"
       class="fixed inset-0 z-50 flex items-center justify-center bg-zinc-950/70"
       @click.self="groupToDelete = undefined"
+      @keydown.escape="groupToDelete = undefined"
     >
       <div
         class="rounded-lg border border-zinc-700 bg-zinc-900 p-6 shadow-xl w-full max-w-md"

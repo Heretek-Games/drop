@@ -691,41 +691,49 @@ export class PluginManager {
     state[id] = { enabled, updatedAt: Date.now() };
     await this.saveState(state);
 
-    if (!enabled) {
-      if (loaded.status === "active") {
-        if (loaded.plugin.teardown) {
-          try {
-            await loaded.plugin.teardown();
-          } catch (err) {
-            this.log.warn(`Error tearing down plugin ${id}: ${err}`);
-          }
-        }
-        this.releasePluginResources(id);
-        loaded.status = "disabled";
-        this.log.info(`Plugin '${id}' disabled`);
-        this.broadcast("plugins:state", { id, enabled: false });
-      }
+    if (enabled) {
+      await this.enablePlugin(id, loaded);
     } else {
-      if (loaded.status !== "active") {
-        const context = await this.createPluginContext(loaded.plugin);
-        loaded.context = context;
-        await this.runStorageMigrations(loaded.plugin, context.storage);
-        try {
-          await loaded.plugin.init(context);
-          loaded.status = "active";
-          loaded.error = undefined;
-          this.log.info(`Plugin '${id}' enabled and initialized`);
-          this.broadcast("plugins:state", { id, enabled: true });
-        } catch (err) {
-          loaded.status = "error";
-          loaded.error = err as Error;
-          this.log.error(`Failed to re-initialize plugin ${id}: ${err}`);
-          throw err;
-        }
-      }
+      await this.disablePlugin(id, loaded);
     }
 
     return true;
+  }
+
+  private async disablePlugin(id: string, loaded: LoadedPlugin): Promise<void> {
+    if (loaded.status !== "active") return;
+
+    if (loaded.plugin.teardown) {
+      try {
+        await loaded.plugin.teardown();
+      } catch (err) {
+        this.log.warn(`Error tearing down plugin ${id}: ${err}`);
+      }
+    }
+    this.releasePluginResources(id);
+    loaded.status = "disabled";
+    this.log.info(`Plugin '${id}' disabled`);
+    this.broadcast("plugins:state", { id, enabled: false });
+  }
+
+  private async enablePlugin(id: string, loaded: LoadedPlugin): Promise<void> {
+    if (loaded.status === "active") return;
+
+    const context = await this.createPluginContext(loaded.plugin);
+    loaded.context = context;
+    await this.runStorageMigrations(loaded.plugin, context.storage);
+    try {
+      await loaded.plugin.init(context);
+      loaded.status = "active";
+      loaded.error = undefined;
+      this.log.info(`Plugin '${id}' enabled and initialized`);
+      this.broadcast("plugins:state", { id, enabled: true });
+    } catch (err) {
+      loaded.status = "error";
+      loaded.error = err as Error;
+      this.log.error(`Failed to re-initialize plugin ${id}: ${err}`);
+      throw err;
+    }
   }
 
   async discoverAndLoadExternalPlugins(): Promise<void> {
@@ -736,49 +744,55 @@ export class PluginManager {
 
       for (const entry of entries) {
         if (!entry.isDirectory() || entry.name.startsWith(".")) continue;
-
-        const pluginDir = path.join(pluginsDir, entry.name);
-        let manifestContent: string | null = null;
-        let manifestFile = path.join(pluginDir, "drop-plugin.json");
-
-        try {
-          manifestContent = await fs.readFile(manifestFile, "utf-8");
-        } catch {
-          try {
-            manifestFile = path.join(pluginDir, "plugin.json");
-            manifestContent = await fs.readFile(manifestFile, "utf-8");
-          } catch {
-            continue;
-          }
-        }
-
-        if (!manifestContent) continue;
-
-        try {
-          const manifest: PluginManifest = JSON.parse(manifestContent);
-          if (
-            !manifest.id ||
-            !manifest.name ||
-            !manifest.version ||
-            !isValidPluginId(manifest.id)
-          ) {
-            this.log.warn(`Invalid plugin manifest in ${pluginDir}`);
-            continue;
-          }
-
-          if (this.plugins.has(manifest.id)) {
-            continue;
-          }
-
-          await this.loadExternalPluginFromDir(pluginDir, manifest);
-        } catch (err) {
-          this.log.error(
-            `Failed to load external plugin from ${pluginDir}: ${err}`,
-          );
-        }
+        await this.loadExternalPluginEntry(path.join(pluginsDir, entry.name));
       }
     } catch (err) {
       this.log.debug(`External plugins directory check: ${err}`);
+    }
+  }
+
+  private async loadExternalPluginEntry(pluginDir: string): Promise<void> {
+    const manifestContent = await this.readExternalManifest(pluginDir);
+    if (!manifestContent) return;
+
+    try {
+      const manifest: PluginManifest = JSON.parse(manifestContent);
+      if (
+        !manifest.id ||
+        !manifest.name ||
+        !manifest.version ||
+        !isValidPluginId(manifest.id)
+      ) {
+        this.log.warn(`Invalid plugin manifest in ${pluginDir}`);
+        return;
+      }
+
+      if (this.plugins.has(manifest.id)) {
+        return;
+      }
+
+      await this.loadExternalPluginFromDir(pluginDir, manifest);
+    } catch (err) {
+      this.log.error(
+        `Failed to load external plugin from ${pluginDir}: ${err}`,
+      );
+    }
+  }
+
+  private async readExternalManifest(
+    pluginDir: string,
+  ): Promise<string | undefined> {
+    try {
+      return await fs.readFile(
+        path.join(pluginDir, "drop-plugin.json"),
+        "utf-8",
+      );
+    } catch {
+      try {
+        return await fs.readFile(path.join(pluginDir, "plugin.json"), "utf-8");
+      } catch {
+        return undefined;
+      }
     }
   }
 

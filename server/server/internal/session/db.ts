@@ -147,45 +147,61 @@ export default function createDBSessionHandler(): SessionProvider {
   };
 }
 
+type JsonPathEntry = { path: string[]; value: unknown };
+
+/** Recurses into a container value or records a leaf path. */
+function pushJsonPathEntry(
+  results: JsonPathEntry[],
+  value: unknown,
+  basePath: string[],
+  key: string,
+): void {
+  if (value !== null && typeof value === "object") {
+    results.push(...walkJsonPath(value, [...basePath, key]));
+  } else {
+    results.push({ path: [...basePath, key], value });
+  }
+}
+
+function walkJsonArray(obj: unknown[], basePath: string[]): JsonPathEntry[] {
+  const results: JsonPathEntry[] = [];
+  for (let i = 0; i < obj.length; i++) {
+    const v = obj[i];
+    if (v === undefined) continue;
+    pushJsonPathEntry(results, v, basePath, String(i));
+  }
+  return results;
+}
+
+function walkJsonObject(
+  obj: Record<string, unknown>,
+  basePath: string[],
+): JsonPathEntry[] {
+  const results: JsonPathEntry[] = [];
+  for (const [k, v] of Object.entries(obj)) {
+    if (v === undefined) continue;
+    pushJsonPathEntry(results, v, basePath, k);
+  }
+  return results;
+}
+
 /**
  * Walks a JSON object and returns all paths and their corresponding values.
  * @param obj The JSON object to walk.
  * @param basePath The base path to start from (used for recursion).
  * @returns An array of objects containing the path and value.
  */
-function walkJsonPath(
-  obj: unknown,
-  basePath: string[] = [],
-): Array<{ path: string[]; value: unknown }> {
-  const results: Array<{ path: string[]; value: unknown }> = [];
-
+function walkJsonPath(obj: unknown, basePath: string[] = []): JsonPathEntry[] {
   if (Array.isArray(obj)) {
-    for (let i = 0; i < obj.length; i++) {
-      const v = obj[i];
-      if (v === undefined) continue;
-      if (v !== null && typeof v === "object") {
-        results.push(...walkJsonPath(v, [...basePath, String(i)]));
-      } else {
-        results.push({ path: [...basePath, String(i)], value: v });
-      }
-    }
-    return results;
+    return walkJsonArray(obj, basePath);
   }
 
   if (obj !== null && typeof obj === "object") {
-    for (const [k, v] of Object.entries(obj as Record<string, unknown>)) {
-      if (v === undefined) continue;
-      if (v !== null && typeof v === "object") {
-        results.push(...walkJsonPath(v, [...basePath, k]));
-      } else {
-        results.push({ path: [...basePath, k], value: v });
-      }
-    }
-    return results;
+    return walkJsonObject(obj as Record<string, unknown>, basePath);
   }
 
   if (basePath.length > 0) {
-    results.push({ path: basePath, value: obj });
+    return [{ path: basePath, value: obj }];
   }
-  return results;
+  return [];
 }

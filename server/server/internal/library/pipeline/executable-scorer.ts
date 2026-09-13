@@ -99,6 +99,55 @@ function tokenMatchScore(gameName: string, filename: string): number {
   return 0;
 }
 
+function scoreExecutable(
+  normPath: string,
+  basename: string,
+  gameName: string,
+): { score: number; reasons: string[] } {
+  let score = 10;
+  const reasons: string[] = ["Valid executable binary"];
+
+  // Unreal Engine shipping binary detection
+  if (/-win64-shipping\.exe$/i.test(basename)) {
+    score += 45;
+    reasons.push("Unreal Engine Win64 Shipping binary");
+  }
+
+  // Modern 64-bit architecture folders
+  if (/[/\\](binaries[/\\]win64|bin[/\\]x64|x64)[/\\]/i.test(normPath)) {
+    score += 30;
+    reasons.push("Located in standard 64-bit binaries directory");
+  } else if (/[/\\](binaries|bin)[/\\]/i.test(normPath)) {
+    score += 15;
+    reasons.push("Located in binaries directory");
+  } else if (!normPath.includes("/")) {
+    score += 20;
+    reasons.push("Located directly in root game folder");
+  }
+
+  // Token match against game name
+  const matchScore = tokenMatchScore(gameName, basename);
+  if (matchScore > 0) {
+    score += matchScore;
+    reasons.push(`Matches game name tokens (+${matchScore})`);
+  }
+
+  // Penalize generic launchers slightly compared to direct game exes
+  if (/launcher\.exe$/i.test(basename)) {
+    score -= 5;
+    reasons.push("Generic launcher binary (-5)");
+  }
+
+  // Penalize deep nesting
+  const depth = normPath.split("/").length - 1;
+  if (depth > 4) {
+    score -= 10;
+    reasons.push("Deeply nested path (-10)");
+  }
+
+  return { score, reasons };
+}
+
 export function scoreExecutables(
   filePaths: string[],
   gameName: string,
@@ -113,59 +162,11 @@ export function scoreExecutables(
       continue;
     }
 
-    // Check against exclusions
-    const isExcluded = EXCLUDED_PATTERNS.some((pattern) =>
-      pattern.test(basename),
-    );
-    const isInExcludedDir = EXCLUDED_DIR_PATTERNS.some((pattern) =>
-      pattern.test(normPath),
-    );
-
-    if (isExcluded || isInExcludedDir) {
+    if (isExcludedExecutablePath(normPath)) {
       continue;
     }
 
-    let score = 10;
-    const reasons: string[] = ["Valid executable binary"];
-
-    // Unreal Engine shipping binary detection
-    if (/-win64-shipping\.exe$/i.test(basename)) {
-      score += 45;
-      reasons.push("Unreal Engine Win64 Shipping binary");
-    }
-
-    // Modern 64-bit architecture folders
-    if (/[/\\](binaries[/\\]win64|bin[/\\]x64|x64)[/\\]/i.test(normPath)) {
-      score += 30;
-      reasons.push("Located in standard 64-bit binaries directory");
-    } else if (/[/\\](binaries|bin)[/\\]/i.test(normPath)) {
-      score += 15;
-      reasons.push("Located in binaries directory");
-    } else if (!normPath.includes("/")) {
-      score += 20;
-      reasons.push("Located directly in root game folder");
-    }
-
-    // Token match against game name
-    const matchScore = tokenMatchScore(gameName, basename);
-    if (matchScore > 0) {
-      score += matchScore;
-      reasons.push(`Matches game name tokens (+${matchScore})`);
-    }
-
-    // Penalize generic launchers slightly compared to direct game exes
-    if (/launcher\.exe$/i.test(basename)) {
-      score -= 5;
-      reasons.push("Generic launcher binary (-5)");
-    }
-
-    // Penalize deep nesting
-    const depth = normPath.split("/").length - 1;
-    if (depth > 4) {
-      score -= 10;
-      reasons.push("Deeply nested path (-10)");
-    }
-
+    const { score, reasons } = scoreExecutable(normPath, basename, gameName);
     candidates.push({
       path: normPath,
       score,
@@ -176,8 +177,9 @@ export function scoreExecutables(
 
   candidates.sort((a, b) => b.score - a.score);
 
-  if (candidates.length > 0) {
-    candidates[0].isPrimary = true;
+  const primary = candidates[0];
+  if (primary) {
+    primary.isPrimary = true;
   }
 
   return candidates;

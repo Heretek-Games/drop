@@ -43,8 +43,8 @@ class PriorityList<T> {
     return this.cachedSorted;
   }
 
-  find(predicate: (value: T, index: number, obj: T[]) => boolean) {
-    return this.source.map((e) => e.object).find(predicate);
+  find(predicate: (value: T) => boolean) {
+    return this.source.map((e) => e.object).find((value) => predicate(value));
   }
 }
 

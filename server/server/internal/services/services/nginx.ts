@@ -13,7 +13,9 @@ export const NGINX_SERVICE = new Service(
     const nginxPrefix = path.join(systemConfig.getDataFolder(), "nginx");
     fs.mkdirSync(nginxPrefix, { recursive: true });
 
-    return spawn("nginx", ["-c", nginxConfig, "-p", nginxPrefix]);
+    // System nginx is resolved via PATH; pinning an absolute path would break
+    // dev installs and there is no user-controlled input here.
+    return spawn("nginx", ["-c", nginxConfig, "-p", nginxPrefix]); // NOSONAR
   },
   undefined,
   // eslint-disable-next-line @typescript-eslint/ban-ts-comment

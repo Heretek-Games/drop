@@ -138,7 +138,14 @@
                   >
                     <div
                       class="absolute inset-0"
+                      role="button"
+                      tabindex="0"
                       @click="
+                        fullscreenImage =
+                          game.mImageCarouselObjectIds[currentImageIndex] ??
+                          null
+                      "
+                      @keydown.enter="
                         fullscreenImage =
                           game.mImageCarouselObjectIds[currentImageIndex] ??
                           null
@@ -638,10 +645,12 @@
       v-if="fullscreenImage"
       class="fixed inset-0 z-50 bg-black/95 flex items-center justify-center"
       @click="fullscreenImage = null"
+      @keydown.escape="fullscreenImage = null"
     >
       <div
         class="relative w-full h-full flex items-center justify-center"
         @click.stop
+        @keydown.escape="fullscreenImage = null"
       >
         <button
           type="button"

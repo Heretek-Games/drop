@@ -35,6 +35,7 @@ export class ZtnetBackend implements MeshBackend {
   readonly id = "zerotier" as const;
   private readonly fetchImpl: FetchLike;
   private readonly baseUrl: string;
+  private readonly baseOrigin: string;
   private readonly networks = new Map<string, string>();
   /** roomId → (userId → member node id), for revocation. */
   private readonly memberIds = new Map<string, Map<string, string>>();
@@ -42,6 +43,7 @@ export class ZtnetBackend implements MeshBackend {
   constructor(private readonly options: ZtnetBackendOptions) {
     this.fetchImpl = options.fetchImpl ?? (fetch as unknown as FetchLike);
     this.baseUrl = options.baseUrl.replace(/\/+$/, "");
+    this.baseOrigin = new URL(this.baseUrl).origin;
   }
 
   private headers(): Record<string, string> {
@@ -62,7 +64,13 @@ export class ZtnetBackend implements MeshBackend {
       body?: string;
     },
   ): Promise<Awaited<ReturnType<FetchLike>>> {
-    const response = await this.fetchImpl(url, {
+    // Re-parse every request against the configured base origin so a caller
+    // cannot turn room/member ids into a request to another host.
+    const target = new URL(url);
+    if (target.origin !== this.baseOrigin) {
+      throw new Error("ZTNET request URL escaped the configured base URL");
+    }
+    const response = await this.fetchImpl(target.toString(), {
       method: init?.method ?? "GET",
       headers: this.headers(),
       body: init?.body,

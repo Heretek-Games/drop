@@ -214,38 +214,41 @@ class ACLManager {
     if (!request)
       throw new Error("Native web requests not available - weird deployment?");
     const userSession = await sessionHandler.getSession(request);
-    if (userSession?.authenticated) {
+    const authenticated = userSession?.authenticated;
+    if (authenticated) {
       const user = await prisma.user.findUnique({
-        where: { id: userSession.authenticated.userId },
+        where: { id: authenticated.userId },
       });
       if (user) {
-        if (!user.admin) return false;
-        if (
-          userSession.authenticated.level <
-          userSession.authenticated.requiredLevel
-        )
-          return false;
-        return true;
+        return this.isAdminSession(authenticated, user.admin);
       }
     }
 
+    return this.allowSystemTokenACL(request, acls);
+  }
+
+  private isAdminSession(
+    authenticated: { level: number; requiredLevel: number },
+    admin: boolean,
+  ): boolean {
+    return admin && authenticated.level >= authenticated.requiredLevel;
+  }
+
+  private async allowSystemTokenACL(
+    request: MinimumRequestObject,
+    acls: SystemACL,
+  ) {
     const authorizationToken = this.getAuthorizationToken(request);
     if (!authorizationToken) return false;
     const token = await prisma.aPIToken.findUnique({
       where: { token: authorizationToken },
     });
-    if (!token) return false;
-    if (token.mode != APITokenMode.System) return false;
+    if (!token || token.mode != APITokenMode.System) return false;
 
     // If empty, we just want to check we are an admin *at all*, not specific ACLs
     if (acls.length == 0) return true;
 
-    for (const acl of acls) {
-      const tokenACLIndex = token.acls.findIndex((e) => e == acl);
-      if (tokenACLIndex != -1) return true;
-    }
-
-    return false;
+    return acls.some((acl) => token.acls.includes(acl));
   }
 
   async hasACL(request: MinimumRequestObject | undefined, acls: GlobalACL[]) {

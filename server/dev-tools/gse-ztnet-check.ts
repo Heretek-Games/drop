@@ -19,6 +19,8 @@ if (!baseUrl || !apiToken || !organizationId) {
   process.exit(2);
 }
 
+const sanitizeForLog = (value: unknown) => String(value).replace(/[\r\n]/g, "");
+
 const backend = new ZtnetBackend({ baseUrl, apiToken, organizationId });
 const roomId = `check-${Date.now()}`;
 // A synthetic ZeroTier node id (10 hex); the API pre-authorizes members that
@@ -38,7 +40,7 @@ for (let attempt = 0; attempt < 15 && !address; attempt++) {
     await new Promise((resolve) => setTimeout(resolve, 1000));
   }
 }
-console.log("member address", address);
+console.log("member address", sanitizeForLog(address));
 if (!address) {
   throw new Error("no address assigned to the member");
 }

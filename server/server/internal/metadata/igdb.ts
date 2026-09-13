@@ -484,47 +484,11 @@ export class IGDBProvider implements MetadataProvider {
 
     context?.progress(20);
 
-    const publishers: CompanyModel[] = [];
-    const developers: CompanyModel[] = [];
-    for (const involvedCompany of currentGame.involved_companies ?? []) {
-      // get details about the involved company
-      const involved_company_response = await this.request<IGDBInvolvedCompany>(
-        "involved_companies",
-        `where id = ${involvedCompany}; fields *;`,
-      );
-      for (const foundInvolved of involved_company_response) {
-        // now we need to get the actual company so we can get the name
-        const findCompanyResponse = await this.request<
-          { name: string } & IGDBItem
-        >("companies", `where id = ${foundInvolved.company}; fields name;`);
-
-        for (const companyData of findCompanyResponse) {
-          context?.logger.info(
-            `Found involved company "${company.name}" as: ${foundInvolved.developer ? "developer, " : ""}${foundInvolved.publisher ? "publisher" : ""}`,
-          );
-
-          const res = await company(companyData.name);
-          if (res === undefined) {
-            context?.logger.warn(
-              `Failed to import company "${companyData.name}"`,
-            );
-            continue;
-          }
-
-          // if company was a dev or publisher
-          // CANNOT use else since a company can be both
-          if (foundInvolved.developer) {
-            context?.logger.info(`Imported developer "${companyData.name}"`);
-            developers.push(res);
-          }
-
-          if (foundInvolved.publisher) {
-            context?.logger.info(`Imported publisher "${companyData.name}"`);
-            publishers.push(res);
-          }
-        }
-      }
-    }
+    const { publishers, developers } = await this._resolveInvolvedCompanies(
+      currentGame.involved_companies,
+      company,
+      context,
+    );
 
     context?.progress(80);
 
@@ -586,6 +550,59 @@ export class IGDBProvider implements MetadataProvider {
 
     return metadata;
   }
+
+  /** Resolves IGDB involved-company ids into publisher/developer metadata. */
+  private async _resolveInvolvedCompanies(
+    involvedCompanyIds: number[] | undefined,
+    company: _FetchGameMetadataParams["company"],
+    context?: TaskRunContext,
+  ): Promise<{ publishers: CompanyModel[]; developers: CompanyModel[] }> {
+    const publishers: CompanyModel[] = [];
+    const developers: CompanyModel[] = [];
+
+    for (const involvedCompany of involvedCompanyIds ?? []) {
+      // get details about the involved company
+      const involved_company_response = await this.request<IGDBInvolvedCompany>(
+        "involved_companies",
+        `where id = ${involvedCompany}; fields *;`,
+      );
+      for (const foundInvolved of involved_company_response) {
+        // now we need to get the actual company so we can get the name
+        const findCompanyResponse = await this.request<
+          { name: string } & IGDBItem
+        >("companies", `where id = ${foundInvolved.company}; fields name;`);
+
+        for (const companyData of findCompanyResponse) {
+          context?.logger.info(
+            `Found involved company "${companyData.name}" as: ${foundInvolved.developer ? "developer, " : ""}${foundInvolved.publisher ? "publisher" : ""}`,
+          );
+
+          const res = await company(companyData.name);
+          if (res === undefined) {
+            context?.logger.warn(
+              `Failed to import company "${companyData.name}"`,
+            );
+            continue;
+          }
+
+          // if company was a dev or publisher
+          // CANNOT use else since a company can be both
+          if (foundInvolved.developer) {
+            context?.logger.info(`Imported developer "${companyData.name}"`);
+            developers.push(res);
+          }
+
+          if (foundInvolved.publisher) {
+            context?.logger.info(`Imported publisher "${companyData.name}"`);
+            publishers.push(res);
+          }
+        }
+      }
+    }
+
+    return { publishers, developers };
+  }
+
   async fetchCompany({
     query,
     createObject,
@@ -595,34 +612,32 @@ export class IGDBProvider implements MetadataProvider {
       `where name = "${query}"; fields *; limit 1;`,
     );
 
-    for (const company of response) {
-      const logo = createObject(await this.getCompanyLogoURl(company.logo));
+    const company = response[0];
+    if (!company) return undefined;
 
-      let company_url = "";
-      for (const companySite of company.websites) {
-        const companySiteRes = await this.request<IGDBCompanyWebsite>(
-          "company_websites",
-          `where id = ${companySite}; fields *;`,
-        );
+    const logo = createObject(await this.getCompanyLogoURl(company.logo));
 
-        for (const site of companySiteRes) {
-          if (company_url.length <= 0) company_url = site.url;
-        }
+    let company_url = "";
+    for (const companySite of company.websites) {
+      const companySiteRes = await this.request<IGDBCompanyWebsite>(
+        "company_websites",
+        `where id = ${companySite}; fields *;`,
+      );
+
+      for (const site of companySiteRes) {
+        if (company_url.length <= 0) company_url = site.url;
       }
-      const metadata: CompanyMetadata = {
-        id: "" + company.id,
-        name: company.name,
-        shortDescription: this.trimMessage(company.description, 280),
-        description: company.description,
-        website: company_url,
-
-        logo: logo,
-        banner: logo,
-      };
-
-      return metadata;
     }
 
-    return undefined;
+    return {
+      id: "" + company.id,
+      name: company.name,
+      shortDescription: this.trimMessage(company.description, 280),
+      description: company.description,
+      website: company_url,
+
+      logo: logo,
+      banner: logo,
+    };
   }
 }

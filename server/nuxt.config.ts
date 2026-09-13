@@ -30,7 +30,7 @@ const dropVersion = getDropVersion();
 // get git ref or supply during build
 const commitHash =
   process.env.BUILD_GIT_REF ??
-  execSync("git rev-parse --short HEAD").toString().trim();
+  execSync("git rev-parse --short HEAD").toString().trim(); // NOSONAR: build-time lookup; CI sets BUILD_GIT_REF, and the tool cannot mark the multi-line expression
 
 console.log(`Drop ${dropVersion} #${commitHash}`);
 

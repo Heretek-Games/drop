@@ -84,7 +84,7 @@ export class TorrentialService extends Service<unknown> {
               "torrential detected in development mode - building from source",
             );
             return spawn(
-              "cargo",
+              "cargo", // NOSONAR: dev-only path; the binary is a fixed literal and the server environment is trusted
               [
                 "run",
                 "--manifest-path",

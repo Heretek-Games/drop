@@ -249,31 +249,15 @@ class LibraryManager {
         const gameDir =
           baseDir.length > 0 ? path.join(baseDir, libraryPath) : libraryPath;
 
-        let inferredType: DistributionType = DistributionType.Unknown;
-        try {
-          inferredType = classifyDistribution(gameDir, suggestedName).type;
-          if (inferredType === DistributionType.Unknown) {
-            const versions = await provider.listVersions(libraryPath, []);
-            for (const version of versions) {
-              if (version === "default") continue;
-              const candidate = classifyDistribution(
-                path.join(gameDir, version),
-                suggestedName,
-              ).type;
-              if (candidate !== DistributionType.Unknown) {
-                inferredType = candidate;
-                break;
-              }
-            }
-          }
-        } catch {
-          // Directory is unreadable or not a plain folder; keep Unknown.
-        }
-
         results.push({
           libraryId,
           libraryPath,
-          inferredType,
+          inferredType: await this.inferDistributionType(
+            provider,
+            libraryPath,
+            gameDir,
+            suggestedName,
+          ),
           suggestedName,
         });
       }
@@ -295,6 +279,35 @@ class LibraryManager {
     }
 
     return results.length;
+  }
+
+  /**
+   * Infers a game directory's distribution type. When the directory itself is
+   * unknown, the provider's version subdirectories are probed as a fallback.
+   */
+  private async inferDistributionType(
+    provider: LibraryProvider<unknown>,
+    libraryPath: string,
+    gameDir: string,
+    suggestedName: string,
+  ): Promise<DistributionType> {
+    try {
+      const inferred = classifyDistribution(gameDir, suggestedName).type;
+      if (inferred !== DistributionType.Unknown) return inferred;
+
+      const versions = await provider.listVersions(libraryPath, []);
+      for (const version of versions) {
+        if (version === "default") continue;
+        const candidate = classifyDistribution(
+          path.join(gameDir, version),
+          suggestedName,
+        ).type;
+        if (candidate !== DistributionType.Unknown) return candidate;
+      }
+    } catch {
+      // Directory is unreadable or not a plain folder; keep Unknown.
+    }
+    return DistributionType.Unknown;
   }
 
   /**
@@ -465,7 +478,54 @@ class LibraryManager {
       ],
     };
 
-    const emulators = await prisma.launchConfiguration.findMany({
+    const emulators = await this.fetchEmulatorSuggestions();
+
+    let files;
+    if (versionIdentifier.type === "local") {
+      files = await library.versionReaddir(
+        game.libraryPath,
+        versionIdentifier.identifier,
+      );
+    } else if (versionIdentifier.type === "depot") {
+      const unimported = await prisma.unimportedGameVersion.findUnique({
+        where: {
+          id: versionIdentifier.identifier,
+        },
+        select: {
+          fileList: true,
+        },
+      });
+      if (!unimported) return undefined;
+      files = unimported.fileList;
+    } else {
+      return undefined;
+    }
+
+    const options = this.collectLaunchOptions(
+      files,
+      game.mName,
+      fileExts,
+      emulators,
+    );
+
+    const baseDir =
+      (library as unknown as { config?: { baseDir?: string } }).config
+        ?.baseDir ?? "";
+    const classification = classifyDistribution(
+      versionIdentifier.type === "local"
+        ? path.join(baseDir, game.libraryPath, versionIdentifier.identifier)
+        : "",
+      game.mName,
+      files,
+    );
+    const recipe = generatePipelineRecipe(classification, game.mName);
+    this.unshiftDetectedTargetOption(options, classification, recipe);
+
+    return options.sort((a, b) => b.match - a.match);
+  }
+
+  private async fetchEmulatorSuggestions() {
+    return await prisma.launchConfiguration.findMany({
       where: {
         emulatorSuggestions: {
           isEmpty: false,
@@ -495,29 +555,19 @@ class LibraryManager {
         platform: true,
       },
     });
+  }
 
+  /**
+   * Builds the version's launch options from its files and any emulator
+   * suggestions; excluded binaries are never offered.
+   */
+  private collectLaunchOptions(
+    files: string[],
+    gameName: string,
+    fileExts: { [key in Platform]: string[] },
+    emulators: Awaited<ReturnType<LibraryManager["fetchEmulatorSuggestions"]>>,
+  ): VersionGuess[] {
     const options: Array<VersionGuess> = [];
-
-    let files;
-    if (versionIdentifier.type === "local") {
-      files = await library.versionReaddir(
-        game.libraryPath,
-        versionIdentifier.identifier,
-      );
-    } else if (versionIdentifier.type === "depot") {
-      const unimported = await prisma.unimportedGameVersion.findUnique({
-        where: {
-          id: versionIdentifier.identifier,
-        },
-        select: {
-          fileList: true,
-        },
-      });
-      if (!unimported) return undefined;
-      files = unimported.fileList;
-    } else {
-      return undefined;
-    }
 
     for (const filename of files) {
       // Never offer installers/uninstallers/redistributables as a launch
@@ -529,26 +579,26 @@ class LibraryManager {
       const dotLocation = filename.lastIndexOf(".");
       const ext =
         dotLocation == -1 ? "" : filename.slice(dotLocation).toLowerCase();
+
       for (const [platform, checkExts] of Object.entries(fileExts)) {
         for (const checkExt of checkExts) {
           if (checkExt != ext) continue;
-          const fuzzyValue = fuzzy(basename, game.mName);
           options.push({
             type: "platform",
             filename: this.shescape.escape(filename),
             platform: platform as Platform,
-            match: fuzzyValue,
+            match: fuzzy(basename, gameName),
           });
         }
       }
+
       for (const emulator of emulators) {
         for (const suggestion of emulator.emulatorSuggestions) {
           if (suggestion != ext) continue;
-          const fuzzyValue = fuzzy(basename, game.mName);
           options.push({
             type: "emulator",
             filename: this.shescape.escape(filename),
-            match: fuzzyValue,
+            match: fuzzy(basename, gameName),
             emulatorId: emulator.launchId,
 
             icon: emulator.gameVersion.game.mIconObjectId,
@@ -562,41 +612,33 @@ class LibraryManager {
       }
     }
 
-    const baseDir =
-      (library as unknown as { config?: { baseDir?: string } }).config
-        ?.baseDir ?? "";
-    const classification = classifyDistribution(
-      versionIdentifier.type === "local"
-        ? path.join(baseDir, game.libraryPath, versionIdentifier.identifier)
-        : "",
-      game.mName,
-      files,
-    );
-    const recipe = generatePipelineRecipe(classification, game.mName);
+    return options;
+  }
 
-    // Only surface a launch option for a target the scorer actually detected,
-    // and escape it consistently with the other options.
+  /**
+   * Only surface a launch option for a target the scorer actually detected, and
+   * escape it consistently with the other options.
+   */
+  private unshiftDetectedTargetOption(
+    options: VersionGuess[],
+    classification: ReturnType<typeof classifyDistribution>,
+    recipe: ReturnType<typeof generatePipelineRecipe>,
+  ): void {
+    const target = recipe.targetExecutable;
+    if (!target) return;
     const targetDetected = classification.detectedExecutables.some(
-      (candidate) => candidate.path === recipe.targetExecutable,
+      (candidate) => candidate.path === target,
     );
-    if (
-      recipe.targetExecutable &&
-      targetDetected &&
-      !options.some(
-        (o) => o.filename === this.shescape.escape(recipe.targetExecutable),
-      )
-    ) {
-      options.unshift({
-        type: "platform",
-        filename: this.shescape.escape(recipe.targetExecutable),
-        platform: Platform.Windows,
-        match: 100,
-      });
-    }
+    if (!targetDetected) return;
 
-    const sortedOptions = options.sort((a, b) => b.match - a.match);
-
-    return sortedOptions;
+    const escaped = this.shescape.escape(target);
+    if (options.some((o) => o.filename === escaped)) return;
+    options.unshift({
+      type: "platform",
+      filename: escaped,
+      platform: Platform.Windows,
+      match: 100,
+    });
   }
 
   // Checks are done in least to most expensive order

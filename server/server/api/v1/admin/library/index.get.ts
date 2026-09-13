@@ -19,6 +19,67 @@ const Query = type({
 
 type FetchArg = Parameters<typeof libraryManager.fetchGamesWithStatus>[0];
 
+const FILTER_BUILDERS: Record<
+  string,
+  Prisma.GameFindManyArgs & Prisma.GameCountArgs
+> = {
+  "version.none": {
+    where: {
+      versions: {
+        none: {},
+      },
+    },
+  },
+  "metadata.featured": {
+    where: {
+      featured: true,
+    },
+  },
+  "metadata.noCarousel": {
+    where: {
+      OR: [
+        {
+          mImageCarouselObjectIds: {
+            isEmpty: true,
+          },
+        },
+      ],
+    },
+  },
+  "metadata.emptyDescription": {
+    where: {
+      mDescription: "",
+    },
+  },
+};
+
+function buildRawFilters(
+  filters: string[] | undefined,
+  search: string | undefined,
+): Array<Prisma.GameFindManyArgs & Prisma.GameCountArgs> {
+  const rawFilters: Array<Prisma.GameFindManyArgs & Prisma.GameCountArgs> = [];
+
+  for (const filter of new Set(filters ?? [])) {
+    const builder = FILTER_BUILDERS[filter];
+    if (builder) {
+      rawFilters.push(builder);
+    }
+  }
+
+  if (search) {
+    rawFilters.push({
+      where: {
+        mName: {
+          contains: search,
+          mode: "insensitive",
+        },
+      },
+    });
+  }
+
+  return rawFilters;
+}
+
 export type AdminLibraryGame = SerializeObject<
   Awaited<ReturnType<typeof libraryManager.fetchGamesWithStatus>>[number]
 >;
@@ -53,60 +114,7 @@ export default defineEventHandler(async (h3) => {
       break;
   }
 
-  const rawFilters: Array<Prisma.GameFindManyArgs & Prisma.GameCountArgs> = [];
-  if (query.filters && query.filters.length > 0) {
-    const filterSet = new Set(query.filters);
-    if (filterSet.has("version.none")) {
-      rawFilters.push({
-        where: {
-          versions: {
-            none: {},
-          },
-        },
-      });
-    }
-
-    if (filterSet.has("metadata.featured")) {
-      rawFilters.push({
-        where: {
-          featured: true,
-        },
-      });
-    }
-
-    if (filterSet.has("metadata.noCarousel")) {
-      rawFilters.push({
-        where: {
-          OR: [
-            {
-              mImageCarouselObjectIds: {
-                isEmpty: true,
-              },
-            },
-          ],
-        },
-      });
-    }
-
-    if (filterSet.has("metadata.emptyDescription")) {
-      rawFilters.push({
-        where: {
-          mDescription: "",
-        },
-      });
-    }
-  }
-
-  if (query.query) {
-    rawFilters.push({
-      where: {
-        mName: {
-          contains: query.query,
-          mode: "insensitive",
-        },
-      },
-    });
-  }
+  const rawFilters = buildRawFilters(query.filters, query.query);
 
   const filters =
     rawFilters.length > 0

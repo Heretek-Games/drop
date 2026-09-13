@@ -75,9 +75,28 @@ async function listFiles(root, prefix = "") {
 }
 
 const manifestPath = path.join(bundleDir, MANIFEST_FILE);
-const manifest = JSON.parse(await readFile(manifestPath, "utf-8"));
+// NOSONAR: manifestPath is a fixed file name inside the confined bundleDir.
+const manifest = JSON.parse(await readFile(manifestPath, "utf-8")); // NOSONAR
 const entry = manifest.entry ?? "index.js";
-const entryBytes = await readFile(path.join(bundleDir, entry));
+if (typeof entry !== "string") {
+  console.error("manifest entry must be a string");
+  process.exit(1);
+}
+// A manifest must not point the entry outside the bundle (e.g.
+// `"entry": "../../secret"`); check the lexical path and the symlink-resolved
+// path so a symlink inside the bundle cannot escape either.
+const entryPath = path.resolve(bundleDir, entry);
+const entryRealPath = await realpath(entryPath).catch(() => null);
+if (
+  !isInside(bundleDir, entryPath) ||
+  !entryRealPath ||
+  !isInside(bundleDir, entryRealPath)
+) {
+  console.error("manifest entry must be inside the bundle directory");
+  process.exit(1);
+}
+// NOSONAR: entryRealPath passed the confinement checks above.
+const entryBytes = await readFile(entryRealPath); // NOSONAR
 
 const checksum = createHash("sha256").update(entryBytes).digest("hex");
 manifest.checksum = checksum;
@@ -108,5 +127,6 @@ if (key) {
   );
 }
 
-await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+// NOSONAR: manifestPath is inside the confined bundleDir.
+await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`); // NOSONAR
 console.log(`signed bundle: ${files.length} file(s)`);

@@ -40,7 +40,11 @@
         >{ "manifest": {...}, "entry": "&lt;base64&gt;" }</code
       >.
     </p>
+    <label for="install-plugin-bundle" class="sr-only"
+      >External plugin bundle JSON</label
+    >
     <textarea
+      id="install-plugin-bundle"
       v-model="installJson"
       rows="4"
       class="w-full rounded-md bg-zinc-900 border border-zinc-700 px-3 py-2 text-xs font-mono text-zinc-200 focus:outline-none focus:border-purple-500"

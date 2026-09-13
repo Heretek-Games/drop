@@ -18,6 +18,9 @@ const email = process.env.ZTNET_EMAIL ?? "admin@drop.local";
 const password = process.env.ZTNET_PASSWORD ?? "Password123!";
 const origin = baseUrl;
 
+/** Collapse CR/LF so server-controlled text cannot forge log lines. */
+const sanitizeForLog = (value) => String(value).replace(/[\r\n]/g, "");
+
 async function auth(path, body) {
   const response = await fetch(`${baseUrl}/api/auth/${path}`, {
     method: "POST",
@@ -67,7 +70,7 @@ if (!session.response.ok) {
   session = await auth("sign-up/email", { email, password, name: "Admin" });
 }
 if (!session.response.ok) {
-  console.error(await session.response.text());
+  console.error(sanitizeForLog(await session.response.text()));
   process.exit(1);
 }
 const cookie = session.cookies.map((entry) => entry.split(";")[0]).join("; ");
@@ -95,5 +98,5 @@ const token = await trpcMutation(
   cookie,
 );
 
-console.log(`GSE_ZTNET_ORG=${orgId}`);
-console.log(`GSE_ZTNET_TOKEN=${token.token}`);
+console.log(`GSE_ZTNET_ORG=${sanitizeForLog(orgId)}`);
+console.log(`GSE_ZTNET_TOKEN=${sanitizeForLog(token.token)}`);

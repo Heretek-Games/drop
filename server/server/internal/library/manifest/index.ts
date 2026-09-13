@@ -1,6 +1,7 @@
 import cacheHandler from "../../cache";
 import prisma from "../../db/database";
-import { castManifest, type V2Manifest } from "./utils";
+import type { JsonValue } from "@prisma/client/runtime/client";
+import { castManifest, type V2ChunkData, type V2Manifest } from "./utils";
 
 export type DownloadManifestDetails = {
   /***
@@ -17,41 +18,29 @@ export type DownloadManifestDetails = {
   downloadSize: number;
 };
 
+type ManifestVersion = {
+  versionId: string;
+  versionIndex: number;
+  delta: boolean;
+  gameId: string;
+  fileList: string[];
+  negativeFileList: string[];
+  dropletManifest: JsonValue;
+};
+
 function convertMap<T>(map: Map<string, T>): { [key: string]: T } {
   return Object.fromEntries(map.entries().toArray());
 }
 const manifestCache =
   cacheHandler.createCache<DownloadManifestDetails>("manifestCache");
 
-/**
- *
- * @param gameId Game ID
- * @param versionId Version ID
- */
-export async function createDownloadManifestDetails(
-  versionId: string,
-  previous?: string,
-  refresh = false,
-): Promise<DownloadManifestDetails> {
-  const manifestKey = previous ? `${versionId}-from-${previous}` : versionId;
-  if ((await manifestCache.has(manifestKey)) && !refresh)
-    return (await manifestCache.get(manifestKey))!;
-  const mainVersion = await prisma.gameVersion.findUnique({
-    where: { versionId },
-    select: {
-      versionId: true,
-      delta: true,
-      versionIndex: true,
-      fileList: true,
-      negativeFileList: true,
-      gameId: true,
-      dropletManifest: true,
-    },
-  });
-  if (!mainVersion)
-    throw createError({ statusCode: 404, message: "Version not found" });
+type ManifestDeltaVersion = Omit<ManifestVersion, "gameId">;
 
-  const collectedVersions = [];
+/** Walks the delta chain backwards, newest-last, for a version. */
+async function resolveVersionOrder(
+  mainVersion: ManifestVersion,
+): Promise<ManifestDeltaVersion[]> {
+  const collectedVersions: ManifestDeltaVersion[] = [];
   let versionIndex = mainVersion.versionIndex;
   while (mainVersion.delta) {
     const nextVersion = await prisma.gameVersion.findFirst({
@@ -81,8 +70,13 @@ export async function createDownloadManifestDetails(
 
   collectedVersions.reverse();
   // Apply fileList in lowest priority to newest priority
-  const versionOrder = [...collectedVersions, mainVersion];
+  return [...collectedVersions, mainVersion];
+}
 
+/** Applies positive/negative file lists across the version chain. */
+function buildFileList(
+  versionOrder: ManifestDeltaVersion[],
+): Map<string, string> {
   const fileList = new Map<string, string>();
   for (const version of versionOrder) {
     for (const file of version.fileList) {
@@ -92,6 +86,62 @@ export async function createDownloadManifestDetails(
       fileList.delete(negFile);
     }
   }
+  return fileList;
+}
+
+/**
+ * Decides whether a chunk must be downloaded for this version and how many
+ * install-size bytes it contributes. A file already present from the previous
+ * download is skipped; a chunk is downloadable if any of its files is wanted.
+ */
+function classifyChunk(
+  chunkData: V2ChunkData,
+  versionId: string,
+  fileNames: { [key: string]: string },
+  existingChunks: DownloadManifestDetails | undefined,
+): { download: boolean; installSize: number } {
+  let download = false;
+  let installSize = 0;
+  for (const fileEntry of chunkData.files) {
+    if (existingChunks?.fileList[fileEntry.filename] === versionId) continue;
+    if (fileNames[fileEntry.filename]) {
+      download = true;
+      installSize += fileEntry.length;
+    }
+  }
+  return { download, installSize };
+}
+
+/**
+ *
+ * @param gameId Game ID
+ * @param versionId Version ID
+ */
+export async function createDownloadManifestDetails(
+  versionId: string,
+  previous?: string,
+  refresh = false,
+): Promise<DownloadManifestDetails> {
+  const manifestKey = previous ? `${versionId}-from-${previous}` : versionId;
+  if ((await manifestCache.has(manifestKey)) && !refresh)
+    return (await manifestCache.get(manifestKey))!;
+  const mainVersion = await prisma.gameVersion.findUnique({
+    where: { versionId },
+    select: {
+      versionId: true,
+      delta: true,
+      versionIndex: true,
+      fileList: true,
+      negativeFileList: true,
+      gameId: true,
+      dropletManifest: true,
+    },
+  });
+  if (!mainVersion)
+    throw createError({ statusCode: 404, message: "Version not found" });
+
+  const versionOrder = await resolveVersionOrder(mainVersion);
+  const fileList = buildFileList(versionOrder);
 
   let installSize = 0;
   let downloadSize = 0;
@@ -111,27 +161,20 @@ export async function createDownloadManifestDetails(
     const fileNames = Object.fromEntries(files);
     const manifest = castManifest(version.dropletManifest);
     const filteredChunks = Object.fromEntries(
-      Object.entries(manifest.chunks).filter(([_, chunkData]) => {
-        //if(existingChunks && existingChunks.manifests[version.versionId]?.chunks?.[chunkId]) return false;
-        let flag = false;
-        chunkData.files.forEach((fileEntry) => {
-          if (
-            existingChunks &&
-            existingChunks.fileList[fileEntry.filename] == version.versionId
-          )
-            return;
-          if (fileNames[fileEntry.filename]) {
-            flag = true;
-            installSize += fileEntry.length;
-          }
-        });
+      Object.entries(manifest.chunks).filter(([, chunkData]) => {
+        const classified = classifyChunk(
+          chunkData,
+          version.versionId,
+          fileNames,
+          existingChunks,
+        );
+        installSize += classified.installSize;
+        if (!classified.download) return false;
         // If we have to download this chunk, add it's length
-        if (flag) {
-          downloadSize += chunkData.files
-            .map((v) => v.length)
-            .reduce((a, b) => a + b, 0);
-        }
-        return flag;
+        downloadSize += chunkData.files
+          .map((v) => v.length)
+          .reduce((a, b) => a + b, 0);
+        return true;
       }),
     );
     manifests.set(version.versionId, {

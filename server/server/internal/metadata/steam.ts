@@ -1,4 +1,5 @@
 import { AgeRatingOrganization, MetadataSource } from "~/prisma/client/enums";
+import type { Company } from "~/prisma/client/client";
 import {
   ESRBRating,
   PEGIRating,
@@ -346,56 +347,11 @@ export class SteamProvider implements MetadataProvider {
       .map((v) => v.attribs.href)
       .filter((v) => v !== undefined);
 
-    const companies: {
-      [key: string]: {
-        pub: boolean;
-        dev: boolean;
-      };
-    } = {};
-
-    companyLinks.forEach((v) => {
-      const [type, name] = v
-        .substring("https://store.steampowered.com/".length, v.indexOf("?"))
-        .split("/");
-
-      if (!type || !name) return;
-
-      companies[name] ??= { pub: false, dev: false };
-      switch (type) {
-        case "publisher":
-          companies[name].pub = true;
-          break;
-        case "developer":
-          companies[name].dev = true;
-          break;
-      }
-    });
-
-    const publishers = [];
-    const developers = [];
-
-    for (const [companyName, types] of Object.entries(companies)) {
-      context?.logger.info(`Processing company: "${companyName}"`);
-      const comp = await company(companyName);
-
-      if (!comp) {
-        context?.logger.warn(`Could not resolve company: "${companyName}"`);
-        continue;
-      }
-
-      if (types.dev) {
-        developers.push(comp);
-        context?.logger.info(
-          `Successfully imported developer: "${companyName}"`,
-        );
-      }
-      if (types.pub) {
-        publishers.push(comp);
-        context?.logger.info(
-          `Successfully imported publisher: "${companyName}"`,
-        );
-      }
-    }
+    const { publishers, developers } = await this._resolveStoreCompanies(
+      companyLinks,
+      company,
+      context,
+    );
 
     context?.logger.info(
       `Company processing complete: ${publishers.length} publishers, ${developers.length} developers`,
@@ -492,6 +448,55 @@ export class SteamProvider implements MetadataProvider {
       coverId: cover,
       images,
     } satisfies GameMetadata;
+  }
+
+  /** Maps Steam store-page company links to resolved publisher/developer metadata. */
+  private async _resolveStoreCompanies(
+    companyLinks: string[],
+    company: _FetchGameMetadataParams["company"],
+    context?: TaskRunContext,
+  ): Promise<{ publishers: Company[]; developers: Company[] }> {
+    const companies: Record<string, { pub: boolean; dev: boolean }> = {};
+
+    for (const link of companyLinks) {
+      const [type, name] = link
+        .substring("https://store.steampowered.com/".length, link.indexOf("?"))
+        .split("/");
+
+      if (!type || !name) continue;
+
+      companies[name] ??= { pub: false, dev: false };
+      if (type === "publisher") companies[name].pub = true;
+      if (type === "developer") companies[name].dev = true;
+    }
+
+    const publishers: Company[] = [];
+    const developers: Company[] = [];
+
+    for (const [companyName, types] of Object.entries(companies)) {
+      context?.logger.info(`Processing company: "${companyName}"`);
+      const comp = await company(companyName);
+
+      if (!comp) {
+        context?.logger.warn(`Could not resolve company: "${companyName}"`);
+        continue;
+      }
+
+      if (types.dev) {
+        developers.push(comp);
+        context?.logger.info(
+          `Successfully imported developer: "${companyName}"`,
+        );
+      }
+      if (types.pub) {
+        publishers.push(comp);
+        context?.logger.info(
+          `Successfully imported publisher: "${companyName}"`,
+        );
+      }
+    }
+
+    return { publishers, developers };
   }
 
   async fetchCompany({
