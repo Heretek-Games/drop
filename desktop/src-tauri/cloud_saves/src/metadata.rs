@@ -2,7 +2,7 @@ use database::GameVersion;
 
 use super::conditions::Condition;
 
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct CloudSaveMetadata {
     pub files: Vec<GameFile>,
     pub game_version: GameVersion,

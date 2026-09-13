@@ -66,6 +66,44 @@ test("classifyDistribution identifies Scene multi-part RAR releases", () => {
   assert.ok(recipe.setupScriptWindows?.includes("TENOKE"));
 });
 
+test("generatePipelineRecipe extracts a standalone Scene ISO without a redundant RAR step", () => {
+  const files = [
+    "tenoke-some.game.nfo",
+    "tenoke-some.game.sfv",
+    "tenoke-some.game.iso",
+  ];
+
+  const result = classifyDistribution(
+    "/data/Some.Game-TENOKE",
+    "Some Game",
+    files,
+  );
+
+  assert.equal(result.type, DistributionType.SceneRelease);
+  assert.equal(result.primaryArchive, "tenoke-some.game.iso");
+
+  const recipe = generatePipelineRecipe(result, "Some Game");
+  assert.equal(recipe.distributionType, DistributionType.SceneRelease);
+  assert.ok(
+    !recipe.steps.some((s) => s.action === "extract_rar"),
+    "standalone ISO must not emit extract_rar",
+  );
+
+  const isoStep = recipe.steps.find((s) => s.action === "extract_iso");
+  assert.ok(isoStep);
+  assert.equal(isoStep.params.sourceGlob, "tenoke-some.game.iso");
+  assert.equal(isoStep.params.outputDir, ".");
+
+  const cleanup = recipe.steps.find((s) => s.action === "cleanup");
+  assert.ok(cleanup);
+  assert.deepEqual(cleanup.params.targets, ["tenoke-some.game.iso"]);
+
+  assert.ok(
+    recipe.setupScriptWindows?.includes("Extracting Scene Release ISO"),
+  );
+  assert.ok(recipe.setupScriptWindows?.includes("tenoke-some.game.iso"));
+});
+
 test("classifyDistribution identifies GOG multi-bin installers", () => {
   const files = [
     "setup_amnesia_the_bunker_1.9_(64bit)_(71145)-1.bin",

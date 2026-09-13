@@ -116,6 +116,25 @@ export type DownloadableMetadata = {
   downloadType: DownloadableType;
 };
 
+export type PipelineProgressEvent = {
+  gameId: string;
+  stepIndex: number;
+  totalSteps: number;
+  stepId: string;
+  action: string;
+  description: string;
+  percentage: number;
+  currentFile?: string | null;
+  logLine?: string | null;
+};
+
+export type PipelineCompletedEvent = {
+  gameId: string;
+  success: boolean;
+  reclaimableBytes: number;
+  error?: string | null;
+};
+
 export type Settings = {
   autostart: boolean;
   maxDownloadThreads: number;

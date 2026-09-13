@@ -100,7 +100,7 @@ pub mod data {
             }
         }
 
-        #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+        #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
         #[serde(rename_all = "camelCase")]
         pub struct GameVersion {
             pub game_id: String,
@@ -119,6 +119,9 @@ pub mod data {
 
             pub launches: Vec<LaunchConfiguration>,
             pub setups: Vec<SetupConfiguration>,
+
+            #[serde(default)]
+            pub droplet_manifest: Option<serde_json::Value>,
         }
 
         #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]

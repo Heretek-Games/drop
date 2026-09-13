@@ -12,6 +12,7 @@ games = { path = "../games", version = "0.1.0" }
 keyvalues-parser = "0.2.3"
 log = "0.4.28"
 page_size = "0.6.0"
+regex = "1.11"
 serde = "1.0.228"
 serde_json = "1"
 serde_with = "3.15.0"
@@ -20,4 +21,9 @@ shared_child = "1.1.1"
 shell-words = "1.1.1"
 tauri = "*"
 tauri-plugin-opener = "*"
+tokio = { version = "1", features = ["rt", "process", "io-util", "sync"] }
 utils = { path = "../utils", version = "0.1.0" }
+walkdir = "2.5"
+
+[dev-dependencies]
+tempfile = "3"

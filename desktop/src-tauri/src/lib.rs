@@ -274,6 +274,9 @@ pub fn run() {
             open_process_logs,
             get_launch_options,
             get_process_handlers,
+            start_pipeline_setup,
+            cancel_pipeline_setup,
+            reclaim_pipeline_space,
             #[cfg(target_os = "linux")]
             ::process::compat::fetch_proton_paths,
             #[cfg(target_os = "linux")]

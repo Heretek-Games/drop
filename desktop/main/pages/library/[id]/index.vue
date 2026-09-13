@@ -615,6 +615,15 @@
     @launch="() => launch()"
   />
 
+  <GameSetupModal
+    v-if="installedData"
+    v-model="setupModalOpen"
+    :game-id="game.id"
+    :game-name="game.mName"
+    @play="() => launch()"
+    @fallback="() => launchIndex(0)"
+  />
+
   <Transition
     enter="transition ease-out duration-300"
     enter-from="opacity-0"
@@ -745,6 +754,7 @@ const installDirs = ref<undefined | Array<string>>();
 const currentImageIndex = ref(0);
 
 const configureModalOpen = ref(false);
+const setupModalOpen = ref(false);
 
 async function installFlow() {
   installFlowOpen.value = true;
@@ -832,7 +842,7 @@ async function launch() {
     status.value.type == "Installed" &&
     status.value.install_type.type == InstalledType.SetupRequired
   ) {
-    await launchIndex(0);
+    setupModalOpen.value = true;
     return;
   }
   try {

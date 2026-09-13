@@ -24,26 +24,43 @@ export function generatePipelineRecipe(
       setupCommand = "drop-pipeline-setup.bat";
       const primaryArchive = classification.primaryArchive || "*.rar";
       const crackGroup = classification.releaseGroup || "Crack";
+      const isDirectIso = primaryArchive.toLowerCase().endsWith(".iso");
 
-      steps.push({
-        id: "extract_rar",
-        action: "extract_rar",
-        params: {
-          input: primaryArchive,
-          outputDir: ".drop_iso_tmp",
-        },
-        description: `Extract multi-part Scene archive (${primaryArchive})`,
-      });
+      if (isDirectIso) {
+        // Standalone Scene ISO: extracting the image directly is the whole
+        // setup. Running extract_rar on an ISO would just unpack it into the
+        // temporary directory and then unpack the same image again into the
+        // game folder.
+        steps.push({
+          id: "extract_iso",
+          action: "extract_iso",
+          params: {
+            sourceGlob: primaryArchive,
+            outputDir: ".",
+          },
+          description: `Extract Scene ISO disc image (${primaryArchive})`,
+        });
+      } else {
+        steps.push({
+          id: "extract_rar",
+          action: "extract_rar",
+          params: {
+            input: primaryArchive,
+            outputDir: ".drop_iso_tmp",
+          },
+          description: `Extract multi-part Scene archive (${primaryArchive})`,
+        });
 
-      steps.push({
-        id: "extract_iso",
-        action: "extract_iso",
-        params: {
-          sourceGlob: ".drop_iso_tmp/*.iso",
-          outputDir: ".",
-        },
-        description: "Extract unpacked ISO disc image into root game folder",
-      });
+        steps.push({
+          id: "extract_iso",
+          action: "extract_iso",
+          params: {
+            sourceGlob: ".drop_iso_tmp/*.iso",
+            outputDir: ".",
+          },
+          description: "Extract unpacked ISO disc image into root game folder",
+        });
+      }
 
       steps.push({
         id: "apply_crack",
@@ -60,20 +77,58 @@ export function generatePipelineRecipe(
         id: "cleanup",
         action: "cleanup",
         params: {
-          targets: [
-            ".drop_iso_tmp",
-            "*.r0*",
-            "*.r1*",
-            "*.r2*",
-            "*.r3*",
-            "*.rar",
-          ],
+          targets: isDirectIso
+            ? [primaryArchive]
+            : [".drop_iso_tmp", "*.r0*", "*.r1*", "*.r2*", "*.r3*", "*.rar"],
         },
-        description: "Remove intermediate ISO and multi-part RAR slices",
+        description: isDirectIso
+          ? "Remove the source ISO image"
+          : "Remove intermediate ISO and multi-part RAR slices",
         optional: true,
       });
 
-      setupScriptWindows = `@echo off
+      const crackOverlayWindows = `for %%G in (RUNE TENOKE CODEX FLT PLAZA SKIDROW DEViANCE RELOADED HOODLUM FAIRLIGHT EMPRESS PROPHET TiNYiSO ALiAS BAT Razor1911 Crack) do (
+  if exist "%%G" (
+    echo [Drop Pipeline] Applying crack from %%G...
+    xcopy /s /e /y "%%G\\*" "."
+  )
+)`;
+
+      const crackOverlayLinux = `for g in RUNE TENOKE CODEX FLT PLAZA SKIDROW DEViANCE RELOADED HOODLUM FAIRLIGHT EMPRESS PROPHET TiNYiSO ALiAS BAT Razor1911 Crack; do
+  if [ -d "$g" ]; then
+    echo "[Drop Pipeline] Applying crack from $g..."
+    cp -rf "$g"/* .
+  fi
+done`;
+
+      if (isDirectIso) {
+        setupScriptWindows = `@echo off
+echo [Drop Pipeline] Extracting Scene Release ISO (${crackGroup})...
+set SEVENZIP="7z"
+if exist "%ProgramFiles%\\7-Zip\\7z.exe" set SEVENZIP="%ProgramFiles%\\7-Zip\\7z.exe"
+if exist "%ProgramFiles(x86)%\\7-Zip\\7z.exe" set SEVENZIP="%ProgramFiles(x86)%\\7-Zip\\7z.exe"
+
+%SEVENZIP% x -y "${primaryArchive}" -o.
+if %ERRORLEVEL% NEQ 0 (
+  echo [Drop Pipeline] ISO extraction failed.
+  exit /b %ERRORLEVEL%
+)
+
+${crackOverlayWindows}
+
+echo [Drop Pipeline] Scene release setup completed successfully!
+exit /b 0
+`;
+
+        setupScriptLinux = `#!/bin/bash
+set -e
+echo "[Drop Pipeline] Extracting Scene Release ISO (${crackGroup})..."
+7z x -y "${primaryArchive}" -o.
+${crackOverlayLinux}
+echo "[Drop Pipeline] Scene release setup completed successfully!"
+`;
+      } else {
+        setupScriptWindows = `@echo off
 echo [Drop Pipeline] Extracting Scene Release (${crackGroup})...
 set SEVENZIP="7z"
 if exist "%ProgramFiles%\\7-Zip\\7z.exe" set SEVENZIP="%ProgramFiles%\\7-Zip\\7z.exe"
@@ -91,14 +146,13 @@ for %%F in (.drop_iso_tmp\\*.iso) do (
   %SEVENZIP% x -y "%%F" -o.
 )
 
-for %%G in (RUNE TENOKE CODEX FLT PLAZA SKIDROW DEViANCE RELOADED HOODLUM FAIRLIGHT EMPRESS PROPHET TiNYiSO ALiAS BAT Razor1911 Crack) do (
-  if exist "%%G" (
-    echo [Drop Pipeline] Applying crack from %%G...
-    xcopy /s /e /y "%%G\\*" "."
-  )
-  if exist ".drop_iso_tmp\\%%G" (
-    echo [Drop Pipeline] Applying crack from .drop_iso_tmp\\%%G...
-    xcopy /s /e /y ".drop_iso_tmp\\%%G\\*" "."
+${crackOverlayWindows}
+if exist ".drop_iso_tmp" (
+  for %%G in (RUNE TENOKE CODEX FLT PLAZA SKIDROW DEViANCE RELOADED HOODLUM FAIRLIGHT EMPRESS PROPHET TiNYiSO ALiAS BAT Razor1911 Crack) do (
+    if exist ".drop_iso_tmp\\%%G" (
+      echo [Drop Pipeline] Applying crack from .drop_iso_tmp\\%%G...
+      xcopy /s /e /y ".drop_iso_tmp\\%%G\\*" "."
+    )
   )
 )
 
@@ -107,7 +161,7 @@ echo [Drop Pipeline] Scene release setup completed successfully!
 exit /b 0
 `;
 
-      setupScriptLinux = `#!/bin/bash
+        setupScriptLinux = `#!/bin/bash
 set -e
 echo "[Drop Pipeline] Extracting Scene Release (${crackGroup})..."
 mkdir -p .drop_iso_tmp
@@ -119,11 +173,9 @@ for iso in .drop_iso_tmp/*.iso; do
   fi
 done
 
+${crackOverlayLinux}
+
 for g in RUNE TENOKE CODEX FLT PLAZA SKIDROW DEViANCE RELOADED HOODLUM FAIRLIGHT EMPRESS PROPHET TiNYiSO ALiAS BAT Razor1911 Crack; do
-  if [ -d "$g" ]; then
-    echo "[Drop Pipeline] Applying crack from $g..."
-    cp -rf "$g"/* .
-  fi
   if [ -d ".drop_iso_tmp/$g" ]; then
     echo "[Drop Pipeline] Applying crack from .drop_iso_tmp/$g..."
     cp -rf ".drop_iso_tmp/$g"/* .
@@ -133,6 +185,7 @@ done
 rm -rf .drop_iso_tmp
 echo "[Drop Pipeline] Scene release setup completed successfully!"
 `;
+      }
       break;
     }
 
