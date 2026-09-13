@@ -3,7 +3,7 @@ use std::{
     process::Command,
 };
 
-use gse_engine::dll::{MANIFEST_FILE, TARGET_BINARIES, backup_originals, restore_originals};
+use gse_engine::dll::{MANIFEST_FILE, TARGET_BINARIES, backup_originals, tracked_binaries};
 use gse_engine::{EmulatorFlavor, PatchPlan, anticheat, apply_plan, restore, scanner};
 use log::{info, warn};
 
@@ -35,13 +35,33 @@ fn gse_requested(install_dir: &Path) -> bool {
 /// Restore Steam API binaries left backed up by interrupted sessions (crash
 /// recovery). Returns the number of game directories recovered.
 pub fn recover_interrupted_sessions(install_dirs: &[PathBuf]) -> usize {
-    let targets: Vec<&str> = TARGET_BINARIES.to_vec();
     let mut recovered = 0;
     for dir in install_dirs {
         if !dir.join(MANIFEST_FILE).is_file() {
             continue;
         }
-        match restore_originals(dir, &targets) {
+
+        // Include every target the manifest tracks (nested paths included),
+        // plus the default names in case the original was replaced/removed.
+        let mut targets: Vec<String> = TARGET_BINARIES
+            .iter()
+            .map(|name| (*name).to_string())
+            .collect();
+        match tracked_binaries(dir) {
+            Ok(tracked) => {
+                for name in tracked {
+                    if !targets.contains(&name) {
+                        targets.push(name);
+                    }
+                }
+            }
+            Err(err) => warn!(
+                "GSE crash recovery could not read the manifest for {}: {err}",
+                dir.display()
+            ),
+        }
+
+        match restore(dir, &targets) {
             Ok(()) => {
                 recovered += 1;
                 info!("GSE crash recovery restored originals in {}", dir.display());
@@ -335,6 +355,33 @@ mod tests {
 
         let _ = std::fs::remove_dir_all(&dir);
         let _ = std::fs::remove_dir_all(&payload);
+    }
+
+    #[test]
+    fn crash_recovery_restores_nested_targets_and_clears_the_marker() {
+        let dir = create_test_dir("nested-recovery");
+        let nested = dir.join("bin/x64");
+        std::fs::create_dir_all(&nested).unwrap();
+        std::fs::write(nested.join("steam_api64.dll"), b"original-valve").unwrap();
+        mark_room_requested(&dir);
+        std::fs::write(dir.join("steam_settings/steam_appid.txt"), "440").unwrap();
+
+        // Simulate an interrupted session: verified backup + manifest, patched
+        // live binary, room marker still present.
+        backup_originals(&dir, &["bin/x64/steam_api64.dll"]).unwrap();
+        std::fs::write(nested.join("steam_api64.dll"), b"patched").unwrap();
+
+        let recovered = recover_interrupted_sessions(&[dir.clone()]);
+        assert_eq!(recovered, 1);
+        assert_eq!(
+            std::fs::read(nested.join("steam_api64.dll")).unwrap(),
+            b"original-valve"
+        );
+        assert!(!nested.join("steam_api64.dll.orig").exists());
+        assert!(!dir.join("steam_settings/custom_broadcasts.txt").exists());
+        assert!(!dir.join("steam_settings/steam_appid.txt").exists());
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

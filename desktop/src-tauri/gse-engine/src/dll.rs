@@ -86,6 +86,14 @@ impl BackupOutcome {
     }
 }
 
+/// Relative names currently tracked in the game's backup manifest. Used by
+/// crash recovery so nested targets (e.g. `bin/x64/steam_api64.dll`) are
+/// restored too, not just the default flat names.
+pub fn tracked_binaries(game_dir: &Path) -> Result<Vec<String>, EngineError> {
+    let manifest = load_manifest(game_dir)?;
+    Ok(manifest.entries.keys().cloned().collect())
+}
+
 /// Back up `binaries` inside `game_dir` as `<name>.orig`.
 pub fn backup_originals(game_dir: &Path, binaries: &[&str]) -> Result<BackupOutcome, EngineError> {
     ensure_game_dir(game_dir)?;
