@@ -1,0 +1,16 @@
+Source: @PACKAGE_NAME@
+Section: games
+Priority: optional
+Maintainer: Heretek Games <contact@heretek.games>
+Build-Depends: debhelper-compat (= 13)
+Standards-Version: 4.6.2
+Homepage: https://github.com/Heretek-Games/drop
+Rules-Requires-Root: no
+
+Package: @PACKAGE_NAME@
+Architecture: amd64 arm64
+Depends: ${shlibs:Depends}, ${misc:Depends}, libwebkit2gtk-4.1-0, libayatana-appindicator3-1, xdg-utils
+Description: @APP_SUMMARY@
+ Drop is an open-source, self-hosted game library and distribution platform.
+ This desktop client connects to your Drop server instance to download,
+ manage, update, and launch your games with native Proton/Wine and emulator support.

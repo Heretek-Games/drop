@@ -26,6 +26,10 @@ Drop is an open-source game distribution platform, similar to GameVault or Steam
 2. Drop is secure. The nature of Drop means an instance can never be accessible without authentication. In line with #1, Drop also supports a huge variety of authentication mechanisms, from username/password to SSO.
 3. Drop is user-friendly. The interface is designed to be clean and simple to use, with advanced features available to users who want them.
 
+## Roadmap & Architecture
+
+See our [Roadmap](./ROADMAP.md) for our long-term architectural blueprint and vision for building an open-source, federated alternative to Steam.
+
 ## Deployment
 
 See our documentation on how to [deploy Drop](https://droposs.org/docs/admin/quickstart) for more information.

@@ -1,17 +1,15 @@
 import { pluginManager } from "./manager";
-import { dropGseServerPlugin } from "./builtin/drop-gse";
 import { helloWorldPlugin } from "./builtin/hello-world";
 
 export * from "./types";
 export * from "./errors";
 export * from "./storage";
 export * from "./manager";
-export { dropGseServerPlugin } from "./builtin/drop-gse";
+export { helloWorldPlugin } from "./builtin/hello-world";
 
 export async function initPlugins(): Promise<void> {
   // Register default built-in plugins
   await pluginManager.registerPlugin(helloWorldPlugin);
-  await pluginManager.registerPlugin(dropGseServerPlugin);
   // Discover and load external plugins from data directory
   await pluginManager.discoverAndLoadExternalPlugins();
 }
