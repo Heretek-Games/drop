@@ -39,6 +39,20 @@ const EXCLUDED_DIR_PATTERNS: RegExp[] = [
 ];
 
 /**
+ * Whether a file path is a known non-game executable (installer, uninstaller,
+ * redistributable, crash handler, ...). Shared with the launch-option fallback
+ * so an uninstaller cannot be auto-picked when the scorer finds no target.
+ */
+export function isExcludedExecutablePath(filepath: string): boolean {
+  const normPath = filepath.replace(/\\/g, "/");
+  const basename = path.basename(normPath);
+  return (
+    EXCLUDED_PATTERNS.some((pattern) => pattern.test(basename)) ||
+    EXCLUDED_DIR_PATTERNS.some((pattern) => pattern.test(normPath))
+  );
+}
+
+/**
  * Normalizes text for string matching comparison
  */
 function normalizeString(str: string): string {

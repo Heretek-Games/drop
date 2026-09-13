@@ -126,6 +126,15 @@ export class MetadataHandler {
     type: GameType,
     parentTask?: TaskRunContext,
   ) {
+    // Manual games get a random metadata id, so the metadata-key duplicate
+    // guard in `createGame` never matches. Guard on the library location
+    // instead so a manual import cannot duplicate an existing game.
+    const existing = await prisma.game.findFirst({
+      where: { libraryId, libraryPath },
+      select: { id: true },
+    });
+    if (existing) return undefined;
+
     return await this.createGame(
       {
         id: "",
@@ -280,48 +289,57 @@ export class MetadataHandler {
 
           progress(95);
 
-          await prisma.game.create({
-            data: {
-              id: gameId,
-              metadataSource: provider.source(),
-              metadataId: metadata.id,
+          try {
+            await prisma.game.create({
+              data: {
+                id: gameId,
+                metadataSource: provider.source(),
+                metadataId: metadata.id,
 
-              mName: metadata.name,
-              mShortDescription: metadata.shortDescription,
-              mDescription: metadata.description,
-              mReleased: metadata.released,
+                mName: metadata.name,
+                mShortDescription: metadata.shortDescription,
+                mDescription: metadata.description,
+                mReleased: metadata.released,
 
-              mIconObjectId: metadata.icon,
-              mBannerObjectId: metadata.bannerId,
-              mCoverObjectId: metadata.coverId,
-              mImageLibraryObjectIds: metadata.images,
+                mIconObjectId: metadata.icon,
+                mBannerObjectId: metadata.bannerId,
+                mCoverObjectId: metadata.coverId,
+                mImageLibraryObjectIds: metadata.images,
 
-              publishers: {
-                connect: metadata.publishers,
+                publishers: {
+                  connect: metadata.publishers,
+                },
+                developers: {
+                  connect: metadata.developers,
+                },
+
+                ratings: {
+                  connectOrCreate: metadataHandler.parseRatings(
+                    metadata.reviews,
+                  ),
+                },
+                ageRatings: {
+                  connectOrCreate: metadataHandler.parseAgeRatings(
+                    metadata.ageRatings,
+                    gameId,
+                  ),
+                },
+                tags: {
+                  connect: await metadataHandler.parseTags(metadata.tags),
+                },
+
+                libraryId,
+                libraryPath,
+
+                type,
               },
-              developers: {
-                connect: metadata.developers,
-              },
-
-              ratings: {
-                connectOrCreate: metadataHandler.parseRatings(metadata.reviews),
-              },
-              ageRatings: {
-                connectOrCreate: metadataHandler.parseAgeRatings(
-                  metadata.ageRatings,
-                  gameId,
-                ),
-              },
-              tags: {
-                connect: await metadataHandler.parseTags(metadata.tags),
-              },
-
-              libraryId,
-              libraryPath,
-
-              type,
-            },
-          });
+            });
+          } catch (e) {
+            // The objects were already uploaded; remove them so a failed
+            // insert does not leak orphaned objects.
+            dumpObjects();
+            throw e;
+          }
 
           logger.info(`Finished game import.`);
           progress(100);
