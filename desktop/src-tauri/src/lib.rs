@@ -145,6 +145,7 @@ async fn setup(handle: AppHandle) -> AppState {
 
     let db_handle = borrow_db_checked();
     let mut missing_games = Vec::new();
+    let mut installed_dirs = Vec::new();
     let statuses = db_handle.applications.game_statuses.clone();
     drop(db_handle);
 
@@ -155,9 +156,18 @@ async fn setup(handle: AppHandle) -> AppState {
                 let install_dir_path = Path::new(&install_dir);
                 if !install_dir_path.exists() {
                     missing_games.push(game_id);
+                } else {
+                    installed_dirs.push(install_dir_path.to_path_buf());
                 }
             }
         }
+    }
+
+    // Crash recovery: restore Steam API binaries from any interrupted GSE run.
+    let recovered =
+        ::process::gse_interceptor::recover_interrupted_sessions(&installed_dirs);
+    if recovered > 0 {
+        info!("GSE crash recovery restored {recovered} game(s)");
     }
 
     info!("detected games missing: {missing_games:?}");

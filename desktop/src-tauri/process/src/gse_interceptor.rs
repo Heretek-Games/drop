@@ -1,4 +1,7 @@
-use std::{path::Path, process::Command};
+use std::{
+    path::{Path, PathBuf},
+    process::Command,
+};
 
 use gse_engine::anticheat;
 use gse_engine::dll::{MANIFEST_FILE, TARGET_BINARIES, backup_originals, restore_originals};
@@ -9,8 +12,50 @@ use crate::{error::ProcessError, interceptor::LaunchInterceptor};
 /// Default LAN discovery target when no mesh peers are configured.
 const DEFAULT_BROADCAST: &str = "127.0.0.1:47584\n";
 
+/// Env var that force-enables GSE for a launch even without a room config.
+const FORCE_ENV: &str = "DROP_GSE_ENABLE";
+
 fn gse_error(context: &str, err: gse_engine::EngineError) -> ProcessError {
     ProcessError::FailedLaunch(format!("{context}: {err}"))
+}
+
+/// Whether GSE should run for this launch.
+///
+/// GSE is opt-in per launch: it activates only when a room config was written
+/// (`steam_settings/custom_broadcasts.txt`, produced by `gse_write_room_config`)
+/// or when `DROP_GSE_ENABLE` is set. This keeps anti-cheat gating and install
+/// mutation away from ordinary launches.
+fn gse_requested(install_dir: &Path) -> bool {
+    std::env::var_os(FORCE_ENV).is_some()
+        || install_dir
+            .join("steam_settings/custom_broadcasts.txt")
+            .is_file()
+}
+
+/// Restore Steam API binaries left backed up by interrupted sessions (crash
+/// recovery). Returns the number of game directories recovered.
+pub fn recover_interrupted_sessions(install_dirs: &[PathBuf]) -> usize {
+    let targets: Vec<&str> = TARGET_BINARIES.to_vec();
+    let mut recovered = 0;
+    for dir in install_dirs {
+        if !dir.join(MANIFEST_FILE).is_file() {
+            continue;
+        }
+        match restore_originals(dir, &targets) {
+            Ok(()) => {
+                recovered += 1;
+                info!(
+                    "GSE crash recovery restored originals in {}",
+                    dir.display()
+                );
+            }
+            Err(err) => warn!(
+                "GSE crash recovery failed for {}: {err}",
+                dir.display()
+            ),
+        }
+    }
+    recovered
 }
 
 /// Interceptor that manages the Goldberg-family Steam emulator lifecycle around
@@ -42,6 +87,15 @@ impl LaunchInterceptor for GseLaunchInterceptor {
         command: &mut Command,
     ) -> Result<(), ProcessError> {
         info!("GSE interceptor pre_launch for game {}", game_id);
+
+        // 0. Opt-in gate: ordinary launches are completely untouched.
+        if !gse_requested(install_dir) {
+            info!(
+                "GSE not requested for {}; skipping emulator setup",
+                game_id
+            );
+            return Ok(());
+        }
 
         // 1. Anti-cheat gate (fail closed).
         match anticheat::detect(install_dir) {
@@ -131,9 +185,32 @@ mod tests {
         path
     }
 
+    fn mark_room_requested(dir: &Path) {
+        let settings = dir.join("steam_settings");
+        std::fs::create_dir_all(&settings).unwrap();
+        std::fs::write(settings.join("custom_broadcasts.txt"), "10.0.0.2:47584\n").unwrap();
+    }
+
+    #[test]
+    fn ordinary_launch_is_untouched_without_a_room() {
+        let dir = create_test_dir("not-opted-in");
+        std::fs::write(dir.join("steam_api64.dll"), b"original-steam-api").unwrap();
+
+        let interceptor = GseLaunchInterceptor::new();
+        let mut cmd = Command::new("echo");
+        assert!(interceptor.pre_launch("game-test", &dir, &mut cmd).is_ok());
+
+        // No backup, no settings written.
+        assert!(!dir.join("steam_api64.dll.orig").exists());
+        assert!(!dir.join("steam_settings/configs.main.ini").exists());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn anticheat_detection_blocks_launch() {
         let dir = create_test_dir("anticheat");
+        mark_room_requested(&dir);
         std::fs::write(dir.join("EasyAntiCheat.exe"), b"test").unwrap();
 
         let interceptor = GseLaunchInterceptor::new();
@@ -152,6 +229,7 @@ mod tests {
         let dir = create_test_dir("lifecycle");
         let dll_path = dir.join("steam_api64.dll");
         std::fs::write(&dll_path, b"original-steam-api").unwrap();
+        mark_room_requested(&dir);
 
         let interceptor = GseLaunchInterceptor::new();
         let mut cmd = Command::new("echo");

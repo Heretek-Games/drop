@@ -110,10 +110,11 @@ to deploy.
 
 Owner: TBD · Depends on: M1
 
-- [ ] **A7** Engine-backed interceptor that runs **only when a room is active or
-      the user opted in** — fixes the current global anti-cheat launch block
-      (`process_manager.rs` aborts any launch with EAC/BattleEye markers)
-- [ ] **A8** Crash-recovery startup sweep (stale `.orig` + crash marker)
+- [x] **A7** Engine-backed interceptor that runs **only when a room is active or
+      `DROP_GSE_ENABLE` is set** (opt-in per launch); ordinary launches no longer
+      hit anti-cheat gating or install mutation
+- [x] **A8** Crash-recovery startup sweep: restore stale `.orig` backups for all
+      installed dirs at client startup (`recover_interrupted_sessions`)
 - [ ] **A9** AppID pinning + Proton prefix resolution via installed-version records
 - [ ] **A10** Server compatibility DB + user consent UI
 
@@ -190,4 +191,8 @@ M0 complete. **M1 engine (A1–A6) landed** as the `desktop/src-tauri/gse-engine
 crate (18 unit tests pass) and the `process` interceptor now delegates to it.
 Remaining in M1: P5/P7/P9 packaging, and wiring a real emulator payload.
 
-Next: M2 (opt-in interceptor + consent/compat + AppID/Proton).
+M2 A7/A8 landed: the interceptor is opt-in (room config or `DROP_GSE_ENABLE`)
+and the client restores interrupted sessions on startup. Remaining: A9/A10 and
+the in-app consent toggle.
+
+Next: A9/A10, then M3 (Part B mesh backend).
