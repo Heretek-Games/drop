@@ -2,11 +2,75 @@
 
 use std::path::Path;
 
-use crate::EmulatorFlavor;
 use crate::error::EngineError;
+use crate::EmulatorFlavor;
 
 /// Directory name for emulator settings inside the game folder.
 pub const SETTINGS_DIR: &str = "steam_settings";
+
+/// Files the interceptor generates and cleanup owns.
+pub const MANAGED_FILES: [&str; 4] = [
+    "configs.main.ini",
+    "steam_appid.txt",
+    "steam_interfaces.txt",
+    "custom_broadcasts.txt",
+];
+
+/// Files that may pre-date Drop (a user's own Goldberg/GSE config). These are
+/// copied aside before being overwritten and restored on cleanup.
+pub const BACKED_UP_FILES: [&str; 2] = ["configs.main.ini", "steam_interfaces.txt"];
+
+/// Suffix for a preserved pre-existing settings file.
+pub const BACKUP_SUFFIX: &str = ".drop-gse-backup";
+
+/// Preserve any pre-existing user emulator config before Drop overwrites it.
+/// Idempotent: an existing backup is never replaced.
+pub fn backup_existing(game_dir: &Path) -> Result<(), EngineError> {
+    let dir = game_dir.join(SETTINGS_DIR);
+    for name in BACKED_UP_FILES {
+        let path = dir.join(name);
+        let backup = dir.join(format!("{name}{BACKUP_SUFFIX}"));
+        if path.is_file() && !backup.exists() {
+            std::fs::copy(&path, &backup)?;
+        }
+    }
+    Ok(())
+}
+
+/// Undo [`SteamSettings::write_to`]: restore backed-up user files and remove
+/// generated ones that had no backup.
+pub fn restore_backups(game_dir: &Path) -> Result<(), EngineError> {
+    let dir = game_dir.join(SETTINGS_DIR);
+    if !dir.is_dir() {
+        return Ok(());
+    }
+
+    for name in BACKED_UP_FILES {
+        let path = dir.join(name);
+        let backup = dir.join(format!("{name}{BACKUP_SUFFIX}"));
+        if backup.is_file() {
+            std::fs::copy(&backup, &path)?;
+            std::fs::remove_file(&backup)?;
+        } else if path.exists() {
+            std::fs::remove_file(&path)?;
+        }
+    }
+
+    for name in MANAGED_FILES {
+        if BACKED_UP_FILES.contains(&name) {
+            continue;
+        }
+        let path = dir.join(name);
+        if path.exists() {
+            std::fs::remove_file(&path)?;
+        }
+    }
+
+    if dir.is_dir() {
+        let _ = std::fs::remove_dir(&dir);
+    }
+    Ok(())
+}
 
 /// Runtime configuration written into `<game_dir>/steam_settings/`.
 #[derive(Debug, Clone)]
@@ -64,14 +128,14 @@ impl SteamSettings {
     }
 
     /// Write all settings files into `<game_dir>/steam_settings/`.
-    pub fn write_to(
-        &self,
-        game_dir: &Path,
-        flavor: EmulatorFlavor,
-    ) -> Result<(), EngineError> {
+    pub fn write_to(&self, game_dir: &Path, flavor: EmulatorFlavor) -> Result<(), EngineError> {
         let dir = game_dir.join(SETTINGS_DIR);
         std::fs::create_dir_all(&dir)?;
-        std::fs::write(dir.join("configs.main.ini"), self.render_configs_main_ini(flavor))?;
+        backup_existing(game_dir)?;
+        std::fs::write(
+            dir.join("configs.main.ini"),
+            self.render_configs_main_ini(flavor),
+        )?;
         std::fs::write(dir.join("steam_appid.txt"), self.render_steam_appid())?;
         std::fs::write(
             dir.join("steam_interfaces.txt"),
@@ -133,11 +197,9 @@ mod tests {
             std::fs::read_to_string(dir.join("steam_interfaces.txt")).unwrap(),
             "SteamUser021"
         );
-        assert!(
-            std::fs::read_to_string(dir.join("configs.main.ini"))
-                .unwrap()
-                .contains("listener_port=47584")
-        );
+        assert!(std::fs::read_to_string(dir.join("configs.main.ini"))
+            .unwrap()
+            .contains("listener_port=47584"));
     }
 
     #[test]
@@ -147,10 +209,40 @@ mod tests {
             custom_broadcasts: vec![],
             interfaces: vec![],
         };
-        assert!(
-            settings
-                .render_configs_main_ini(EmulatorFlavor::GseFork)
-                .contains("listen_port=47584")
+        assert!(settings
+            .render_configs_main_ini(EmulatorFlavor::GseFork)
+            .contains("listen_port=47584"));
+    }
+
+    #[test]
+    fn preserves_and_restores_pre_existing_user_config() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join(SETTINGS_DIR);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("configs.main.ini"), "user-config").unwrap();
+
+        let settings = SteamSettings {
+            app_id: 1,
+            custom_broadcasts: vec!["10.0.0.2".into()],
+            interfaces: vec![],
+        };
+        settings
+            .write_to(tmp.path(), EmulatorFlavor::GbeFork)
+            .unwrap();
+
+        assert!(!std::fs::read_to_string(dir.join("configs.main.ini"))
+            .unwrap()
+            .contains("user-config"));
+        assert!(dir.join("configs.main.ini.drop-gse-backup").exists());
+
+        restore_backups(tmp.path()).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(dir.join("configs.main.ini")).unwrap(),
+            "user-config"
         );
+        assert!(!dir.join("configs.main.ini.drop-gse-backup").exists());
+        // Managed files without a backup are removed on cleanup.
+        assert!(!dir.join("custom_broadcasts.txt").exists());
+        assert!(!dir.join("steam_appid.txt").exists());
     }
 }

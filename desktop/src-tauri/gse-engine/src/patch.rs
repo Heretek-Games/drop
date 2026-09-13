@@ -3,7 +3,7 @@
 use std::path::Path;
 
 use crate::error::EngineError;
-use crate::{PatchPlan, anticheat, config::SteamSettings, config::SETTINGS_DIR, dll, interfaces};
+use crate::{PatchPlan, anticheat, config::SteamSettings, dll, interfaces};
 
 /// Result of a successful patch.
 #[derive(Debug, Default, PartialEq, Eq)]
@@ -86,22 +86,7 @@ pub fn apply_plan(
 pub fn restore(game_dir: &Path, targets: &[String]) -> Result<(), EngineError> {
     let refs: Vec<&str> = targets.iter().map(String::as_str).collect();
     dll::restore_originals(game_dir, &refs)?;
-
-    let settings = game_dir.join(SETTINGS_DIR);
-    for file in [
-        "custom_broadcasts.txt",
-        "configs.main.ini",
-        "steam_appid.txt",
-        "steam_interfaces.txt",
-    ] {
-        let path = settings.join(file);
-        if path.exists() {
-            std::fs::remove_file(path)?;
-        }
-    }
-    if settings.is_dir() {
-        let _ = std::fs::remove_dir(&settings);
-    }
+    crate::config::restore_backups(game_dir)?;
     Ok(())
 }
 
