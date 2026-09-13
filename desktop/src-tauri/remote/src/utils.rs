@@ -44,7 +44,6 @@ impl Middleware for AutoOfflineMiddleware {
         extensions: &mut Extensions,
         next: Next<'_>,
     ) -> Result<Response> {
-        let url = req.url().clone();
         let res = next.run(req, extensions).await;
         match res {
             Ok(res) => {
@@ -61,7 +60,7 @@ impl Middleware for AutoOfflineMiddleware {
                                     .expect("failed to emit state update");
                             }
                         } else {
-                            warn!("failed to lock app state - {}", url.as_str());
+                            warn!("failed to lock app state");
                         }
                     };
                 });
@@ -106,21 +105,13 @@ fn fetch_certificates() -> Vec<Certificate> {
                         match File::open(c.path()) {
                             Ok(f) => f,
                             Err(e) => {
-                                warn!(
-                                    "Failed to open file at {} with error {}",
-                                    c.path().display(),
-                                    e
-                                );
+                                warn!("Failed to open certificate file with error {e}");
                                 continue;
                             }
                         }
                         .read_to_end(&mut buf)
                         .unwrap_or_else(|e| {
-                            panic!(
-                                "Failed to read to end of certificate file {} with error {}",
-                                c.path().display(),
-                                e
-                            )
+                            panic!("Failed to read to end of certificate file with error {e}")
                         });
 
                         match Certificate::from_pem_bundle(&buf) {
@@ -130,11 +121,9 @@ fn fetch_certificates() -> Vec<Certificate> {
                                 }
                                 debug!("loaded a certificate bundle");
                             }
-                            Err(e) => warn!(
-                                "Invalid certificate file {} with error {}",
-                                c.path().display(),
-                                e
-                            ),
+                            Err(e) => {
+                                warn!("Invalid certificate file with error {e}");
+                            }
                         }
                     }
                     Err(_) => todo!(),

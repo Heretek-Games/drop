@@ -68,6 +68,10 @@ export class ZtnetBackend implements MeshBackend {
       body: init?.body,
     });
     if (!response.ok) {
+      // Already-deleted networks/members are a successful teardown/revoke.
+      if (init?.method === "DELETE" && response.status === 404) {
+        return response;
+      }
       throw new Error(
         `ZTNET request failed (${response.status}) ${url}: ${await response.text()}`,
       );

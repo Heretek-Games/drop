@@ -1,9 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { PluginManager } from "../manager";
 import { DropGseServerPlugin } from "../builtin/drop-gse";
 import {
@@ -1037,4 +1039,214 @@ test("PluginManager installs and removes external bundles", async () => {
   // Builtin plugins cannot be removed.
   await manager.registerPlugin(new HelloWorldPlugin());
   await assert.rejects(() => manager.removeBundle("hello-world"), /builtin/);
+});
+
+test("PluginManager.canSubscribe enforces registered subscription authorizers", async () => {
+  const manager = createTestManager();
+  const plugin: ServerPlugin = {
+    metadata: {
+      id: "authz-demo",
+      name: "Authz",
+      version: "1.0.0",
+      apiVersion: PLUGIN_API_VERSION,
+      capabilities: ["websocket"],
+    },
+    init(ctx: PluginContext) {
+      ctx.registerSubscriptionAuthorizer(
+        (channel) => channel.startsWith("room:"),
+        (_channel, context) => context.userId === "member",
+      );
+    },
+  };
+  await manager.registerPlugin(plugin);
+
+  assert.equal(
+    await manager.canSubscribe("room:1", {
+      userId: "member",
+      userAcls: undefined,
+    }),
+    true,
+  );
+  assert.equal(
+    await manager.canSubscribe("room:1", {
+      userId: "stranger",
+      userAcls: undefined,
+    }),
+    false,
+  );
+  // Channels with no matching authorizer remain open.
+  assert.equal(
+    await manager.canSubscribe("unrelated", {
+      userId: undefined,
+      userAcls: undefined,
+    }),
+    true,
+  );
+});
+
+test("a configured but empty registry denies external plugins", async () => {
+  const dataDir = tmpDataDir();
+  await fs.mkdir(dataDir, { recursive: true });
+  const registryPath = path.join(dataDir, "registry.json");
+  await fs.writeFile(registryPath, JSON.stringify({ plugins: null }));
+
+  const manager = new PluginManager({
+    dataDir,
+    registryPath,
+    storageFactory: () => new MemoryStorage(),
+    authResolver: async () => ({}),
+  });
+
+  const entry =
+    "export default { metadata: { id: 'denied-demo', name: 'Denied'," +
+    " version: '1.0.0', apiVersion: 1 }, init() {} };\n";
+  const entryBase64 = Buffer.from(entry).toString("base64");
+  await assert.rejects(
+    () =>
+      manager.installBundle(
+        {
+          id: "denied-demo",
+          name: "Denied",
+          version: "1.0.0",
+          apiVersion: PLUGIN_API_VERSION,
+          entry: "index.js",
+        },
+        entryBase64,
+      ),
+    /not in the registry/,
+  );
+});
+
+test("multi-file bundles must declare files checksums", async () => {
+  const dataDir = tmpDataDir();
+  const pluginDir = path.join(dataDir, "plugins", "multi-demo");
+  await fs.mkdir(pluginDir, { recursive: true });
+  const entry =
+    "import { value } from './helper.mjs';\n" +
+    "export default { metadata: { id: 'multi-demo', name: 'Multi'," +
+    " version: '1.0.0', apiVersion: 1 }, init() { void value; } };\n";
+  await fs.writeFile(path.join(pluginDir, "index.mjs"), entry);
+  await fs.writeFile(
+    path.join(pluginDir, "helper.mjs"),
+    "export const value = 1;\n",
+  );
+
+  const manifest = {
+    id: "multi-demo",
+    name: "Multi",
+    version: "1.0.0",
+    apiVersion: PLUGIN_API_VERSION,
+    entry: "index.mjs",
+  };
+  await fs.writeFile(
+    path.join(pluginDir, "drop-plugin.json"),
+    JSON.stringify(manifest),
+  );
+
+  const manager = new PluginManager({
+    dataDir,
+    storageFactory: () => new MemoryStorage(),
+    authResolver: async () => ({}),
+  });
+  await manager.discoverAndLoadExternalPlugins();
+  assert.equal(
+    manager.listPlugins().find((p) => p.id === "multi-demo"),
+    undefined,
+    "an unverified multi-file bundle must not load",
+  );
+
+  const files: Record<string, string> = {};
+  for (const rel of ["index.mjs", "helper.mjs"]) {
+    files[rel] = createHash("sha256")
+      .update(await fs.readFile(path.join(pluginDir, rel)))
+      .digest("hex");
+  }
+  await fs.writeFile(
+    path.join(pluginDir, "drop-plugin.json"),
+    JSON.stringify({ ...manifest, files }),
+  );
+  const manager2 = new PluginManager({
+    dataDir,
+    storageFactory: () => new MemoryStorage(),
+    authResolver: async () => ({}),
+  });
+  await manager2.discoverAndLoadExternalPlugins();
+  assert.equal(
+    manager2.listPlugins().find((p) => p.id === "multi-demo")?.status,
+    "active",
+  );
+});
+
+test("sign-plugin output loads as a verified signed bundle", async () => {
+  const dataDir = tmpDataDir();
+  const pluginDir = path.join(dataDir, "plugins", "signed-demo");
+  await fs.mkdir(pluginDir, { recursive: true });
+  const entry =
+    "import { value } from './helper.mjs';\n" +
+    "export default { metadata: { id: 'signed-demo', name: 'Signed'," +
+    " version: '1.0.0', apiVersion: 1 }, init() { void value; } };\n";
+  await fs.writeFile(path.join(pluginDir, "index.mjs"), entry);
+  await fs.writeFile(
+    path.join(pluginDir, "helper.mjs"),
+    "export const value = 1;\n",
+  );
+  await fs.writeFile(
+    path.join(pluginDir, "drop-plugin.json"),
+    JSON.stringify({
+      id: "signed-demo",
+      name: "Signed",
+      version: "1.0.0",
+      apiVersion: PLUGIN_API_VERSION,
+      entry: "index.mjs",
+    }),
+  );
+
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  const signer = path.resolve(here, "../../../../dev-tools/sign-plugin.mjs");
+  const signingKey = "test-signing-key";
+  const signed = spawnSync(process.execPath, [signer, "plugins/signed-demo"], {
+    cwd: dataDir,
+    env: { ...process.env, DROP_PLUGIN_SIGNING_KEY: signingKey },
+    encoding: "utf8",
+  });
+  assert.equal(signed.status, 0, signed.stderr);
+
+  const previousKey = process.env.DROP_PLUGIN_SIGNING_KEY;
+  process.env.DROP_PLUGIN_SIGNING_KEY = signingKey;
+  try {
+    const manager = new PluginManager({
+      dataDir,
+      storageFactory: () => new MemoryStorage(),
+      authResolver: async () => ({}),
+    });
+    await manager.discoverAndLoadExternalPlugins();
+    assert.equal(
+      manager.listPlugins().find((p) => p.id === "signed-demo")?.status,
+      "active",
+      "a correctly signed bundle must load",
+    );
+
+    // Tampering an imported file must invalidate the aggregate signature.
+    await fs.writeFile(
+      path.join(pluginDir, "helper.mjs"),
+      "export const value = 2;\n",
+    );
+    const tampered = new PluginManager({
+      dataDir,
+      storageFactory: () => new MemoryStorage(),
+      authResolver: async () => ({}),
+    });
+    await tampered.discoverAndLoadExternalPlugins();
+    assert.equal(
+      tampered.listPlugins().find((p) => p.id === "signed-demo"),
+      undefined,
+      "a tampered imported file must not load",
+    );
+  } finally {
+    if (previousKey === undefined) {
+      delete process.env.DROP_PLUGIN_SIGNING_KEY;
+    } else {
+      process.env.DROP_PLUGIN_SIGNING_KEY = previousKey;
+    }
+  }
 });

@@ -45,6 +45,13 @@ export interface PluginManifest extends PluginMetadata {
   /** SHA-256 of the entry file, hex. Verified before the bundle is imported. */
   checksum?: string | undefined;
   /**
+   * SHA-256 of every file the bundle may import, keyed by path relative to the
+   * bundle directory. Required for multi-file bundles so relative imports are
+   * verified too. When present with `DROP_PLUGIN_SIGNING_KEY`, `signature`
+   * covers the aggregate bundle digest rather than only the entry file.
+   */
+  files?: Record<string, string>;
+  /**
    * HMAC-SHA256 (hex) of `checksum`, keyed by `DROP_PLUGIN_SIGNING_KEY`.
    * Set `DROP_PLUGIN_REQUIRE_SIGNATURE=true` to reject unsigned bundles.
    */
@@ -85,6 +92,22 @@ export interface WebSocketContext {
   send: (data: unknown) => void;
 }
 
+/** Caller identity available when authorizing a channel subscription. */
+export interface SubscriptionContext {
+  userId: string | undefined;
+  userAcls: string[] | undefined;
+}
+
+/**
+ * Authorize a client subscription to a channel. Returning `false` denies the
+ * subscription; a channel with no matching authorizer is allowed (subject to
+ * the gateway's authentication requirement).
+ */
+export type SubscriptionAuthorizer = (
+  channel: string,
+  context: SubscriptionContext,
+) => Promise<boolean> | boolean;
+
 export type WebSocketHandler = (
   message: unknown,
   context: WebSocketContext,
@@ -106,6 +129,15 @@ export interface PluginContext {
    * capability. Channel names are global; a channel may only be claimed once.
    */
   registerWebSocket(channel: string, handler: WebSocketHandler): void;
+  /**
+   * Gate client subscriptions to channels matching `matches`. Requires the
+   * `websocket` capability. Channels with no matching authorizer stay open to
+   * authenticated peers.
+   */
+  registerSubscriptionAuthorizer(
+    matches: (channel: string) => boolean,
+    authorize: SubscriptionAuthorizer,
+  ): void;
   /** Network egress. Requires the `network` capability. */
   fetch(input: string | URL, init?: RequestInit): Promise<Response>;
 }

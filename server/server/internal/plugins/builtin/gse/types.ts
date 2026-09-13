@@ -65,6 +65,8 @@ export interface MeshCredential {
 export interface IssuedCredential {
   secret: string;
   address?: string | undefined;
+  /** Backend-imposed credential lifetime (ms epoch), when shorter than the room. */
+  expiresAt?: number;
 }
 
 /**
@@ -204,6 +206,20 @@ function redactMesh(mesh: PublicMeshInfo): PublicMeshInfo {
     };
   }
   return { backend: "tailscale", aclTag: "", expiresAt: mesh.expiresAt };
+}
+
+/**
+ * Member-visible room view. Peer mesh node ids are revocation handles, so they
+ * are only exposed to the host; other members see addresses but not node ids.
+ */
+export function toMemberView(room: Room, isHost: boolean): Room {
+  if (isHost) return room;
+  return {
+    ...room,
+    members: room.members.map(
+      ({ meshNodeId: _meshNodeId, ...member }) => member,
+    ),
+  };
 }
 
 export function toDiscoverable(room: Room): DiscoverableRoom {

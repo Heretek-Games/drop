@@ -179,6 +179,11 @@ pub fn find_tool_binary(tool_name: &str) -> Option<PathBuf> {
     None
 }
 
+/// Whether a pipeline setup is currently running for `game_id`.
+pub fn pipeline_is_running(game_id: &str) -> bool {
+    RUNNING_PIPELINES.lock().contains_key(game_id)
+}
+
 pub fn cancel_pipeline(game_id: &str) -> bool {
     let lock = RUNNING_PIPELINES.lock();
     if let Some(flag) = lock.get(game_id) {
@@ -295,11 +300,13 @@ pub fn materialize_setup_script(
         return Err("refusing to write an unsafe setup script name".to_string());
     }
 
-    let path = install_dir.join(&name);
-    fs::write(&path, script).map_err(|e| format!("failed to write {name}: {e}"))?;
+    gse_engine::path_guard::write_file(install_dir, &name, script.as_bytes())
+        .map_err(|e| format!("failed to write {name}: {e}"))?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
+        let path = gse_engine::path_guard::safe_join(install_dir, &name)
+            .map_err(|e| format!("failed to resolve {name}: {e}"))?;
         if let Err(e) = fs::set_permissions(&path, fs::Permissions::from_mode(0o755)) {
             warn!("failed to mark {name} executable: {e}");
         }
@@ -319,9 +326,13 @@ pub async fn run_prepared_pipeline(
     } = prepared;
 
     let cancel_flag = Arc::new(AtomicBool::new(false));
-    RUNNING_PIPELINES
-        .lock()
-        .insert(game_id.clone(), cancel_flag.clone());
+    {
+        let mut running = RUNNING_PIPELINES.lock();
+        if running.contains_key(&game_id) {
+            return Err(format!("A pipeline is already running for game {game_id}"));
+        }
+        running.insert(game_id.clone(), cancel_flag.clone());
+    }
 
     let result = execute_pipeline(
         &app_handle,
@@ -411,146 +422,153 @@ async fn execute_pipeline(
         game_id, total_steps
     );
 
-    for (step_index, step) in recipe.steps.iter().enumerate() {
-        if cancel_flag.load(Ordering::SeqCst) {
-            return Err("Pipeline setup cancelled by user".to_string());
-        }
+    let run_result: Result<(), String> = 'steps: {
+        for (step_index, step) in recipe.steps.iter().enumerate() {
+            if cancel_flag.load(Ordering::SeqCst) {
+                break 'steps Err("Pipeline setup cancelled by user".to_string());
+            }
 
-        info!(
-            "Step {}/{}: {} ({:?})",
-            step_index + 1,
-            total_steps,
-            step.description,
-            step.action
-        );
+            info!(
+                "Step {}/{}: {} ({:?})",
+                step_index + 1,
+                total_steps,
+                step.description,
+                step.action
+            );
 
-        emit_progress(
-            app_handle,
-            game_id,
-            step_index,
-            total_steps,
-            &step.id,
-            &step.action,
-            &step.description,
-            0,
-            None,
-            Some(format!("Starting: {}", step.description)),
-        );
+            emit_progress(
+                app_handle,
+                game_id,
+                step_index,
+                total_steps,
+                &step.id,
+                &step.action,
+                &step.description,
+                0,
+                None,
+                Some(format!("Starting: {}", step.description)),
+            );
 
-        let step_res = match step.action {
-            PipelineStepAction::ExtractRar => {
-                execute_extract_rar(
-                    app_handle,
-                    game_id,
-                    step_index,
-                    total_steps,
-                    step,
-                    install_dir,
-                    cancel_flag.clone(),
-                )
-                .await
-            }
-            PipelineStepAction::ExtractIso => {
-                execute_extract_iso(
-                    app_handle,
-                    game_id,
-                    step_index,
-                    total_steps,
-                    step,
-                    install_dir,
-                    cancel_flag.clone(),
-                )
-                .await
-            }
-            PipelineStepAction::ExtractArchive => {
-                execute_extract_archive(
-                    app_handle,
-                    game_id,
-                    step_index,
-                    total_steps,
-                    step,
-                    install_dir,
-                    cancel_flag.clone(),
-                )
-                .await
-            }
-            PipelineStepAction::Innoextract => {
-                execute_innoextract(
-                    app_handle,
-                    game_id,
-                    step_index,
-                    total_steps,
-                    step,
-                    install_dir,
-                    cancel_flag.clone(),
-                )
-                .await
-            }
-            PipelineStepAction::ApplyCrack => {
-                execute_apply_crack(
-                    app_handle,
-                    game_id,
-                    step_index,
-                    total_steps,
-                    step,
-                    install_dir,
-                )
-                .await
-            }
-            PipelineStepAction::Cleanup => {
-                // Post-setup cleanup is typically deferred until user confirms,
-                // but any explicit non-optional intermediate cleanup step can run here
-                if !step.optional {
-                    execute_cleanup_step(step, install_dir).await
-                } else {
+            let step_res = match step.action {
+                PipelineStepAction::ExtractRar => {
+                    execute_extract_rar(
+                        app_handle,
+                        game_id,
+                        step_index,
+                        total_steps,
+                        step,
+                        install_dir,
+                        cancel_flag.clone(),
+                    )
+                    .await
+                }
+                PipelineStepAction::ExtractIso => {
+                    execute_extract_iso(
+                        app_handle,
+                        game_id,
+                        step_index,
+                        total_steps,
+                        step,
+                        install_dir,
+                        cancel_flag.clone(),
+                    )
+                    .await
+                }
+                PipelineStepAction::ExtractArchive => {
+                    execute_extract_archive(
+                        app_handle,
+                        game_id,
+                        step_index,
+                        total_steps,
+                        step,
+                        install_dir,
+                        cancel_flag.clone(),
+                    )
+                    .await
+                }
+                PipelineStepAction::Innoextract => {
+                    execute_innoextract(
+                        app_handle,
+                        game_id,
+                        step_index,
+                        total_steps,
+                        step,
+                        install_dir,
+                        cancel_flag.clone(),
+                    )
+                    .await
+                }
+                PipelineStepAction::ApplyCrack => {
+                    execute_apply_crack(
+                        app_handle,
+                        game_id,
+                        step_index,
+                        total_steps,
+                        step,
+                        install_dir,
+                    )
+                    .await
+                }
+                PipelineStepAction::Cleanup => {
+                    // Post-setup cleanup is typically deferred until user confirms,
+                    // but any explicit non-optional intermediate cleanup step can run here
+                    if !step.optional {
+                        execute_cleanup_step(step, install_dir).await
+                    } else {
+                        Ok(())
+                    }
+                }
+                PipelineStepAction::RunCommand => {
+                    execute_run_command(
+                        app_handle,
+                        game_id,
+                        step_index,
+                        total_steps,
+                        step,
+                        install_dir,
+                        cancel_flag.clone(),
+                    )
+                    .await
+                }
+                PipelineStepAction::Unknown => {
+                    warn!("Skipping unknown step action: {:?}", step.action);
                     Ok(())
                 }
-            }
-            PipelineStepAction::RunCommand => {
-                execute_run_command(
-                    app_handle,
-                    game_id,
-                    step_index,
-                    total_steps,
-                    step,
-                    install_dir,
-                    cancel_flag.clone(),
-                )
-                .await
-            }
-            PipelineStepAction::Unknown => {
-                warn!("Skipping unknown step action: {:?}", step.action);
-                Ok(())
-            }
-        };
+            };
 
-        if let Err(err) = step_res {
-            if step.optional {
-                warn!("Optional step {} failed, continuing: {}", step.id, err);
-            } else {
-                return Err(format!("Step '{}' failed: {}", step.id, err));
+            if let Err(err) = step_res {
+                if step.optional {
+                    warn!("Optional step {} failed, continuing: {}", step.id, err);
+                } else {
+                    break 'steps Err(format!("Step '{}' failed: {}", step.id, err));
+                }
             }
+
+            emit_progress(
+                app_handle,
+                game_id,
+                step_index,
+                total_steps,
+                &step.id,
+                &step.action,
+                &step.description,
+                100,
+                None,
+                Some(format!("Completed: {}", step.description)),
+            );
         }
 
-        emit_progress(
-            app_handle,
-            game_id,
-            step_index,
-            total_steps,
-            &step.id,
-            &step.action,
-            &step.description,
-            100,
-            None,
-            Some(format!("Completed: {}", step.description)),
-        );
+        Ok(())
+    };
+
+    // Remove the temporary extraction directory in every outcome: on success it
+    // is no longer needed, and on failure/cancellation leaving it behind wastes
+    // disk and can confuse a later run.
+    if let Err(err) = gse_engine::path_guard::remove_dir_all(install_dir, ".drop_iso_tmp") {
+        debug!("failed to remove temporary extraction directory: {err}");
     }
 
-    // Clean up temporary extraction directories like .drop_iso_tmp
-    let tmp_iso_dir = install_dir.join(".drop_iso_tmp");
-    if tmp_iso_dir.is_dir() {
-        let _ = fs::remove_dir_all(&tmp_iso_dir);
-    }
+    run_result?;
 
     let reclaimable = calculate_reclaimable_space(recipe, install_dir);
     Ok(reclaimable)
@@ -605,7 +623,9 @@ async fn execute_extract_rar(
         .filter(|v| !v.is_empty());
 
     let archive_path = match archive_name {
-        Some(name) if !name.contains(['*', '?']) => resolve_install_path(install_dir, name)?,
+        Some(name) if !name.contains(['*', '?']) => {
+            gse_engine::path_guard::safe_join(install_dir, name).map_err(|e| e.to_string())?
+        }
         _ => find_primary_rar(install_dir)
             .ok_or_else(|| "No primary RAR archive found in game directory".to_string())?,
     };
@@ -623,14 +643,8 @@ async fn execute_extract_rar(
         .and_then(|v| v.as_str())
         .unwrap_or(".drop_iso_tmp");
 
-    let output_dir = resolve_install_path(install_dir, output_sub)?;
-    fs::create_dir_all(&output_dir).map_err(|e| {
-        format!(
-            "Failed to create output directory {}: {}",
-            output_dir.display(),
-            e
-        )
-    })?;
+    let output_dir = gse_engine::path_guard::ensure_dir(install_dir, output_sub)
+        .map_err(|e| format!("Refusing unsafe output directory '{output_sub}': {e}"))?;
 
     let mut cmd = tokio::process::Command::new(tool);
     cmd.arg("x")
@@ -671,18 +685,8 @@ async fn execute_extract_iso(
         .get("outputDir")
         .and_then(|v| v.as_str())
         .unwrap_or(".");
-    let output_dir = if output_sub == "." {
-        install_dir.to_path_buf()
-    } else {
-        resolve_install_path(install_dir, output_sub)?
-    };
-    fs::create_dir_all(&output_dir).map_err(|e| {
-        format!(
-            "Failed to create output directory {}: {}",
-            output_dir.display(),
-            e
-        )
-    })?;
+    let output_dir = gse_engine::path_guard::ensure_dir(install_dir, output_sub)
+        .map_err(|e| format!("Refusing unsafe output directory '{output_sub}': {e}"))?;
 
     // Recipes provide `sourceGlob` (e.g. ".drop_iso_tmp/*.iso"); fall back to
     // the legacy `isoDir` param, then the temporary extraction directory.
@@ -698,7 +702,7 @@ async fn execute_extract_iso(
             dirs.push(if rel == "." || rel.is_empty() {
                 install_dir.to_path_buf()
             } else {
-                resolve_install_path(install_dir, rel)?
+                gse_engine::path_guard::safe_join(install_dir, rel).map_err(|e| e.to_string())?
             });
         }
         let iso_dir_sub = step
@@ -706,7 +710,9 @@ async fn execute_extract_iso(
             .get("isoDir")
             .and_then(|v| v.as_str())
             .unwrap_or(".drop_iso_tmp");
-        dirs.push(resolve_install_path(install_dir, iso_dir_sub)?);
+        if let Ok(dir) = gse_engine::path_guard::safe_join(install_dir, iso_dir_sub) {
+            dirs.push(dir);
+        }
         dirs.push(install_dir.to_path_buf());
         dirs
     };
@@ -786,13 +792,11 @@ async fn execute_extract_archive(
         .get("outputDir")
         .and_then(|v| v.as_str())
         .unwrap_or(".");
-    let output_dir = if output_sub == "." {
-        install_dir.to_path_buf()
-    } else {
-        resolve_install_path(install_dir, output_sub)?
-    };
+    let output_dir = gse_engine::path_guard::ensure_dir(install_dir, output_sub)
+        .map_err(|e| format!("Refusing unsafe output directory '{output_sub}': {e}"))?;
 
-    let archive_path = resolve_install_path(install_dir, archive_name)?;
+    let archive_path =
+        gse_engine::path_guard::safe_join(install_dir, archive_name).map_err(|e| e.to_string())?;
     let mut cmd = tokio::process::Command::new(tool);
     cmd.arg("x")
         .arg("-y")
@@ -838,13 +842,15 @@ async fn execute_innoextract(
         .get("outputDir")
         .and_then(|v| v.as_str())
         .unwrap_or("app");
-    let _ = resolve_install_path(install_dir, output_sub)?;
+    let output_dir = gse_engine::path_guard::ensure_dir(install_dir, output_sub)
+        .map_err(|e| format!("Refusing unsafe output directory '{output_sub}': {e}"))?;
 
-    let setup_path = resolve_install_path(install_dir, setup_exe)?;
+    let setup_path =
+        gse_engine::path_guard::safe_join(install_dir, setup_exe).map_err(|e| e.to_string())?;
     let mut cmd = tokio::process::Command::new(tool);
     cmd.arg("-e")
         .arg("-d")
-        .arg(output_sub)
+        .arg(&output_dir)
         .arg(&setup_path)
         .current_dir(install_dir)
         .stdout(Stdio::piped())
@@ -895,25 +901,26 @@ async fn execute_apply_crack(
     let specified_dir = step.params.get("crackDir").and_then(|v| v.as_str());
 
     if let Some(c) = specified_dir {
-        let p = install_dir.join(c);
-        if p.is_dir() {
+        if let Some(p) = confined_dir(install_dir, c) {
             crack_dirs.push(p);
         }
-        let p_tmp = install_dir.join(".drop_iso_tmp").join(c);
-        if p_tmp.is_dir() {
-            crack_dirs.push(p_tmp);
+        if let Some(p) = confined_dir(install_dir, &format!(".drop_iso_tmp/{c}")) {
+            crack_dirs.push(p);
         }
     }
 
-    // Also scan candidates in root and .drop_iso_tmp
+    // Also scan candidates in root and .drop_iso_tmp. `crackDir` is confined to
+    // the install directory; an absolute or `..` value is ignored.
     for c in candidates {
-        let p = install_dir.join(c);
-        if p.is_dir() && !crack_dirs.contains(&p) {
+        if let Some(p) = confined_dir(install_dir, c)
+            && !crack_dirs.contains(&p)
+        {
             crack_dirs.push(p);
         }
-        let p_tmp = install_dir.join(".drop_iso_tmp").join(c);
-        if p_tmp.is_dir() && !crack_dirs.contains(&p_tmp) {
-            crack_dirs.push(p_tmp);
+        if let Some(p) = confined_dir(install_dir, &format!(".drop_iso_tmp/{c}"))
+            && !crack_dirs.contains(&p)
+        {
+            crack_dirs.push(p);
         }
     }
 
@@ -950,53 +957,40 @@ async fn execute_apply_crack(
 }
 
 pub fn overlay_directory(src_dir: &Path, dest_dir: &Path) -> Result<(), String> {
-    for entry in walkdir::WalkDir::new(src_dir).min_depth(1) {
+    for entry in walkdir::WalkDir::new(src_dir)
+        .min_depth(1)
+        .follow_links(false)
+    {
         let entry = entry.map_err(|e| format!("Walkdir error: {e}"))?;
         let rel_path = entry
             .path()
             .strip_prefix(src_dir)
             .map_err(|e| format!("Strip prefix error: {e}"))?;
-        let target_path = dest_dir.join(rel_path);
-
-        // Never write through an existing symlink: an untrusted release could
-        // ship one that redirects the overlay outside the install directory.
-        if let Ok(meta) = fs::symlink_metadata(&target_path)
-            && meta.file_type().is_symlink()
-        {
-            return Err(format!(
-                "refusing to write through symlink {}",
-                target_path.display()
-            ));
-        }
 
         if entry.file_type().is_dir() {
-            fs::create_dir_all(&target_path)
-                .map_err(|e| format!("Failed to create dir {}: {}", target_path.display(), e))?;
+            gse_engine::path_guard::ensure_dir(dest_dir, rel_path)
+                .map_err(|e| format!("Failed to create dir {}: {e}", rel_path.display()))?;
         } else if entry.file_type().is_file() {
-            if let Some(parent) = target_path.parent() {
-                if let Ok(meta) = fs::symlink_metadata(parent)
-                    && meta.file_type().is_symlink()
-                {
-                    return Err(format!(
-                        "refusing to create files under symlink {}",
-                        parent.display()
-                    ));
-                }
-                fs::create_dir_all(parent).map_err(|e| {
-                    format!("Failed to create parent dir {}: {}", parent.display(), e)
-                })?;
-            }
-            fs::copy(entry.path(), &target_path).map_err(|e| {
+            gse_engine::path_guard::copy_to(dest_dir, entry.path(), rel_path).map_err(|e| {
                 format!(
-                    "Failed to copy {} to {}: {}",
+                    "Failed to copy {} to {}: {e}",
                     entry.path().display(),
-                    target_path.display(),
-                    e
+                    rel_path.display()
                 )
             })?;
         }
+        // Symlink entries (follow_links = false) are intentionally skipped.
     }
     Ok(())
+}
+
+/// Resolve `candidate` inside `install_dir` and return it only when it is an
+/// existing directory. Absolute paths, `..` escapes and symlinked components
+/// are rejected.
+fn confined_dir(install_dir: &Path, candidate: &str) -> Option<PathBuf> {
+    gse_engine::path_guard::safe_join(install_dir, candidate)
+        .ok()
+        .filter(|path| path.is_dir())
 }
 
 async fn execute_cleanup_step(step: &PipelineStep, install_dir: &Path) -> Result<(), String> {
@@ -1005,7 +999,7 @@ async fn execute_cleanup_step(step: &PipelineStep, install_dir: &Path) -> Result
             if let Some(pattern) = t.as_str() {
                 // Targets without a wildcard may be directories (e.g. .drop_iso_tmp).
                 if !pattern.contains(['*', '?', '[']) {
-                    let dir = match resolve_install_path(install_dir, pattern) {
+                    let dir = match gse_engine::path_guard::safe_join(install_dir, pattern) {
                         Ok(dir) => dir,
                         Err(e) => {
                             warn!("Refusing cleanup target: {e}");
@@ -1013,7 +1007,8 @@ async fn execute_cleanup_step(step: &PipelineStep, install_dir: &Path) -> Result
                         }
                     };
                     if dir.is_dir() {
-                        if let Err(e) = fs::remove_dir_all(&dir) {
+                        if let Err(e) = gse_engine::path_guard::remove_dir_all(install_dir, pattern)
+                        {
                             warn!(
                                 "Failed to remove temporary directory {}: {}",
                                 dir.display(),
@@ -1064,14 +1059,11 @@ async fn execute_run_command(
         return Ok(());
     }
 
-    // A recipe command may name a binary on PATH, but any path-like or
-    // absolute target must stay inside the install directory.
-    let program = &parts[0];
-    if Path::new(program).is_absolute() || program.contains(['/', '\\']) || program.contains("..") {
-        resolve_install_path(install_dir, program)?;
-    }
+    // A recipe command may only run a binary that stays inside the install
+    // directory; it must never fall back to an arbitrary PATH binary.
+    let program = resolve_command_program(install_dir, &parts[0])?;
 
-    let mut cmd = tokio::process::Command::new(program);
+    let mut cmd = tokio::process::Command::new(&program);
     cmd.args(&parts[1..])
         .current_dir(install_dir)
         .stdout(Stdio::piped())
@@ -1270,9 +1262,8 @@ pub fn reclaim_pipeline_space(
     }
 
     // Remove any leftover temporary folders
-    let tmp_iso = install_dir.join(".drop_iso_tmp");
-    if tmp_iso.is_dir() {
-        let _ = fs::remove_dir_all(&tmp_iso);
+    if let Err(err) = gse_engine::path_guard::remove_dir_all(install_dir, ".drop_iso_tmp") {
+        debug!("failed to remove temporary extraction directory: {err}");
     }
 
     Ok(total_deleted)
@@ -1316,13 +1307,12 @@ fn delete_pattern(base_dir: &Path, pattern: &str) -> u64 {
     for entry in entries.flatten() {
         let name = entry.file_name().to_string_lossy().to_string();
         if re.is_match(&name) {
-            let p = entry.path();
             if let Ok(meta) = entry.metadata() {
                 if meta.is_file() {
                     let len = meta.len();
-                    if fs::remove_file(&p).is_ok() {
+                    if gse_engine::path_guard::remove_file(base_dir, &name).is_ok() {
                         deleted += len;
-                        info!("Reclaimed space: deleted {}", p.display());
+                        info!("Reclaimed space: deleted {}", entry.path().display());
                     }
                 }
             }
@@ -1346,40 +1336,30 @@ fn glob_to_regex(glob: &str) -> String {
     s
 }
 
-/// Lexically normalizes a path (resolves `.`/`..` without touching disk).
-fn normalize_lexically(path: &Path) -> PathBuf {
-    use std::path::Component;
-    let mut out = PathBuf::new();
-    for component in path.components() {
-        match component {
-            Component::ParentDir => {
-                out.pop();
-            }
-            Component::CurDir => {}
-            other => out.push(other.as_os_str()),
-        }
+/// Resolve the program for a `run_command` step.
+///
+/// A path-like or absolute target must stay inside `install_dir`; a bare name
+/// is only accepted when the file exists inside `install_dir`. There is
+/// deliberately no PATH fallback, so a crafted recipe cannot run an arbitrary
+/// system binary.
+fn resolve_command_program(install_dir: &Path, program: &str) -> Result<PathBuf, String> {
+    if program.is_empty() {
+        return Err("run_command program is empty".to_string());
     }
-    out
-}
-
-/// Resolves a recipe-supplied path inside `install_dir`, rejecting absolute
-/// paths and `..` escapes so a crafted recipe cannot read/write/delete
-/// outside the game's install directory.
-fn resolve_install_path(install_dir: &Path, candidate: &str) -> Result<PathBuf, String> {
-    let path = Path::new(candidate);
-    if path.is_absolute() {
-        return Err(format!(
-            "pipeline path '{candidate}' must be relative to the install directory"
-        ));
+    let path = Path::new(program);
+    if path.is_absolute() || program.contains(['/', '\\']) {
+        return gse_engine::path_guard::safe_join(install_dir, program)
+            .map_err(|e| format!("refusing command '{program}': {e}"));
     }
-    let joined = install_dir.join(path);
-    let normalized = normalize_lexically(&joined);
-    if !normalized.starts_with(normalize_lexically(install_dir)) {
-        return Err(format!(
-            "pipeline path '{candidate}' escapes the install directory"
-        ));
+    let candidate = gse_engine::path_guard::safe_join(install_dir, program)
+        .map_err(|e| format!("refusing command '{program}': {e}"))?;
+    if candidate.is_file() {
+        Ok(candidate)
+    } else {
+        Err(format!(
+            "command '{program}' was not found in the install directory"
+        ))
     }
-    Ok(joined)
 }
 
 fn find_primary_rar(dir: &Path) -> Option<PathBuf> {
@@ -1492,15 +1472,47 @@ mod tests {
     }
 
     #[test]
-    fn test_resolve_install_path_rejects_escapes() {
+    fn test_safe_join_rejects_escapes() {
         let temp = tempfile::tempdir().unwrap();
         let base = temp.path();
 
-        assert!(resolve_install_path(base, "sub/file.dll").is_ok());
-        assert!(resolve_install_path(base, ".").is_ok());
-        assert!(resolve_install_path(base, "../outside").is_err());
-        assert!(resolve_install_path(base, "sub/../../outside").is_err());
-        assert!(resolve_install_path(base, "/etc/passwd").is_err());
+        assert!(gse_engine::path_guard::safe_join(base, "sub/file.dll").is_ok());
+        assert!(gse_engine::path_guard::safe_join(base, ".").is_ok());
+        assert!(gse_engine::path_guard::safe_join(base, "../outside").is_err());
+        assert!(gse_engine::path_guard::safe_join(base, "sub/../../outside").is_err());
+        assert!(gse_engine::path_guard::safe_join(base, "/etc/passwd").is_err());
+    }
+
+    #[test]
+    fn test_resolve_command_program_refuses_path_lookup() {
+        let temp = tempfile::tempdir().unwrap();
+        let base = temp.path();
+
+        // Bare name that exists in the install dir is allowed.
+        fs::write(base.join("setup.exe"), b"x").unwrap();
+        assert!(resolve_command_program(base, "setup.exe").is_ok());
+
+        // Bare name not present must not fall back to PATH (e.g. `sh`).
+        assert!(resolve_command_program(base, "sh").is_err());
+        assert!(resolve_command_program(base, "../../bin/sh").is_err());
+        assert!(resolve_command_program(base, "/bin/sh").is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_overlay_directory_rejects_symlinked_destination() {
+        let temp = tempfile::tempdir().unwrap();
+        let src = temp.path().join("src");
+        let dest = temp.path().join("dest");
+        let outside = temp.path().join("outside");
+        fs::create_dir_all(&src).unwrap();
+        fs::create_dir_all(&dest).unwrap();
+        fs::create_dir_all(&outside).unwrap();
+        fs::write(src.join("evil.dll"), b"pwned").unwrap();
+        std::os::unix::fs::symlink(outside.join("evil.dll"), dest.join("evil.dll")).unwrap();
+
+        assert!(overlay_directory(&src, &dest).is_err());
+        assert!(!outside.join("evil.dll").exists());
     }
 
     #[test]

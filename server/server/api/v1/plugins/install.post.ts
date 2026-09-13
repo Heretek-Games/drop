@@ -13,6 +13,7 @@ const InstallBundle = type({
     "entry?": "string",
     "capabilities?": "string[]",
     "checksum?": "string",
+    "files?": "Record<string, string>",
     "signature?": "string",
   },
   entry: "string>0",

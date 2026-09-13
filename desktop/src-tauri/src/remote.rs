@@ -366,7 +366,7 @@ pub async fn plugin_request_ws(
 /// the same directory and each SHA-256 is verified before writing.
 #[tauri::command]
 pub async fn gse_fetch_release(manifest_url: String) -> Result<(), String> {
-    use gse_engine::dist::{ReleaseSpec, fetch_release, is_trusted_manifest_url};
+    use gse_engine::dist::{ReleaseSpec, fetch_release, is_trusted_manifest_url, url_origin};
 
     // Root of trust: only HTTPS origins named in DROP_GSE_RELEASE_ALLOWLIST may
     // supply a release manifest (loopback is allowed for development). Without
@@ -385,15 +385,23 @@ pub async fn gse_fetch_release(manifest_url: String) -> Result<(), String> {
         ));
     }
 
+    // The payload URLs are derived from the manifest, so pin them to the
+    // manifest's origin. This prevents a compromised/allow-listed manifest from
+    // pointing payloads at an attacker host, and rejects cross-origin
+    // redirects (reqwest follows redirects by default).
+    let trusted_origin = url_origin(&manifest_url)
+        .ok_or_else(|| format!("invalid release manifest URL: {manifest_url}"))?;
+
     let client = DROP_CLIENT_WS_CLIENT.clone();
-    let manifest_bytes = client
+    let manifest_response = client
         .get(&manifest_url)
         .send()
         .await
-        .map_err(|e| e.to_string())?
-        .bytes()
-        .await
         .map_err(|e| e.to_string())?;
+    if url_origin(manifest_response.url().as_str()).as_ref() != Some(&trusted_origin) {
+        return Err("refusing release manifest that redirected off its origin".to_string());
+    }
+    let manifest_bytes = manifest_response.bytes().await.map_err(|e| e.to_string())?;
     let spec: ReleaseSpec = serde_json::from_slice(&manifest_bytes).map_err(|e| e.to_string())?;
 
     let base = Url::parse(&manifest_url)
@@ -404,15 +412,18 @@ pub async fn gse_fetch_release(manifest_url: String) -> Result<(), String> {
     let mut payloads = std::collections::HashMap::new();
     for name in spec.files.keys() {
         let url = base.join(name).map_err(|e| e.to_string())?;
-        let bytes = client
-            .get(url)
-            .send()
-            .await
-            .map_err(|e| e.to_string())?
-            .bytes()
-            .await
-            .map_err(|e| e.to_string())?
-            .to_vec();
+        if url_origin(url.as_str()).as_ref() != Some(&trusted_origin) {
+            return Err(format!(
+                "refusing release payload '{name}' outside the trusted origin"
+            ));
+        }
+        let response = client.get(url).send().await.map_err(|e| e.to_string())?;
+        if url_origin(response.url().as_str()).as_ref() != Some(&trusted_origin) {
+            return Err(format!(
+                "refusing release payload '{name}' that redirected off its origin"
+            ));
+        }
+        let bytes = response.bytes().await.map_err(|e| e.to_string())?.to_vec();
         payloads.insert(name.clone(), bytes);
     }
 
@@ -449,15 +460,20 @@ pub fn gse_write_room_config(
         return Err("Game install directory does not exist".to_string());
     }
 
-    let settings_dir = path.join("steam_settings");
-    if let Err(e) = std::fs::create_dir_all(&settings_dir) {
+    // All writes are symlink-confined to the install directory so a release
+    // cannot ship a `steam_settings` symlink that redirects them elsewhere.
+    if let Err(e) = gse_engine::path_guard::ensure_dir(path, "steam_settings") {
         return Err(format!("Failed to create steam_settings dir: {e}"));
     }
 
     // Pin the room's AppID so the emulator namespaces lobbies correctly.
     if let Some(app_id) = app_id {
-        std::fs::write(settings_dir.join("steam_appid.txt"), app_id.to_string())
-            .map_err(|e| format!("Failed to write steam_appid.txt: {e}"))?;
+        gse_engine::path_guard::write_file(
+            path,
+            "steam_settings/steam_appid.txt",
+            app_id.to_string().as_bytes(),
+        )
+        .map_err(|e| format!("Failed to write steam_appid.txt: {e}"))?;
     }
 
     // Record the emulator flavor so the launch interceptor stages the matching
@@ -467,10 +483,13 @@ pub fn gse_write_room_config(
         Some("gse_fork") => "gse_fork",
         _ => "gbe_fork",
     };
-    std::fs::write(settings_dir.join("drop_gse_flavor.txt"), flavor)
-        .map_err(|e| format!("Failed to write drop_gse_flavor.txt: {e}"))?;
+    gse_engine::path_guard::write_file(
+        path,
+        "steam_settings/drop_gse_flavor.txt",
+        flavor.as_bytes(),
+    )
+    .map_err(|e| format!("Failed to write drop_gse_flavor.txt: {e}"))?;
 
-    let broadcasts_file = settings_dir.join("custom_broadcasts.txt");
     let content = if peer_ips.is_empty() {
         "127.0.0.1:47584\n".to_string()
     } else {
@@ -488,7 +507,11 @@ pub fn gse_write_room_config(
         lines.join("\n")
     };
 
-    std::fs::write(&broadcasts_file, content)
-        .map_err(|e| format!("Failed to write custom_broadcasts.txt: {e}"))?;
+    gse_engine::path_guard::write_file(
+        path,
+        "steam_settings/custom_broadcasts.txt",
+        content.as_bytes(),
+    )
+    .map_err(|e| format!("Failed to write custom_broadcasts.txt: {e}"))?;
     Ok(())
 }

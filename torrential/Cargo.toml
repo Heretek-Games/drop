@@ -38,7 +38,6 @@ bytes = "*"
 file_open_limit = "0.0.5"
 pin-project-lite = "0.2.16"
 protobuf = "3.7.2"
-waitmap = "1.1.0"
 uuid = { version = "1.20.0", features = ["v4"] }
 num_cpus = "1.17.0"
 

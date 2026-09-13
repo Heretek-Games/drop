@@ -208,7 +208,7 @@ impl ChunkCache {
     pub fn reserve(&self, checksum: &str, expected_bytes: u64) -> Option<FillGuard<'_>> {
         let final_path = self.path_for(checksum)?;
 
-        {
+        let mut committed = {
             let inner = self
                 .inner
                 .lock()
@@ -216,17 +216,34 @@ impl ChunkCache {
             if inner.entries.contains_key(checksum) {
                 return None;
             }
-        }
+            inner.total
+        };
 
-        // Bound the temporary space used by concurrent fills so a burst of
-        // misses cannot exceed the configured cache budget.
+        // Bound committed bytes plus in-flight fills against one budget.
+        // If the committed set leaves no headroom, evict LRU entries so the new
+        // fill fits instead of letting committed + in-flight reach ~2x the cap.
         if self.max_bytes > 0 {
+            let reserved_now = self.reserved_bytes.load(Ordering::Acquire);
+            let headroom = self
+                .max_bytes
+                .saturating_sub(reserved_now)
+                .saturating_sub(expected_bytes);
+            if committed > headroom {
+                let mut inner = self
+                    .inner
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                self.evict_until(&mut inner, headroom);
+                committed = inner.total;
+            }
+
             let reserved =
                 self.reserved_bytes
                     .try_update(Ordering::AcqRel, Ordering::Acquire, |current| {
                         current
                             .checked_add(expected_bytes)
-                            .filter(|next| *next <= self.max_bytes)
+                            .and_then(|pending| committed.checked_add(pending))
+                            .filter(|total| *total <= self.max_bytes)
                     });
             if reserved.is_err() {
                 return None;
@@ -310,10 +327,16 @@ impl ChunkCache {
     }
 
     fn evict(&self, inner: &mut Inner) {
+        self.evict_until(inner, self.max_bytes);
+    }
+
+    /// Evicts least-recently-used entries until the committed total is at or
+    /// below `target`. A `max_bytes` of 0 disables eviction.
+    fn evict_until(&self, inner: &mut Inner, target: u64) {
         if self.max_bytes == 0 {
             return;
         }
-        while inner.total > self.max_bytes && !inner.entries.is_empty() {
+        while inner.total > target && !inner.entries.is_empty() {
             let Some(oldest) = inner
                 .entries
                 .iter()
@@ -436,9 +459,15 @@ mod tests {
         assert!(second.is_some(), "dropping a fill releases its reservation");
         drop(second);
 
-        // Committed entries no longer count as in-flight.
+        // A full committed set is evicted to make room for a new fill, so the
+        // combined footprint stays within the budget.
         cache.insert(key("cccc"), 8);
-        assert!(cache.reserve(key("dddd").as_str(), 6).is_some());
+        let reserved = cache.reserve(key("dddd").as_str(), 6);
+        assert!(
+            reserved.is_some(),
+            "eviction should free room for the new fill"
+        );
+        assert!(cache.inner.lock().unwrap().total <= 4);
     }
 
     #[test]

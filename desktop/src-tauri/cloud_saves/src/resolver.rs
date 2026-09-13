@@ -26,7 +26,7 @@ pub fn resolve(meta: &mut CloudSaveMetadata) -> File {
             .iter()
             .find_map(|p| match p {
                 super::conditions::Condition::Os(os) => Some(os),
-                _ => None
+                _ => None,
             })
             .cloned()
         {
@@ -44,7 +44,6 @@ pub fn resolve(meta: &mut CloudSaveMetadata) -> File {
             None => continue,
         };
         let t_path = PathBuf::from(normalize(&file.path, os));
-        println!("{:?}", &t_path);
         let path = parse_path(t_path, handler, &meta.game_version).unwrap();
         let f = std::fs::metadata(&path).unwrap(); // TODO: Fix unwrap here
         if f.is_dir() {
@@ -92,7 +91,7 @@ pub fn extract(file: PathBuf) -> Result<(), BackupError> {
             .iter()
             .find_map(|p| match p {
                 super::conditions::Condition::Os(os) => Some(os),
-                _ => None
+                _ => None,
             })
             .cloned()
         {
@@ -140,9 +139,10 @@ pub fn copy_item<P: AsRef<Path>>(src: P, dest: P) -> io::Result<()> {
     } else {
         // Handle other file types like symlinks if necessary,
         // for now, return an error or skip.
-        return Err(io::Error::other(
-            format!("Source {:?} is neither a file nor a directory", src_path),
-        ));
+        return Err(io::Error::other(format!(
+            "Source {:?} is neither a file nor a directory",
+            src_path
+        )));
     }
 
     Ok(())
@@ -182,7 +182,6 @@ pub fn parse_path(
     backup_handler: &dyn BackupHandler,
     game: &GameVersion,
 ) -> Result<PathBuf, BackupError> {
-    println!("Parsing: {:?}", &path);
     let mut s = PathBuf::new();
     for component in path.components() {
         match component.as_str().unwrap() {
@@ -208,6 +207,6 @@ pub fn parse_path(
         }
     }
 
-    println!("Final line: {:?}", &s);
+    debug!("resolved save path");
     Ok(s)
 }

@@ -83,6 +83,24 @@ export class RoomStore {
    */
   private readonly locks = new Map<string, Promise<unknown>>();
 
+  /**
+   * In-process cache of live credentials. Persistence redacts secrets at rest,
+   * so this is what makes credential reads actually cache instead of issuing a
+   * fresh backend key on every request (e.g. one Tailscale key per call).
+   */
+  private readonly credentialCache = new Map<string, MeshCredential>();
+
+  private cacheKey(roomId: string, userId: string): string {
+    return `${roomId}\u0000${userId}`;
+  }
+
+  private clearRoomCache(roomId: string): void {
+    const prefix = `${roomId}\u0000`;
+    for (const key of this.credentialCache.keys()) {
+      if (key.startsWith(prefix)) this.credentialCache.delete(key);
+    }
+  }
+
   constructor(
     private readonly persistence: RoomPersistence,
     private readonly backend: MeshBackend,
@@ -108,21 +126,29 @@ export class RoomStore {
   async pruneExpired(): Promise<number> {
     return this.withLock("__prune__", async () => {
       const rooms = await this.persistence.listRooms();
-      const now = this.now();
-      const expired = rooms.filter((room) => room.expiresAt <= now);
+      const expired = rooms.filter((room) => room.expiresAt <= this.now());
       let pruned = 0;
       for (const room of expired) {
-        try {
-          await this.backend.teardown(room.id, room.mesh);
-        } catch {
-          // Keep the persisted mesh so a later sweep can retry the teardown
-          // instead of orphaning the provisioned network.
-          continue;
-        }
-        await this.persistence.deleteRoomData(room.id);
-        pruned += 1;
+        // Take the room's own lock so a prune cannot tear a mesh down
+        // concurrently with a join/heartbeat/leave/credential read-modify-write.
+        const removed = await this.withLock(room.id, async () => {
+          // Re-read: another operation may have renewed the room meanwhile.
+          const current = await this.persistence.getRoom(room.id);
+          if (!current || current.expiresAt > this.now()) return 0;
+          try {
+            await this.backend.teardown(room.id, current.mesh);
+          } catch {
+            // Keep the persisted mesh so a later sweep can retry the teardown
+            // instead of orphaning the provisioned network.
+            return 0;
+          }
+          await this.persistence.deleteRoomData(room.id);
+          this.clearRoomCache(room.id);
+          return 1;
+        });
+        pruned += removed;
       }
-      await this.persistence.deleteExpiredCredentials(now);
+      await this.persistence.deleteExpiredCredentials(this.now());
       return pruned;
     });
   }
@@ -174,7 +200,18 @@ export class RoomStore {
         createdAt: now,
         expiresAt,
       };
-      await this.persistence.saveRoom(room);
+      try {
+        await this.persistence.saveRoom(room);
+      } catch (err) {
+        // The mesh was already provisioned; roll it back so a persistence
+        // failure does not orphan a network that no room row can ever sweep.
+        try {
+          await this.backend.teardown(roomId, mesh);
+        } catch {
+          // Best effort; a later sweep cannot see the room, so log-and-drop.
+        }
+        throw err;
+      }
       return room;
     });
   }
@@ -244,6 +281,27 @@ export class RoomStore {
         throw new Error("not a room member");
       }
 
+      // A node id identifies one device; two members must never share one, or
+      // either could revoke/kick the other. Reject a node already held by
+      // someone else.
+      const heldByAnother = room.members.some(
+        (entry) => entry.userId !== userId && entry.meshNodeId === memberId,
+      );
+      if (heldByAnother) {
+        throw new Error("mesh member id already registered to another member");
+      }
+
+      // Release the caller's previous node id when it rotates, so a stale node
+      // does not remain authorized.
+      if (member.meshNodeId && member.meshNodeId !== memberId) {
+        await this.backend.revokeMember(
+          roomId,
+          userId,
+          room.mesh,
+          member.meshNodeId,
+        );
+      }
+
       // Persist the node id even when authorization cannot assign an address,
       // so revocation still works after a coordinator restart.
       member.meshNodeId = memberId;
@@ -292,6 +350,7 @@ export class RoomStore {
       if (room.hostUserId === userId) {
         await this.backend.teardown(roomId, room.mesh);
         await this.persistence.deleteRoomData(roomId);
+        this.clearRoomCache(roomId);
         return { closed: true };
       }
 
@@ -304,6 +363,7 @@ export class RoomStore {
         leaving?.meshNodeId,
       );
       await this.persistence.saveRoom(room);
+      this.credentialCache.delete(this.cacheKey(roomId, userId));
       return { closed: false, room };
     });
   }
@@ -320,18 +380,19 @@ export class RoomStore {
         throw new Error("not a room member");
       }
 
-      const roomCredentials = await this.persistence.getCredentials(roomId);
-      const existing = roomCredentials[userId];
-      // Return a cached credential unless it is close to expiry (rotate) or its
-      // secret was redacted at rest (then it must be re-issued).
+      const key = this.cacheKey(roomId, userId);
+      const cached = this.credentialCache.get(key);
+      // Prefer the live in-process credential; persistence redacts the secret,
+      // so reading it back always requires a re-issue.
       if (
-        existing &&
-        existing.secret &&
-        existing.expiresAt - this.now() > CREDENTIAL_ROTATION_WINDOW_MS
+        cached &&
+        cached.expiresAt - this.now() > CREDENTIAL_ROTATION_WINDOW_MS
       ) {
-        return existing;
+        return cached;
       }
 
+      const roomCredentials = await this.persistence.getCredentials(roomId);
+      const existing = roomCredentials[userId];
       const issued = await this.backend.issueCredential(
         roomId,
         userId,
@@ -341,10 +402,13 @@ export class RoomStore {
         roomId,
         userId,
         secret: issued.secret,
-        address: issued.address ?? existing?.address,
+        address: issued.address ?? existing?.address ?? cached?.address,
         issuedAt: this.now(),
-        expiresAt: room.expiresAt,
+        // Respect a backend-imposed lifetime (e.g. a 1h Tailscale key) so the
+        // reported expiry does not overstate the credential's validity.
+        expiresAt: Math.min(room.expiresAt, issued.expiresAt ?? room.expiresAt),
       };
+      this.credentialCache.set(key, credential);
 
       // Record the assigned mesh address so peers see it in the room view.
       const address = issued.address ?? existing?.address;

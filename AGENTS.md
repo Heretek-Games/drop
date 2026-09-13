@@ -99,6 +99,15 @@ Source: `torrential/src/downloads/cache.rs` (wired in `serve.rs`, `state.rs`, `m
 - Documented optional volume/env in `server/deploy-template/compose.yml` and
   `sites/docs/src/content/docs/admin/quickstart.md`; the cache stores
   **unencrypted game data at rest**.
+- The RPC listener (`server/src/server/mod.rs`) authenticates its local peer
+  with a spawn-time shared secret: `TORRENTIAL_RPC_SECRET` (64 hex chars) is
+  set by the server for the child it spawns and is required by torrential
+  (fail-closed). An operator running torrential out-of-process must set the
+  same value on both sides. The `WaitMap` leak was replaced by a removable
+  response map, and committed + in-flight cache bytes now share one budget.
+- `/invalidate` and `/api/v1/depot/manifest.json` accept an optional
+  `TORRENTIAL_HTTP_TOKEN` (`Authorization: Bearer <token>` or
+  `x-torrential-token`); when unset those routes stay open for back-compat.
 
 ### 2.5 Tauri high-DPI window architecture
 

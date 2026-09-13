@@ -1,6 +1,8 @@
 import { spawn } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import { Service } from "..";
 import fs from "node:fs";
+import path from "node:path";
 import { logger } from "../../logging";
 import type { Socket } from "node:net";
 import net from "node:net";
@@ -23,6 +25,30 @@ import serverGamesProcessor from "./server-games";
 const INTERNAL_DEPOT_URL = new URL(
   process.env.INTERNAL_DEPOT_URL ?? "http://localhost:5000",
 );
+
+/**
+ * Spawn-time secret shared with the torrential RPC listener. Torrential
+ * refuses unauthenticated peers, so the process we spawn (or the separately
+ * configured one) must know this value. An operator running torrential outside
+ * this process must set `TORRENTIAL_RPC_SECRET` on both sides.
+ */
+function resolveRpcSecret(): string {
+  const provided = process.env.TORRENTIAL_RPC_SECRET?.trim();
+  if (provided) {
+    if (!/^[0-9a-fA-F]{64}$/.test(provided)) {
+      throw new Error("TORRENTIAL_RPC_SECRET must be 64 hex characters");
+    }
+    return provided.toLowerCase();
+  }
+  return randomBytes(32).toString("hex");
+}
+
+const RPC_SECRET = resolveRpcSecret();
+
+const TORRENTIAL_SPAWN_ENV = {
+  ...process.env,
+  TORRENTIAL_RPC_SECRET: RPC_SECRET,
+};
 
 export interface QueryProcessor<
   T extends DropBoundType,
@@ -65,25 +91,36 @@ export class TorrentialService extends Service<unknown> {
                 `${torrentialDir}/Cargo.toml`,
                 "--release",
               ],
-              {},
+              { env: TORRENTIAL_SPAWN_ENV },
             );
           }
         }
 
-        const localDir = fs.readdirSync(".");
-        if (localDir.includes("torrential")) {
-          return spawn("./torrential", [], {});
+        // Resolve the binary to an absolute path instead of searching PATH:
+        // a user-writable directory on PATH could otherwise hijack the spawn.
+        // The Docker image installs it at /usr/bin/torrential.
+        const candidates = [
+          process.env.TORRENTIAL_PATH,
+          path.join(process.cwd(), "torrential"),
+          "/usr/local/bin/torrential",
+          "/usr/bin/torrential",
+        ].filter((candidate): candidate is string => Boolean(candidate));
+        for (const candidate of candidates) {
+          if (fs.existsSync(candidate) && fs.statSync(candidate).isFile()) {
+            return spawn(candidate, [], { env: TORRENTIAL_SPAWN_ENV });
+          }
         }
 
-        const envPath = process.env.TORRENTIAL_PATH;
-        if (envPath) return spawn(envPath, [], {});
-
-        return spawn("torrential", [], {});
+        throw new Error(
+          "torrential binary not found; set TORRENTIAL_PATH or place 'torrential' in the working directory",
+        );
       },
       async () => {
         const socket = net.createConnection({ port: 33148, host: "127.0.0.1" });
         await new Promise<void>((r, j) => {
           socket.on("connect", () => {
+            // Authenticate before torrential will send any RPC query.
+            socket.write(Buffer.from(RPC_SECRET, "hex"));
             this.logger.info("connected to torrential socket");
             this.socket = socket;
             r();

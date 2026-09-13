@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::error::EngineError;
+use crate::path_guard;
 
 /// steam_api binaries we may replace, per platform.
 pub const TARGET_BINARIES: &[&str] = &["steam_api.dll", "steam_api64.dll", "libsteam_api.so"];
@@ -33,12 +34,12 @@ fn sha256_of(path: &Path) -> Result<String, EngineError> {
     Ok(to_hex(&Sha256::digest(&data)))
 }
 
-fn manifest_path(game_dir: &Path) -> PathBuf {
-    game_dir.join(MANIFEST_FILE)
+fn manifest_path(game_dir: &Path) -> Result<PathBuf, EngineError> {
+    path_guard::safe_join(game_dir, MANIFEST_FILE)
 }
 
 fn load_manifest(game_dir: &Path) -> Result<Manifest, EngineError> {
-    let path = manifest_path(game_dir);
+    let path = manifest_path(game_dir)?;
     if path.exists() {
         let raw = std::fs::read_to_string(&path)?;
         serde_json::from_str(&raw).map_err(EngineError::Serialization)
@@ -49,8 +50,7 @@ fn load_manifest(game_dir: &Path) -> Result<Manifest, EngineError> {
 
 fn save_manifest(game_dir: &Path, manifest: &Manifest) -> Result<(), EngineError> {
     let raw = serde_json::to_string_pretty(manifest)?;
-    std::fs::write(manifest_path(game_dir), raw)?;
-    Ok(())
+    path_guard::write_file(game_dir, MANIFEST_FILE, raw.as_bytes())
 }
 
 fn ensure_game_dir(game_dir: &Path) -> Result<(), EngineError> {
@@ -101,14 +101,15 @@ pub fn backup_originals(game_dir: &Path, binaries: &[&str]) -> Result<BackupOutc
     let mut outcome = BackupOutcome::default();
 
     for name in binaries {
-        let src = game_dir.join(name);
+        let src = path_guard::safe_join(game_dir, name)?;
         if !std::fs::metadata(&src)
             .map(|m| m.is_file())
             .unwrap_or(false)
         {
             continue;
         }
-        let dst = game_dir.join(format!("{name}.orig"));
+        let dst_rel = format!("{name}.orig");
+        let dst = path_guard::safe_join(game_dir, &dst_rel)?;
         let live_digest = sha256_of(&src)?;
 
         match manifest.entries.get(*name) {
@@ -128,7 +129,7 @@ pub fn backup_originals(game_dir: &Path, binaries: &[&str]) -> Result<BackupOutc
                 } else if live_digest == *recorded {
                     // The backup is missing/corrupt but the live binary is the
                     // recorded original, so refreshing the backup is safe.
-                    std::fs::copy(&src, &dst)?;
+                    path_guard::copy_to(game_dir, &src, &dst_rel)?;
                     manifest.entries.insert(name.to_string(), sha256_of(&dst)?);
                     outcome
                         .states
@@ -145,7 +146,7 @@ pub fn backup_originals(game_dir: &Path, binaries: &[&str]) -> Result<BackupOutc
                 }
             }
             None => {
-                std::fs::copy(&src, &dst)?;
+                path_guard::copy_to(game_dir, &src, &dst_rel)?;
                 manifest.entries.insert(name.to_string(), sha256_of(&dst)?);
                 outcome
                     .states
@@ -170,7 +171,7 @@ pub fn restore_originals(game_dir: &Path, binaries: &[&str]) -> Result<(), Engin
         let Some(recorded) = manifest.entries.get(*name) else {
             continue;
         };
-        let src = game_dir.join(format!("{name}.orig"));
+        let src = path_guard::safe_join(game_dir, format!("{name}.orig"))?;
         let found = sha256_of(&src).map_err(|_| EngineError::ManifestMismatch {
             path: name.to_string(),
             expected: recorded.clone(),
@@ -189,22 +190,23 @@ pub fn restore_originals(game_dir: &Path, binaries: &[&str]) -> Result<(), Engin
         if !manifest.entries.contains_key(*name) {
             continue;
         }
-        std::fs::copy(game_dir.join(format!("{name}.orig")), game_dir.join(name))?;
+        let src = path_guard::safe_join(game_dir, format!("{name}.orig"))?;
+        path_guard::copy_to(game_dir, &src, name)?;
     }
 
     for name in binaries {
         if !manifest.entries.contains_key(*name) {
             continue;
         }
-        std::fs::remove_file(game_dir.join(format!("{name}.orig")))?;
+        path_guard::remove_file(game_dir, format!("{name}.orig"))?;
         manifest.entries.remove(*name);
         save_manifest(game_dir, &manifest)?;
     }
 
     // Remove an empty manifest once fully restored.
-    let path = manifest_path(game_dir);
+    let path = manifest_path(game_dir)?;
     if manifest.entries.is_empty() && path.exists() {
-        std::fs::remove_file(path)?;
+        path_guard::remove_file(game_dir, MANIFEST_FILE)?;
     }
     Ok(())
 }

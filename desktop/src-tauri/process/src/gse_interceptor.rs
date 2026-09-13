@@ -1,6 +1,8 @@
 use std::{
+    collections::HashSet,
     path::{Path, PathBuf},
     process::Command,
+    sync::Mutex,
 };
 
 use gse_engine::dll::{MANIFEST_FILE, TARGET_BINARIES, backup_originals, tracked_binaries};
@@ -124,6 +126,10 @@ pub struct GseLaunchInterceptor {
     /// Explicit payload override (tests / release manager). When `None`, the
     /// payload directory is resolved per launch from the room's emulator flavor.
     payload_override: Option<PathBuf>,
+    /// Games whose current launch actually activated GSE. `post_exit` only
+    /// restores/cleans when the launch is in this set, so an ordinary launch
+    /// never deletes a player's pre-existing `steam_settings/`.
+    active: Mutex<HashSet<String>>,
 }
 
 impl Default for GseLaunchInterceptor {
@@ -137,6 +143,7 @@ impl GseLaunchInterceptor {
     pub fn new() -> Self {
         Self {
             payload_override: None,
+            active: Mutex::new(HashSet::new()),
         }
     }
 
@@ -144,6 +151,7 @@ impl GseLaunchInterceptor {
     pub fn with_payload_dir(payload_dir: Option<PathBuf>) -> Self {
         Self {
             payload_override: payload_dir,
+            active: Mutex::new(HashSet::new()),
         }
     }
 }
@@ -228,6 +236,10 @@ impl LaunchInterceptor for GseLaunchInterceptor {
             }
         }
 
+        self.active
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .insert(game_id.to_string());
         command.env("DROP_GSE_ACTIVE", "1");
         Ok(())
     }
@@ -247,6 +259,23 @@ impl LaunchInterceptor for GseLaunchInterceptor {
             "GSE interceptor post_exit for game {} (status: {:?})",
             game_id, exit_status
         );
+
+        // Only restore/clean when this specific launch activated GSE. Without
+        // this gate, an ordinary launch whose install dir has no room marker
+        // still reached the cleanup below and deleted a player's own
+        // `steam_settings/`.
+        let activated = self
+            .active
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .remove(game_id);
+        if !activated {
+            info!(
+                "GSE was not active for {}; skipping restore/cleanup",
+                game_id
+            );
+            return Ok(());
+        }
 
         // Restore in reverse order of mutation: current targets plus the
         // default names (in case the original was replaced and then removed).
@@ -323,6 +352,23 @@ mod tests {
         // No backup, no settings written.
         assert!(!dir.join("steam_api64.dll.orig").exists());
         assert!(!dir.join("steam_settings/configs.main.ini").exists());
+
+        // post_exit must not touch a player's own settings on a launch that
+        // never activated GSE.
+        let settings = dir.join("steam_settings");
+        std::fs::create_dir_all(&settings).unwrap();
+        std::fs::write(settings.join("configs.main.ini"), "user-config").unwrap();
+        std::fs::write(settings.join("steam_appid.txt"), "480").unwrap();
+
+        assert!(interceptor.post_exit("game-test", &dir, Some(0)).is_ok());
+        assert_eq!(
+            std::fs::read_to_string(settings.join("configs.main.ini")).unwrap(),
+            "user-config"
+        );
+        assert_eq!(
+            std::fs::read_to_string(settings.join("steam_appid.txt")).unwrap(),
+            "480"
+        );
 
         let _ = std::fs::remove_dir_all(&dir);
     }

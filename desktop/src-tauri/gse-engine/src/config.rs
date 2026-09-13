@@ -2,8 +2,9 @@
 
 use std::path::Path;
 
-use crate::error::EngineError;
 use crate::EmulatorFlavor;
+use crate::error::EngineError;
+use crate::path_guard;
 
 /// Directory name for emulator settings inside the game folder.
 pub const SETTINGS_DIR: &str = "steam_settings";
@@ -26,12 +27,13 @@ pub const BACKUP_SUFFIX: &str = ".drop-gse-backup";
 /// Preserve any pre-existing user emulator config before Drop overwrites it.
 /// Idempotent: an existing backup is never replaced.
 pub fn backup_existing(game_dir: &Path) -> Result<(), EngineError> {
-    let dir = game_dir.join(SETTINGS_DIR);
     for name in BACKED_UP_FILES {
-        let path = dir.join(name);
-        let backup = dir.join(format!("{name}{BACKUP_SUFFIX}"));
+        let path_rel = format!("{SETTINGS_DIR}/{name}");
+        let backup_rel = format!("{SETTINGS_DIR}/{name}{BACKUP_SUFFIX}");
+        let path = path_guard::safe_join(game_dir, &path_rel)?;
+        let backup = path_guard::safe_join(game_dir, &backup_rel)?;
         if path.is_file() && !backup.exists() {
-            std::fs::copy(&path, &backup)?;
+            path_guard::copy_to(game_dir, &path, &backup_rel)?;
         }
     }
     Ok(())
@@ -40,19 +42,24 @@ pub fn backup_existing(game_dir: &Path) -> Result<(), EngineError> {
 /// Undo [`SteamSettings::write_to`]: restore backed-up user files and remove
 /// generated ones that had no backup.
 pub fn restore_backups(game_dir: &Path) -> Result<(), EngineError> {
-    let dir = game_dir.join(SETTINGS_DIR);
+    // If the settings directory is itself a planted symlink, do nothing rather
+    // than following it out of the install directory.
+    let Ok(dir) = path_guard::safe_join(game_dir, SETTINGS_DIR) else {
+        return Ok(());
+    };
     if !dir.is_dir() {
         return Ok(());
     }
 
     for name in BACKED_UP_FILES {
-        let path = dir.join(name);
-        let backup = dir.join(format!("{name}{BACKUP_SUFFIX}"));
+        let path_rel = format!("{SETTINGS_DIR}/{name}");
+        let backup_rel = format!("{SETTINGS_DIR}/{name}{BACKUP_SUFFIX}");
+        let backup = path_guard::safe_join(game_dir, &backup_rel)?;
         if backup.is_file() {
-            std::fs::copy(&backup, &path)?;
-            std::fs::remove_file(&backup)?;
-        } else if path.exists() {
-            std::fs::remove_file(&path)?;
+            path_guard::copy_to(game_dir, &backup, &path_rel)?;
+            path_guard::remove_file(game_dir, &backup_rel)?;
+        } else {
+            path_guard::remove_file(game_dir, &path_rel)?;
         }
     }
 
@@ -60,15 +67,10 @@ pub fn restore_backups(game_dir: &Path) -> Result<(), EngineError> {
         if BACKED_UP_FILES.contains(&name) {
             continue;
         }
-        let path = dir.join(name);
-        if path.exists() {
-            std::fs::remove_file(&path)?;
-        }
+        path_guard::remove_file(game_dir, format!("{SETTINGS_DIR}/{name}"))?;
     }
 
-    if dir.is_dir() {
-        let _ = std::fs::remove_dir(&dir);
-    }
+    let _ = std::fs::remove_dir(&dir);
     Ok(())
 }
 
@@ -197,9 +199,11 @@ mod tests {
             std::fs::read_to_string(dir.join("steam_interfaces.txt")).unwrap(),
             "SteamUser021"
         );
-        assert!(std::fs::read_to_string(dir.join("configs.main.ini"))
-            .unwrap()
-            .contains("listener_port=47584"));
+        assert!(
+            std::fs::read_to_string(dir.join("configs.main.ini"))
+                .unwrap()
+                .contains("listener_port=47584")
+        );
     }
 
     #[test]
@@ -209,9 +213,11 @@ mod tests {
             custom_broadcasts: vec![],
             interfaces: vec![],
         };
-        assert!(settings
-            .render_configs_main_ini(EmulatorFlavor::GseFork)
-            .contains("listen_port=47584"));
+        assert!(
+            settings
+                .render_configs_main_ini(EmulatorFlavor::GseFork)
+                .contains("listen_port=47584")
+        );
     }
 
     #[test]
@@ -230,9 +236,11 @@ mod tests {
             .write_to(tmp.path(), EmulatorFlavor::GbeFork)
             .unwrap();
 
-        assert!(!std::fs::read_to_string(dir.join("configs.main.ini"))
-            .unwrap()
-            .contains("user-config"));
+        assert!(
+            !std::fs::read_to_string(dir.join("configs.main.ini"))
+                .unwrap()
+                .contains("user-config")
+        );
         assert!(dir.join("configs.main.ini.drop-gse-backup").exists());
 
         restore_backups(tmp.path()).unwrap();

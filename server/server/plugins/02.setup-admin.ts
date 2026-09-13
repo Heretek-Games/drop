@@ -30,6 +30,18 @@ export default defineNitroPlugin(async (_nitro) => {
     },
   });
 
-  const setupUrl = `${systemConfig.getExternalUrl()}/setup?token=${token.token}`;
-  logger.info(`Open ${setupUrl} in a browser to get started with Drop.`);
+  const setupBaseUrl = `${systemConfig.getExternalUrl()}/setup`;
+  if (process.env.DROP_SETUP_LOG_TOKEN === "true") {
+    // Opt-in only: the setup token is a one-time admin credential and must
+    // not be written to logs by default.
+    logger.info(
+      `Open ${setupBaseUrl}?token=${token.token} in a browser to get started with Drop.`,
+    );
+  } else {
+    logger.info(
+      `Setup required. Open ${setupBaseUrl} and retrieve the one-time setup ` +
+        `token from the "Setup Wizard" API token; set DROP_SETUP_LOG_TOKEN=true ` +
+        `to log the full setup URL instead.`,
+    );
+  }
 });

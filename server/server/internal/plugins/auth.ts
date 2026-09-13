@@ -88,8 +88,12 @@ export async function resolvePluginAuth(
 ): Promise<PluginAuthContext> {
   const { default: aclManager } = await import("../acls");
 
+  // `getUserIdACL(..., [])` resolves sessions only; Bearer API tokens are
+  // resolved separately so a valid token authenticates plugin routes/WS (the
+  // previous empty-ACL call silently rejected every Bearer token).
   const sessionUserId =
-    (await aclManager.getUserIdACL(request, [])) ?? undefined;
+    (await aclManager.getUserIdACL(request, [])) ??
+    (await aclManager.getUserIdFromBearer(request));
   if (sessionUserId) {
     const allAcls = await aclManager.fetchAllACLs(request);
     return {

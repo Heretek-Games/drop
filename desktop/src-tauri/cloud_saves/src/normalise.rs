@@ -71,7 +71,6 @@ pub fn normalize(path: &str, os: Platform) -> String {
 }
 
 fn too_broad(path: &str) -> bool {
-    println!("Path: {}", path);
     use {
         BASE, HOME, ROOT, STORE_USER_ID, WIN_APP_DATA, WIN_DIR, WIN_DOCUMENTS, XDG_CONFIG, XDG_DATA,
     };

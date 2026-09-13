@@ -271,7 +271,8 @@ export class ZeroTierBackend implements MeshBackend {
         body: JSON.stringify({ authorized: false }),
       },
     );
-    if (!response.ok) {
+    // A 404 means the node is already gone: revocation is idempotent.
+    if (!response.ok && response.status !== 404) {
       throw new Error(`ZeroTier member revocation failed (${response.status})`);
     }
   }
@@ -285,7 +286,8 @@ export class ZeroTierBackend implements MeshBackend {
       `${this.options.baseUrl}/controller/network/${encodeURIComponent(networkId)}`,
       { method: "DELETE", headers: this.headers() },
     );
-    if (!response.ok) {
+    // Already-deleted networks are a successful teardown (idempotent).
+    if (!response.ok && response.status !== 404) {
       throw new Error(`ZeroTier network deletion failed (${response.status})`);
     }
   }
@@ -301,6 +303,9 @@ export interface TailscaleProvisioner {
   issueAuthKey(aclTag: string, userId: string, roomId: string): Promise<string>;
   teardownRoom(roomId: string): Promise<void>;
 }
+
+/** Lifetime requested for Tailscale auth keys (matches the API request below). */
+export const TAILSCALE_KEY_LIFETIME_MS = 60 * 60 * 1000;
 
 /**
  * Tailscale ephemeral backend. Keys are one-off and tagged per room; the
@@ -327,6 +332,7 @@ export class TailscaleBackend implements MeshBackend {
     }
     return {
       secret: await this.provisioner.issueAuthKey(mesh.aclTag, userId, roomId),
+      expiresAt: Date.now() + TAILSCALE_KEY_LIFETIME_MS,
     };
   }
 
@@ -363,7 +369,8 @@ export interface TailscaleApiOptions {
 export class TailscaleApiProvisioner implements TailscaleProvisioner {
   private readonly fetchImpl: FetchLike;
   private readonly baseUrl: string;
-  private readonly keyIds = new Map<string, string[]>();
+  /** roomId → (userId → issued key id), so a re-issued key can revoke its predecessor. */
+  private readonly keyIds = new Map<string, Map<string, string>>();
 
   constructor(private readonly options: TailscaleApiOptions) {
     this.fetchImpl = options.fetchImpl ?? (fetch as unknown as FetchLike);
@@ -388,6 +395,18 @@ export class TailscaleApiProvisioner implements TailscaleProvisioner {
     userId: string,
     roomId: string,
   ): Promise<string> {
+    const roomKeys = this.keyIds.get(roomId) ?? new Map<string, string>();
+    this.keyIds.set(roomId, roomKeys);
+
+    // Revoke the member's previous key before minting a new one, so rotation
+    // (every read after a restart, or near expiry) does not leave a trail of
+    // live keys.
+    const previous = roomKeys.get(userId);
+    if (previous) {
+      await this.deleteKey(previous, true);
+      roomKeys.delete(userId);
+    }
+
     const url = `${this.baseUrl}/tailnet/${this.options.tailnet}/keys`;
     const response = await this.fetchImpl(url, {
       method: "POST",
@@ -416,23 +435,27 @@ export class TailscaleApiProvisioner implements TailscaleProvisioner {
     if (!data.key) {
       throw new Error("Tailscale key creation returned no key");
     }
-    const ids = this.keyIds.get(roomId) ?? [];
-    if (data.id) ids.push(data.id);
-    this.keyIds.set(roomId, ids);
+    if (data.id) roomKeys.set(userId, data.id);
     return data.key;
   }
 
+  /** Delete a key; a 404 is treated as success when `tolerateNotFound`. */
+  private async deleteKey(id: string, tolerateNotFound = false): Promise<void> {
+    const response = await this.fetchImpl(
+      `${this.baseUrl}/tailnet/${this.options.tailnet}/keys/${id}`,
+      { method: "DELETE", headers: this.headers() },
+    );
+    if (!response.ok && !(tolerateNotFound && response.status === 404)) {
+      throw new Error(`Tailscale key deletion failed (${response.status})`);
+    }
+  }
+
   async teardownRoom(roomId: string): Promise<void> {
-    const ids = this.keyIds.get(roomId) ?? [];
+    const roomKeys = this.keyIds.get(roomId);
     this.keyIds.delete(roomId);
-    for (const id of ids) {
-      const response = await this.fetchImpl(
-        `${this.baseUrl}/tailnet/${this.options.tailnet}/keys/${id}`,
-        { method: "DELETE", headers: this.headers() },
-      );
-      if (!response.ok) {
-        throw new Error(`Tailscale key deletion failed (${response.status})`);
-      }
+    if (!roomKeys) return;
+    for (const id of roomKeys.values()) {
+      await this.deleteKey(id);
     }
   }
 }

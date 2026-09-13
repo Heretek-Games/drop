@@ -85,9 +85,7 @@ impl GameDownloadAgent {
             .unwrap_or(metadata.id.clone());
 
         let base_dir_path = Path::new(&base_dir);
-        info!("base dir {}", base_dir_path.display());
         let data_base_dir_path = base_dir_path.join(game_name);
-        info!("data dir path {}", data_base_dir_path.display());
 
         create_dir_all(data_base_dir_path.clone())?;
 
@@ -308,7 +306,10 @@ impl GameDownloadAgent {
         let current_file_tree = self.scan_filetree(base_path)?;
 
         for file in current_file_tree {
-            let filename = file.strip_prefix(base_path)?.to_string_lossy().replace('\\', "/");
+            let filename = file
+                .strip_prefix(base_path)?
+                .to_string_lossy()
+                .replace('\\', "/");
             let needed = file_list.contains_key(&filename) || filename == ".dropdata";
             if !needed {
                 debug!("deleted {}", file.display());

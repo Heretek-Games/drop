@@ -5,7 +5,7 @@
 //! files are verified before being copied into a game directory.
 
 use std::collections::BTreeMap;
-use std::path::Path;
+use std::path::{Component, Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -55,6 +55,12 @@ fn split_url(url: &str) -> Option<(String, String)> {
     Some((scheme.to_ascii_lowercase(), host.to_ascii_lowercase()))
 }
 
+/// Public accessor for a URL's `(scheme, host)` origin, used to keep release
+/// payloads on the same origin as a trusted manifest.
+pub fn url_origin(url: &str) -> Option<(String, String)> {
+    split_url(url)
+}
+
 /// Whether a release manifest URL may be fetched.
 ///
 /// Only `https` origins are trusted, except loopback hosts (development), which
@@ -86,10 +92,22 @@ pub struct ReleaseSpec {
     pub files: BTreeMap<String, String>,
 }
 
+/// Confine a release manifest key to a single file name (no directories, `..`
+/// or absolute paths) so a crafted manifest cannot read/write elsewhere.
+fn confined_release_name(name: &str) -> Result<PathBuf, EngineError> {
+    let mut components = Path::new(name).components();
+    match (components.next(), components.next()) {
+        (Some(Component::Normal(segment)), None) => Ok(PathBuf::from(segment)),
+        _ => Err(EngineError::ScanFailed(format!(
+            "invalid release file name: {name}"
+        ))),
+    }
+}
+
 /// Verify every payload file in `release_dir` against `spec`.
 pub fn verify_release(release_dir: &Path, spec: &ReleaseSpec) -> Result<(), EngineError> {
     for (name, expected) in &spec.files {
-        let path = release_dir.join(name);
+        let path = release_dir.join(confined_release_name(name)?);
         let found = sha256_file(&path)?;
         if found != *expected {
             return Err(EngineError::ManifestMismatch {
@@ -114,9 +132,7 @@ pub fn stage_release(release_dir: &Path, dest: &Path) -> Result<(), EngineError>
     verify_release(release_dir, &spec)?;
     std::fs::create_dir_all(dest)?;
     for name in spec.files.keys() {
-        let file_name = Path::new(name)
-            .file_name()
-            .ok_or_else(|| EngineError::ScanFailed(format!("invalid release file name: {name}")))?;
+        let file_name = confined_release_name(name)?;
         std::fs::copy(release_dir.join(name), dest.join(file_name))?;
     }
     Ok(())
@@ -142,9 +158,7 @@ where
                 found: digest,
             });
         }
-        let file_name = Path::new(name)
-            .file_name()
-            .ok_or_else(|| EngineError::ScanFailed(format!("invalid release file name: {name}")))?;
+        let file_name = confined_release_name(name)?;
         std::fs::write(dest_dir.join(file_name), bytes)?;
     }
     Ok(())

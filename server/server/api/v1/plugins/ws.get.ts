@@ -94,6 +94,22 @@ export default defineWebSocketHandler({
           return;
         }
 
+        // Per-channel authorization (e.g. room membership), when a plugin
+        // registers an authorizer for the channel.
+        const authorized = await pluginManager.canSubscribe(data.channel, {
+          userId,
+          userAcls: peerAcls.get(peer.id),
+        });
+        if (!authorized) {
+          peer.send(
+            JSON.stringify({
+              channel: data.channel,
+              error: "not authorized for channel",
+            }),
+          );
+          return;
+        }
+
         const subscriptions = clientChannels.get(peer.id);
         if (!subscriptions) return;
         if (subscriptions.has(data.channel)) return;
@@ -120,6 +136,16 @@ export default defineWebSocketHandler({
         typeof data.channel === "string" &&
         CHANNEL_PATTERN.test(data.channel)
       ) {
+        // Unauthenticated peers may only send on public channels.
+        if (!userId && !PUBLIC_CHANNELS.has(data.channel)) {
+          peer.send(
+            JSON.stringify({
+              channel: data.channel,
+              error: "authentication required",
+            }),
+          );
+          return;
+        }
         const handled = await pluginManager.dispatchWebSocket(
           data.channel,
           data.data,

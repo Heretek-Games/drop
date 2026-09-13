@@ -10,6 +10,7 @@ import {
 } from "../builtin/gse/mesh";
 import { CompatRegistry, compatFromEnv } from "../builtin/gse/compat";
 import { StorageRoomPersistence } from "../builtin/gse/persistence";
+import type { RoomPersistence } from "../builtin/gse/persistence";
 import { ZtnetBackend } from "../builtin/gse/ztnet";
 import {
   CREDENTIAL_ROTATION_WINDOW_MS,
@@ -19,7 +20,7 @@ import {
   RoomStore,
 } from "../builtin/gse/room-store";
 import type { PluginStorage } from "../types";
-import { parseCredential, parseRoom } from "../builtin/gse/types";
+import { parseCredential, parseRoom, toMemberView } from "../builtin/gse/types";
 import type { EmulatorBinding, MeshBackend } from "../builtin/gse/types";
 
 class MemoryStorage implements PluginStorage {
@@ -897,4 +898,196 @@ test("pruneExpired retries teardown instead of orphaning rooms", async () => {
 
   assert.equal(await store.pruneExpired(), 1);
   assert.equal(await persistence.getRoom(room.id), undefined);
+});
+
+test("RoomStore rejects a mesh node id already held by another member", async () => {
+  const { store } = harness();
+  const room = await store.create(createInput("host"));
+  await store.join(room.id, "guest");
+  await store.registerMember(room.id, "host", "abcdef0123");
+
+  await assert.rejects(
+    () => store.registerMember(room.id, "guest", "abcdef0123"),
+    /already registered/,
+  );
+});
+
+test("toMemberView hides peer node ids from non-hosts", async () => {
+  const { store } = harness();
+  const room = await store.create(createInput("host"));
+  await store.join(room.id, "guest");
+  const updated = await store.registerMember(room.id, "host", "abcdef0123");
+
+  const hostMember = (view: {
+    members: Array<{ userId: string; meshNodeId?: string }>;
+  }) => view.members.find((member) => member.userId === "host");
+
+  assert.equal(
+    hostMember(toMemberView(updated, true))?.meshNodeId,
+    "abcdef0123",
+  );
+  assert.equal(hostMember(toMemberView(updated, false))?.meshNodeId, undefined);
+});
+
+test("RoomStore tears down a provisioned mesh when persisting the room fails", async () => {
+  const persistence = new StorageRoomPersistence(new MemoryStorage());
+  const failing: RoomPersistence = {
+    listRooms: () => persistence.listRooms(),
+    getRoom: (id) => persistence.getRoom(id),
+    saveRoom: async () => {
+      throw new Error("database unavailable");
+    },
+    deleteRoom: (id) => persistence.deleteRoom(id),
+    deleteRoomData: (id) => persistence.deleteRoomData(id),
+    getCredentials: (id) => persistence.getCredentials(id),
+    saveCredential: (id, credential) =>
+      persistence.saveCredential(id, credential),
+    deleteCredentials: (id) => persistence.deleteCredentials(id),
+    deleteExpiredCredentials: (before) =>
+      persistence.deleteExpiredCredentials(before),
+  };
+
+  const base = new InMemoryMeshBackend();
+  const tornDown: string[] = [];
+  const backend: MeshBackend = {
+    id: base.id,
+    provision: (roomId, expiresAt) => base.provision(roomId, expiresAt),
+    issueCredential: (r, u, m) => base.issueCredential(r, u, m),
+    authorizeMember: (r, u, mid, m, used) =>
+      base.authorizeMember!(r, u, mid, m, used),
+    revokeMember: async () => {},
+    teardown: async (roomId, mesh) => {
+      tornDown.push(roomId);
+      await base.teardown(roomId, mesh);
+    },
+  };
+
+  const store = new RoomStore(failing, backend, () => 1_000_000);
+  await assert.rejects(
+    () => store.create(createInput("host")),
+    /database unavailable/,
+  );
+  assert.equal(tornDown.length, 1, "the orphaned mesh must be torn down");
+});
+
+test("RoomStore honors a backend-imposed credential expiry", async () => {
+  const base = new InMemoryMeshBackend();
+  const backend: MeshBackend = {
+    id: base.id,
+    provision: (roomId, expiresAt) => base.provision(roomId, expiresAt),
+    issueCredential: (roomId, userId, mesh) =>
+      Promise.resolve({
+        secret: baseSecret(roomId, userId, mesh),
+        address: "10.242.1.20",
+        expiresAt: 1_000_000 + 1_000,
+      }),
+    authorizeMember: (r, u, mid, m, used) =>
+      base.authorizeMember!(r, u, mid, m, used),
+    revokeMember: async () => {},
+    teardown: async () => {},
+  };
+  const store = new RoomStore(
+    new StorageRoomPersistence(new MemoryStorage()),
+    backend,
+    () => 1_000_000,
+  );
+  const room = await store.create(createInput("host"));
+  const credential = await store.credential(room.id, "host");
+  assert.equal(credential.expiresAt, 1_001_000);
+});
+
+function baseSecret(
+  roomId: string,
+  userId: string,
+  mesh: { backend: string },
+): string {
+  return `zt-member:${roomId}:${userId}:${mesh.backend}`;
+}
+
+test("ZtnetBackend treats a 404 teardown as success", async () => {
+  const backend = new ZtnetBackend({
+    baseUrl: "http://ztnet:3000",
+    apiToken: "t",
+    organizationId: "org-1",
+    fetchImpl: async () => ({
+      ok: false,
+      status: 404,
+      json: async () => ({}),
+      text: async () => "not found",
+    }),
+  });
+  await assert.doesNotReject(() =>
+    backend.teardown("room-x", {
+      backend: "zerotier",
+      cidr: "10.242.1.0/24",
+      networkId: "nw-gone",
+      expiresAt: 1,
+    }),
+  );
+});
+
+test("ZeroTierBackend treats a 404 teardown as success", async () => {
+  const backend = new ZeroTierBackend({
+    baseUrl: "http://localhost:9993",
+    authToken: "t",
+    controllerNodeId: "n",
+    fetchImpl: async () => ({
+      ok: false,
+      status: 404,
+      json: async () => ({}),
+      text: async () => "not found",
+    }),
+  });
+  await assert.doesNotReject(() =>
+    backend.teardown("room-x", {
+      backend: "zerotier",
+      cidr: "10.242.1.0/24",
+      networkId: "net-gone",
+      expiresAt: 1,
+    }),
+  );
+});
+
+test("TailscaleApiProvisioner revokes the previous key before re-issuing", async () => {
+  const deletes: string[] = [];
+  let issued = 0;
+  const provisioner = new TailscaleApiProvisioner({
+    apiKey: "ts-key",
+    tailnet: "example.com",
+    tag: "tag:dropgse",
+    fetchImpl: async (url, init) => {
+      if (init?.method === "DELETE") {
+        deletes.push(url);
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({}),
+          text: async () => "",
+        };
+      }
+      issued += 1;
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ id: `key-${issued}`, key: `tskey-${issued}` }),
+        text: async () => "",
+      };
+    },
+  });
+
+  const first = await provisioner.issueAuthKey(
+    "tag:dropgse",
+    "user-1",
+    "room-1",
+  );
+  const second = await provisioner.issueAuthKey(
+    "tag:dropgse",
+    "user-1",
+    "room-1",
+  );
+  assert.equal(first, "tskey-1");
+  assert.equal(second, "tskey-2");
+  assert.deepEqual(deletes, [
+    "https://api.tailscale.com/api/v2/tailnet/example.com/keys/key-1",
+  ]);
 });

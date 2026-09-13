@@ -28,6 +28,7 @@ import {
   generatePipelineRecipe,
   DistributionType,
 } from "./pipeline";
+import { isExcludedExecutablePath } from "./pipeline/executable-scorer";
 
 export function createGameImportTaskId(libraryId: string, libraryPath: string) {
   return createHash("sha256")
@@ -278,7 +279,14 @@ class LibraryManager {
       }
     }
 
-    await prisma.discoveredGame.deleteMany({ where: { decision: "Pending" } });
+    // Only refresh Pending rows for libraries that were actually scanned, so a
+    // temporarily offline library keeps its discovery state.
+    const scannedLibraryIds = Object.keys(unimported);
+    if (scannedLibraryIds.length > 0) {
+      await prisma.discoveredGame.deleteMany({
+        where: { decision: "Pending", libraryId: { in: scannedLibraryIds } },
+      });
+    }
     if (results.length > 0) {
       await prisma.discoveredGame.createMany({
         data: results,
@@ -341,6 +349,11 @@ class LibraryManager {
 
       const min = (index / versions.length) * 100;
       const max = ((index + 1) / versions.length) * 100;
+      // `importVersion` returns a task id even when its inner task fails, so
+      // count only versions that were actually persisted.
+      const versionsBefore = await prisma.gameVersion.count({
+        where: { gameId },
+      });
       await this.importVersion(
         gameId,
         version,
@@ -367,7 +380,10 @@ class LibraryManager {
           prefix: `${libraryPath} (${version.name})`,
         }),
       );
-      imported++;
+      const versionsAfter = await prisma.gameVersion.count({
+        where: { gameId },
+      });
+      if (versionsAfter > versionsBefore) imported++;
       index++;
     }
 
@@ -504,6 +520,11 @@ class LibraryManager {
     }
 
     for (const filename of files) {
+      // Never offer installers/uninstallers/redistributables as a launch
+      // target: when the scorer finds nothing, this fallback list is what the
+      // auto-picker chooses from.
+      if (isExcludedExecutablePath(filename)) continue;
+
       const basename = path.basename(filename);
       const dotLocation = filename.lastIndexOf(".");
       const ext =
