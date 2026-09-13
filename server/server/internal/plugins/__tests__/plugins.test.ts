@@ -525,6 +525,15 @@ test("drop-gse member report authorizes the ZeroTier node and returns its addres
     new DropGseServerPlugin(new StorageRoomPersistence(storage), backend),
   );
 
+  const backendInfo = (await manager.dispatch(
+    "drop-gse",
+    "GET",
+    "/backend",
+    jsonEvent("GET", "/backend"),
+  )) as { backend: string; memory: boolean };
+  assert.equal(backendInfo.backend, "zerotier");
+  assert.equal(backendInfo.memory, false);
+
   const created = (await manager.dispatch(
     "drop-gse",
     "POST",

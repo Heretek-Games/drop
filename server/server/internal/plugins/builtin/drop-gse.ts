@@ -57,6 +57,7 @@ export class DropGseServerPlugin implements ServerPlugin {
   };
 
   private store!: RoomStore;
+  private backend!: MeshBackend;
   private ctx!: PluginContext;
   private pruneTimer: ReturnType<typeof setInterval> | undefined;
 
@@ -119,9 +120,10 @@ export class DropGseServerPlugin implements ServerPlugin {
   init(ctx: PluginContext): void {
     this.ctx = ctx;
     const compat = new CompatRegistry(compatFromEnv());
+    this.backend = this.backendOverride ?? this.resolveBackend();
     this.store = new RoomStore(
       this.persistence ?? new PrismaRoomPersistence(),
-      this.backendOverride ?? this.resolveBackend(),
+      this.backend,
       Date.now,
       compat,
     );
@@ -177,6 +179,13 @@ export class DropGseServerPlugin implements ServerPlugin {
 
     // Route: GET /compat — known-incompatible games/AppIDs.
     ctx.registerRoute("GET", "/compat", () => compat.info());
+
+    // Route: GET /backend — the mesh backend this deployment is configured
+    // with. There is exactly one per deployment; clients cannot choose it.
+    ctx.registerRoute("GET", "/backend", () => ({
+      backend: this.backend.id,
+      memory: this.backend instanceof InMemoryMeshBackend,
+    }));
 
     // Route: GET /rooms
     ctx.registerRoute("GET", "/rooms", async (_event, context) => {

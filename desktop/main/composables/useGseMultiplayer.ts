@@ -35,9 +35,16 @@ export interface GseRoom {
 const activeRoomsMap = ref<{ [gameId: string]: GseRoom[] }>({});
 const currentRoomMap = ref<{ [gameId: string]: GseRoom | null }>({});
 
+export interface MeshBackendInfo {
+  backend: "zerotier" | "tailscale";
+  memory: boolean;
+}
+
 export const useGseMultiplayer = (gameId: string) => {
   const isLoading = ref(false);
   const error = ref<string | null>(null);
+  /** The backend this Drop deployment is configured with (server-side). */
+  const activeBackend = ref<MeshBackendInfo | null>(null);
   /** This client's assigned mesh address (set once the server authorizes it). */
   const selfAddress = ref<string | null>(null);
   const selfNetworkId = ref<string | null>(null);
@@ -79,9 +86,23 @@ export const useGseMultiplayer = (gameId: string) => {
     }
   }
 
+  /** Fetch the server-configured mesh backend (there is one per deployment). */
+  async function fetchBackend(): Promise<MeshBackendInfo | null> {
+    try {
+      const res = await invoke<MeshBackendInfo>("plugin_request", {
+        pluginId: "drop-gse",
+        method: "GET",
+        path: "/backend",
+      });
+      activeBackend.value = res;
+      return res;
+    } catch {
+      return null;
+    }
+  }
+
   async function hostRoom(
     versionId: string,
-    backend: "tailscale" | "zerotier" = "tailscale",
     appId?: number,
   ): Promise<GseRoom | null> {
     isLoading.value = true;
@@ -94,7 +115,6 @@ export const useGseMultiplayer = (gameId: string) => {
         body: {
           gameId,
           versionId,
-          backend,
           appId,
           emulator: {
             flavor: "gbe_fork",
@@ -338,11 +358,13 @@ export const useGseMultiplayer = (gameId: string) => {
   return {
     rooms,
     currentRoom,
+    activeBackend,
     selfAddress,
     selfNetworkId,
     meshReady,
     isLoading,
     error,
+    fetchBackend,
     fetchRooms,
     refreshRoom,
     requestCredential,

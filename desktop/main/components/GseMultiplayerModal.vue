@@ -126,21 +126,25 @@
         >
           <div class="flex items-center justify-between">
             <h4 class="text-sm font-semibold text-zinc-200">Host New Room</h4>
-            <div class="flex items-center gap-x-2">
-              <label class="text-xs text-zinc-400">Mesh:</label>
-              <select
-                v-model="selectedBackend"
-                class="rounded bg-zinc-900 px-2 py-1 text-xs text-zinc-200 border border-zinc-700 focus:outline-none focus:border-purple-500"
-              >
-                <option value="tailscale">Tailscale Mesh</option>
-                <option value="zerotier">ZeroTier Mesh</option>
-              </select>
-            </div>
+            <span
+              class="rounded bg-zinc-800 px-2 py-0.5 text-[10px] uppercase tracking-wide text-zinc-400"
+            >
+              {{ backendLabel }}
+            </span>
           </div>
 
           <p class="text-xs text-zinc-400">
             Create an encrypted room on the Drop server and broadcast
             multiplayer sessions to friends.
+          </p>
+
+          <p
+            v-if="activeBackend?.backend === 'tailscale'"
+            class="rounded bg-amber-500/10 px-2 py-1 text-[11px] text-amber-400"
+          >
+            This server uses a Tailscale mesh. The desktop client cannot join it
+            automatically yet — players must join the tailnet manually with
+            their own credentials.
           </p>
 
           <label class="flex items-start gap-x-2 text-[11px] text-zinc-400">
@@ -270,16 +274,17 @@ const emit = defineEmits<{
 }>();
 
 const isOpen = defineModel<boolean>({ default: false });
-const selectedBackend = ref<"tailscale" | "zerotier">("tailscale");
 const consent = ref(false);
 
 const {
   rooms,
   currentRoom,
+  activeBackend,
   selfAddress,
   meshReady,
   isLoading,
   error,
+  fetchBackend,
   fetchRooms,
   hostRoom,
   joinRoom,
@@ -289,11 +294,18 @@ const {
   stopLiveUpdates,
 } = useGseMultiplayer(props.gameId);
 
+const backendLabel = computed(() => {
+  const backend = activeBackend.value;
+  if (!backend) return "Mesh: unknown";
+  if (backend.memory) return "In-memory (dev)";
+  return backend.backend === "tailscale" ? "Tailscale Mesh" : "ZeroTier Mesh";
+});
+
 watch(
   isOpen,
   async (open) => {
     if (open) {
-      await fetchRooms();
+      await Promise.all([fetchBackend(), fetchRooms()]);
       await startLiveUpdates();
     } else {
       stopLiveUpdates();
@@ -303,7 +315,7 @@ watch(
 );
 
 async function handleHostRoom() {
-  await hostRoom(props.versionId, selectedBackend.value, props.appId);
+  await hostRoom(props.versionId, props.appId);
   if (currentRoom.value && props.installDir) {
     await syncRoomConfigToDisk(props.installDir, currentRoom.value);
   }

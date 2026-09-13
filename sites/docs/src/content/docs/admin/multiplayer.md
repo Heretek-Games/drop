@@ -46,7 +46,8 @@ Enable it under **Settings → Plugins** (it is enabled by default) — see
 | `GSE_BLOCKED_GAME_IDS`  | Comma-separated Drop game ids refused for rooms.                          |
 
 Backend selection in `resolveBackend()`: ZTNET → raw ZeroTier → Tailscale →
-in-memory.
+in-memory. A Drop deployment uses exactly **one** mesh backend; players do not
+choose it (the client shows the configured backend read-only).
 
 ## ZeroTier via ZTNET (recommended)
 
@@ -102,6 +103,11 @@ GSE_ZEROTIER_NODE=<10-hex node id>
 Networks are created and members authorized through the controller API directly.
 
 ## Tailscale (advanced)
+
+> **Desktop support is not implemented yet.** The server can provision Tailscale
+> rooms, but the desktop client only joins ZeroTier networks automatically
+> (`gse_mesh_join`). With a Tailscale backend, players must join the tailnet
+> manually. Prefer ZTNET for a working end-to-end flow.
 
 Tailscale cannot do true per-room subnets, so isolation relies on a policy tag.
 Declare one tag (default `tag:dropgse`) in your tailnet policy and give Drop a
