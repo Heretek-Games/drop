@@ -566,6 +566,54 @@ test("drop-gse member report authorizes the ZeroTier node and returns its addres
   );
 });
 
+test("drop-gse backend selection honors GSE_MESH_BACKEND", async () => {
+  const saved = {
+    GSE_MESH_BACKEND: process.env.GSE_MESH_BACKEND,
+    GSE_ZTNET_URL: process.env.GSE_ZTNET_URL,
+    GSE_ZTNET_TOKEN: process.env.GSE_ZTNET_TOKEN,
+    GSE_ZTNET_ORG: process.env.GSE_ZTNET_ORG,
+  };
+  const restore = () => {
+    for (const [key, value] of Object.entries(saved)) {
+      if (value === undefined) Reflect.deleteProperty(process.env, key);
+      else process.env[key] = value;
+    }
+  };
+  const backendOf = async () => {
+    const manager = createTestManager();
+    await manager.registerPlugin(
+      new DropGseServerPlugin(new StorageRoomPersistence(new MemoryStorage())),
+    );
+    return (await manager.dispatch(
+      "drop-gse",
+      "GET",
+      "/backend",
+      jsonEvent("GET", "/backend"),
+    )) as { backend: string; memory: boolean };
+  };
+
+  try {
+    // Explicit `memory` wins even when ZTNET credentials are present.
+    process.env.GSE_MESH_BACKEND = "memory";
+    process.env.GSE_ZTNET_URL = "http://ztnet:3000";
+    process.env.GSE_ZTNET_TOKEN = "t";
+    process.env.GSE_ZTNET_ORG = "o";
+    assert.deepEqual(await backendOf(), { backend: "zerotier", memory: true });
+
+    process.env.GSE_MESH_BACKEND = "ztnet";
+    assert.deepEqual(await backendOf(), { backend: "zerotier", memory: false });
+
+    // Unknown or under-configured explicit values fail closed.
+    process.env.GSE_MESH_BACKEND = "bogus";
+    await assert.rejects(() => backendOf(), /GSE_MESH_BACKEND/);
+
+    process.env.GSE_MESH_BACKEND = "tailscale";
+    await assert.rejects(() => backendOf(), /GSE_MESH_BACKEND/);
+  } finally {
+    restore();
+  }
+});
+
 test("PluginManager routes WebSocket messages and enforces the capability", async () => {
   const manager = createTestManager();
   let received: unknown;

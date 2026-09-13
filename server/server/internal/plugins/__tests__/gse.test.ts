@@ -5,6 +5,7 @@ import {
   TailscaleApiProvisioner,
   TailscaleBackend,
   ZeroTierBackend,
+  allocateMemberAddress,
   roomCidr,
 } from "../builtin/gse/mesh";
 import { CompatRegistry, compatFromEnv } from "../builtin/gse/compat";
@@ -179,6 +180,26 @@ test("roomCidr is stable and within the base /16", () => {
   const cidr = roomCidr("room-abc");
   assert.match(cidr, /^10\.242\.\d{1,3}\.0\/24$/);
   assert.equal(cidr, roomCidr("room-abc"));
+});
+
+test("allocateMemberAddress probes past collisions and exhausts cleanly", () => {
+  const cidr = "10.242.7.0/24";
+  const first = allocateMemberAddress(cidr, "user-a");
+  assert.ok(first);
+  // A second member whose hash collides must get a different address.
+  const second = allocateMemberAddress(cidr, "user-a", [first]);
+  assert.ok(second);
+  assert.notEqual(second, first);
+
+  // The pool holds 200 deterministic, unique addresses before it is full.
+  const used: string[] = [];
+  for (let i = 0; i < 200; i++) {
+    const address = allocateMemberAddress(cidr, `member-${i}`, used);
+    assert.ok(address);
+    used.push(address);
+  }
+  assert.equal(new Set(used).size, 200);
+  assert.equal(allocateMemberAddress(cidr, "overflow", used), undefined);
 });
 
 test("ZeroTierBackend provisions a network via the controller API", async () => {
@@ -573,6 +594,36 @@ test("TailscaleApiProvisioner issues one-off keys and revokes them", async () =>
   );
 });
 
+test("TailscaleApiProvisioner surfaces key deletion failures", async () => {
+  let issued = false;
+  const provisioner = new TailscaleApiProvisioner({
+    apiKey: "ts-key",
+    tailnet: "example.com",
+    tag: "tag:dropgse",
+    fetchImpl: async (_url, init) => {
+      if (init?.method === "DELETE") {
+        return {
+          ok: false,
+          status: 403,
+          json: async () => ({}),
+          text: async () => "denied",
+        };
+      }
+      issued = true;
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ id: "key-1", key: "tskey-ephemeral" }),
+        text: async () => "",
+      };
+    },
+  });
+
+  await provisioner.issueAuthKey("tag:dropgse", "user-1", "room-1");
+  assert.ok(issued);
+  await assert.rejects(() => provisioner.teardownRoom("room-1"), /403/);
+});
+
 test("RoomStore records the address authorized for a member node", async () => {
   const { store } = harness();
   const room = await store.create(createInput("host"));
@@ -639,4 +690,69 @@ test("compatFromEnv parses blocked app and game lists", () => {
   });
   assert.deepEqual(info.blockedAppIds, [1, 2]);
   assert.deepEqual(info.blockedGameIds, ["a", "b"]);
+});
+
+test("RoomStore discovery redacts the mesh network id", async () => {
+  const { store } = harness();
+  const room = await store.create(createInput("host"));
+  const [listed] = await store.list();
+  assert.ok(listed);
+  assert.equal(listed.mesh.backend, "zerotier");
+  if (listed.mesh.backend === "zerotier") {
+    assert.equal(listed.mesh.networkId, "");
+    assert.equal(listed.mesh.cidr, roomCidr(room.id));
+  }
+
+  // Members still see the full mesh on the room itself.
+  const full = await store.get(room.id);
+  assert.ok(full);
+  assert.equal(full.mesh.backend, "zerotier");
+  if (full.mesh.backend === "zerotier") {
+    assert.ok(full.mesh.networkId.length > 0);
+  }
+});
+
+test("StorageRoomPersistence redacts secrets and sweeps expired credentials", async () => {
+  const storage = new MemoryStorage();
+  const persistence = new StorageRoomPersistence(storage);
+  const store = new RoomStore(
+    persistence,
+    new InMemoryMeshBackend(),
+    () => 1_000_000,
+  );
+  const room = await store.create(createInput("host"));
+
+  await persistence.saveCredential(room.id, {
+    roomId: room.id,
+    userId: "host",
+    secret: "super-secret",
+    address: "10.242.1.20",
+    issuedAt: 1_000_000,
+    expiresAt: 2_000_000,
+  });
+  const stored = await persistence.getCredentials(room.id);
+  assert.equal(stored["host"]?.secret, "");
+  assert.equal(stored["host"]?.address, "10.242.1.20");
+
+  assert.equal(await persistence.deleteExpiredCredentials(1_500_000), 0);
+  assert.equal(await persistence.deleteExpiredCredentials(2_500_000), 1);
+  assert.deepEqual(await persistence.getCredentials(room.id), {});
+});
+
+test("RoomStore host close deletes the room and its credentials together", async () => {
+  const storage = new MemoryStorage();
+  const persistence = new StorageRoomPersistence(storage);
+  const store = new RoomStore(
+    persistence,
+    new InMemoryMeshBackend(),
+    () => 1_000_000,
+  );
+  const room = await store.create(createInput("host"));
+  await store.credential(room.id, "host");
+  assert.ok(Object.keys(await persistence.getCredentials(room.id)).length > 0);
+
+  const closed = await store.leave(room.id, "host");
+  assert.equal(closed.closed, true);
+  assert.equal(await persistence.getRoom(room.id), undefined);
+  assert.deepEqual(await persistence.getCredentials(room.id), {});
 });

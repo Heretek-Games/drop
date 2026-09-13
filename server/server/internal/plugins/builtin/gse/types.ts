@@ -96,13 +96,15 @@ export interface MeshBackend {
    * Authorize a member's node after it has joined the mesh. Returns the address
    * assigned by the backend, when it can report one. `userId` lets the backend
    * remember the node id for later revocation; `mesh` lets it recover the
-   * network after a restart.
+   * network after a restart; `usedAddresses` lets it avoid reusing a room
+   * address already handed to another member.
    */
   authorizeMember?(
     roomId: string,
     userId: string,
     memberId: string,
     mesh?: PublicMeshInfo,
+    usedAddresses?: string[],
   ): Promise<string | undefined>;
   /**
    * Remove every node/network for the room. `mesh` is supplied when available
@@ -112,6 +114,22 @@ export interface MeshBackend {
   teardown(roomId: string, mesh?: PublicMeshInfo): Promise<void>;
 }
 
+/**
+ * Drop the network identifiers from mesh info for non-member discovery: only
+ * authenticated members receive them via their credential/room view.
+ */
+function redactMesh(mesh: PublicMeshInfo): PublicMeshInfo {
+  if (mesh.backend === "zerotier") {
+    return {
+      backend: "zerotier",
+      cidr: mesh.cidr,
+      networkId: "",
+      expiresAt: mesh.expiresAt,
+    };
+  }
+  return { backend: "tailscale", aclTag: "", expiresAt: mesh.expiresAt };
+}
+
 export function toDiscoverable(room: Room): DiscoverableRoom {
   return {
     id: room.id,
@@ -119,7 +137,7 @@ export function toDiscoverable(room: Room): DiscoverableRoom {
     versionId: room.versionId,
     appId: room.appId,
     emulator: room.emulator,
-    mesh: room.mesh,
+    mesh: redactMesh(room.mesh),
     memberCount: room.members.length,
     createdAt: room.createdAt,
     expiresAt: room.expiresAt,

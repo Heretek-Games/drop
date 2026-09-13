@@ -1,4 +1,4 @@
-import { type FetchLike, roomCidr, roomMemberAddress } from "./mesh";
+import { allocateMemberAddress, type FetchLike, roomCidr } from "./mesh";
 import type { IssuedCredential, MeshBackend, PublicMeshInfo } from "./types";
 
 export interface ZtnetBackendOptions {
@@ -165,14 +165,20 @@ export class ZtnetBackend implements MeshBackend {
     userId: string,
     memberId: string,
     mesh?: PublicMeshInfo,
+    usedAddresses: string[] = [],
   ): Promise<string | undefined> {
     const networkId = this.networkIdFor(roomId, mesh);
     if (!networkId) return undefined;
 
     // Assign a deterministic address from the room pool at authorization time;
     // the controller does not auto-assign until the node actually joins, and
-    // peers need known addresses for `custom_broadcasts.txt`.
-    const assigned = roomMemberAddress(roomCidr(roomId), memberId);
+    // peers need known addresses for `custom_broadcasts.txt`. Existing
+    // assignments are skipped so two members cannot collide.
+    const assigned = allocateMemberAddress(
+      roomCidr(roomId),
+      memberId,
+      usedAddresses,
+    );
 
     const member = await this.json<ZtnetMemberResponse>(
       this.orgUrl(`/${networkId}/member/${memberId}`),

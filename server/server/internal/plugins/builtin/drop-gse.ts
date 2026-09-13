@@ -36,9 +36,10 @@ const PRUNE_INTERVAL_MS = 60_000;
 /**
  * Drop GSE multiplayer room coordinator.
  *
- * Rooms are durable (plugin storage) and mesh-backed by a pluggable
- * `MeshBackend`: ZeroTier when `GSE_ZEROTIER_URL`/`GSE_ZEROTIER_TOKEN`/
- * `GSE_ZEROTIER_NODE` are configured, otherwise an in-memory backend.
+ * Rooms are durable (Postgres by default) and mesh-backed by one pluggable
+ * `MeshBackend`, chosen by `GSE_MESH_BACKEND` or auto-detected: ZTNET (default)
+ * → raw ZeroTier → Tailscale → in-memory. The backend is per-deployment;
+ * clients cannot switch it.
  */
 export class DropGseServerPlugin implements ServerPlugin {
   metadata: PluginMetadata = {
@@ -71,19 +72,33 @@ export class DropGseServerPlugin implements ServerPlugin {
     private readonly backendOverride?: MeshBackend,
   ) {}
 
+  /**
+   * Select the mesh backend from `GSE_MESH_BACKEND` (explicit) or by
+   * auto-detecting configured credentials. Auto order: ZTNET → raw ZeroTier →
+   * Tailscale → in-memory. An explicit value that is unknown or missing its
+   * configuration fails closed instead of silently falling through.
+   */
   private resolveBackend(): MeshBackend {
-    const selected = (process.env.GSE_MESH_BACKEND ?? "").toLowerCase();
+    const selected = (process.env.GSE_MESH_BACKEND ?? "").trim().toLowerCase();
+
+    if (selected === "memory") {
+      return new InMemoryMeshBackend();
+    }
+    if (
+      selected &&
+      !["ztnet", "zerotier", "tailscale", "memory"].includes(selected)
+    ) {
+      throw new Error(
+        `unknown GSE_MESH_BACKEND '${selected}' (expected ztnet, zerotier, tailscale or memory)`,
+      );
+    }
+    const selectedOr = (name: string) => selected === "" || selected === name;
 
     // ZTNET-managed controller is the default path.
     const ztnetUrl = process.env.GSE_ZTNET_URL;
     const ztnetToken = process.env.GSE_ZTNET_TOKEN;
     const ztnetOrg = process.env.GSE_ZTNET_ORG;
-    if (
-      (selected === "ztnet" || (selected === "" && ztnetUrl)) &&
-      ztnetUrl &&
-      ztnetToken &&
-      ztnetOrg
-    ) {
+    if (selectedOr("ztnet") && ztnetUrl && ztnetToken && ztnetOrg) {
       return new ZtnetBackend({
         baseUrl: ztnetUrl,
         apiToken: ztnetToken,
@@ -91,13 +106,16 @@ export class DropGseServerPlugin implements ServerPlugin {
       });
     }
 
+    const baseUrl = process.env.GSE_ZEROTIER_URL;
+    const authToken = process.env.GSE_ZEROTIER_TOKEN;
+    const controllerNodeId = process.env.GSE_ZEROTIER_NODE;
+    if (selectedOr("zerotier") && baseUrl && authToken && controllerNodeId) {
+      return new ZeroTierBackend({ baseUrl, authToken, controllerNodeId });
+    }
+
     const tailscaleKey = process.env.GSE_TAILSCALE_API_KEY;
     const tailnet = process.env.GSE_TAILSCALE_TAILNET;
-    if (
-      (selected === "tailscale" || (selected === "" && tailscaleKey)) &&
-      tailscaleKey &&
-      tailnet
-    ) {
+    if (selectedOr("tailscale") && tailscaleKey && tailnet) {
       return new TailscaleBackend(
         new TailscaleApiProvisioner({
           apiKey: tailscaleKey,
@@ -107,11 +125,10 @@ export class DropGseServerPlugin implements ServerPlugin {
       );
     }
 
-    const baseUrl = process.env.GSE_ZEROTIER_URL;
-    const authToken = process.env.GSE_ZEROTIER_TOKEN;
-    const controllerNodeId = process.env.GSE_ZEROTIER_NODE;
-    if (baseUrl && authToken && controllerNodeId) {
-      return new ZeroTierBackend({ baseUrl, authToken, controllerNodeId });
+    if (selected) {
+      throw new Error(
+        `GSE_MESH_BACKEND='${selected}' is set but its required configuration is missing`,
+      );
     }
 
     return new InMemoryMeshBackend();

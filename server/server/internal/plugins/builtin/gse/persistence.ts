@@ -11,9 +11,18 @@ export interface RoomPersistence {
   getRoom(id: string): Promise<Room | undefined>;
   saveRoom(room: Room): Promise<void>;
   deleteRoom(id: string): Promise<void>;
+  /** Atomically delete a room and all of its credentials. */
+  deleteRoomData(id: string): Promise<void>;
   getCredentials(roomId: string): Promise<Record<string, MeshCredential>>;
+  /**
+   * Persist a credential. Implementations store the assigned address/expiry but
+   * redact `secret`, so backend secrets are not kept at rest; `RoomStore`
+   * re-issues when it reads back an empty secret.
+   */
   saveCredential(roomId: string, credential: MeshCredential): Promise<void>;
   deleteCredentials(roomId: string): Promise<void>;
+  /** Delete credentials that expired at or before `before`. Returns the count. */
+  deleteExpiredCredentials(before: number): Promise<number>;
 }
 
 const ROOMS_KEY = "rooms";
@@ -57,6 +66,15 @@ export class StorageRoomPersistence implements RoomPersistence {
     await this.storage.set(ROOMS_KEY, rooms);
   }
 
+  async deleteRoomData(id: string): Promise<void> {
+    const rooms = await this.loadRooms();
+    Reflect.deleteProperty(rooms, id);
+    const credentials = await this.loadCredentials();
+    Reflect.deleteProperty(credentials, id);
+    await this.storage.set(ROOMS_KEY, rooms);
+    await this.storage.set(CREDENTIALS_KEY, credentials);
+  }
+
   async getCredentials(
     roomId: string,
   ): Promise<Record<string, MeshCredential>> {
@@ -69,7 +87,11 @@ export class StorageRoomPersistence implements RoomPersistence {
   ): Promise<void> {
     const credentials = await this.loadCredentials();
     credentials[roomId] = credentials[roomId] ?? {};
-    credentials[roomId][credential.userId] = credential;
+    // Redact the secret at rest; the coordinator re-issues on demand.
+    credentials[roomId][credential.userId] = {
+      ...credential,
+      secret: "",
+    };
     await this.storage.set(CREDENTIALS_KEY, credentials);
   }
 
@@ -77,5 +99,26 @@ export class StorageRoomPersistence implements RoomPersistence {
     const credentials = await this.loadCredentials();
     Reflect.deleteProperty(credentials, roomId);
     await this.storage.set(CREDENTIALS_KEY, credentials);
+  }
+
+  async deleteExpiredCredentials(before: number): Promise<number> {
+    const credentials = await this.loadCredentials();
+    let removed = 0;
+    for (const roomId of Object.keys(credentials)) {
+      const perUser = credentials[roomId];
+      if (!perUser) continue;
+      for (const userId of Object.keys(perUser)) {
+        const credential = perUser[userId];
+        if (credential && credential.expiresAt <= before) {
+          Reflect.deleteProperty(perUser, userId);
+          removed += 1;
+        }
+      }
+      if (Object.keys(perUser).length === 0) {
+        Reflect.deleteProperty(credentials, roomId);
+      }
+    }
+    await this.storage.set(CREDENTIALS_KEY, credentials);
+    return removed;
   }
 }

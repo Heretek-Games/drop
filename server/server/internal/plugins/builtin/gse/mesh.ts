@@ -29,6 +29,28 @@ export function roomMemberAddress(
 }
 
 /**
+ * First free address in a room /24, starting at the deterministic hash slot and
+ * probing upward. `used` are addresses already assigned in the room, so two
+ * members cannot collide even when their hashes do.
+ */
+export function allocateMemberAddress(
+  cidr: string,
+  userId: string,
+  used: Iterable<string> = [],
+): string | undefined {
+  if (!cidr.endsWith("/24")) return undefined;
+  const base = cidr.replace(/\.0\/24$/, "");
+  const start = 20 + (hashString(userId) % 200);
+  const taken = new Set(used);
+  for (let offset = 0; offset < 200; offset++) {
+    const host = 20 + ((start - 20 + offset) % 200);
+    const candidate = `${base}.${host}`;
+    if (!taken.has(candidate)) return candidate;
+  }
+  return undefined;
+}
+
+/**
  * In-memory mesh backend used for tests and local development. Produces
  * deterministic public info and opaque per-member credentials.
  */
@@ -70,9 +92,12 @@ export class InMemoryMeshBackend implements MeshBackend {
     roomId: string,
     userId: string,
     memberId: string,
+    mesh?: PublicMeshInfo,
+    usedAddresses: string[] = [],
   ): Promise<string | undefined> {
     void userId;
-    return roomMemberAddress(roomCidr(roomId), memberId);
+    const cidr = mesh?.backend === "zerotier" ? mesh.cidr : roomCidr(roomId);
+    return allocateMemberAddress(cidr, memberId, usedAddresses);
   }
 
   async teardown(roomId: string, mesh?: PublicMeshInfo): Promise<void> {
@@ -401,10 +426,13 @@ export class TailscaleApiProvisioner implements TailscaleProvisioner {
     const ids = this.keyIds.get(roomId) ?? [];
     this.keyIds.delete(roomId);
     for (const id of ids) {
-      await this.fetchImpl(
+      const response = await this.fetchImpl(
         `${this.baseUrl}/tailnet/${this.options.tailnet}/keys/${id}`,
         { method: "DELETE", headers: this.headers() },
       );
+      if (!response.ok) {
+        throw new Error(`Tailscale key deletion failed (${response.status})`);
+      }
     }
   }
 }

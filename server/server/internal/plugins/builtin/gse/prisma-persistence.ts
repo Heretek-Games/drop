@@ -46,6 +46,14 @@ export class PrismaRoomPersistence implements RoomPersistence {
     await prisma.gseRoom.deleteMany({ where: { id } });
   }
 
+  async deleteRoomData(id: string): Promise<void> {
+    const prisma = await this.db();
+    await prisma.$transaction([
+      prisma.gseRoom.deleteMany({ where: { id } }),
+      prisma.gseCredential.deleteMany({ where: { roomId: id } }),
+    ]);
+  }
+
   async getCredentials(
     roomId: string,
   ): Promise<Record<string, MeshCredential>> {
@@ -63,11 +71,14 @@ export class PrismaRoomPersistence implements RoomPersistence {
     credential: MeshCredential,
   ): Promise<void> {
     const prisma = await this.db();
+    // Redact the backend secret at rest; the coordinator re-issues it on
+    // demand (the assigned address and expiry are retained).
+    const redacted: MeshCredential = { ...credential, secret: "" };
     const data = {
       roomId,
       userId: credential.userId,
       expiresAt: BigInt(credential.expiresAt),
-      payload: credential as unknown as object,
+      payload: redacted as unknown as object,
     };
     await prisma.gseCredential.upsert({
       where: { roomId_userId: { roomId, userId: credential.userId } },
@@ -79,5 +90,13 @@ export class PrismaRoomPersistence implements RoomPersistence {
   async deleteCredentials(roomId: string): Promise<void> {
     const prisma = await this.db();
     await prisma.gseCredential.deleteMany({ where: { roomId } });
+  }
+
+  async deleteExpiredCredentials(before: number): Promise<number> {
+    const prisma = await this.db();
+    const result = await prisma.gseCredential.deleteMany({
+      where: { expiresAt: { lte: BigInt(before) } },
+    });
+    return result.count;
   }
 }
