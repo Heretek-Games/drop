@@ -443,7 +443,27 @@ impl ProcessManager<'_> {
                     .find(|v| v.platform == target_platform)
                     .ok_or(ProcessError::NotInstalled)?;
 
-                (setup_config.command.clone(), None)
+                // Generated setup commands (e.g. drop-pipeline-setup.bat) are
+                // not shipped in the release; materialize them from the
+                // recipe before the legacy fallback tries to run them.
+                if let Some(manifest) = game_version.droplet_manifest.as_ref() {
+                    crate::pipeline::materialize_setup_script(
+                        manifest,
+                        PathBuf::from(&install_dir).as_path(),
+                        &target_platform,
+                    )
+                    .map_err(ProcessError::FailedLaunch)?;
+                }
+
+                let command = setup_config.command.clone();
+                if let Ok(parsed) = ParsedCommand::parse(command.clone()) {
+                    let resolved = PathBuf::from(&install_dir).join(&parsed.command);
+                    if !resolved.is_file() {
+                        return Err(ProcessError::MissingSetupScript(parsed.command));
+                    }
+                }
+
+                (command, None)
             }
             _ => unreachable!("Game registered as 'Partially Installed'"),
         };

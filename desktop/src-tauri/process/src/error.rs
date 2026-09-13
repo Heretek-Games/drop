@@ -20,6 +20,7 @@ pub enum ProcessError {
     InvalidArguments(String),
     FailedLaunch(String),
     NotExecutable(String),
+    MissingSetupScript(String),
     NoCompat,
 }
 
@@ -43,6 +44,9 @@ impl Display for ProcessError {
             ProcessError::NotExecutable(command) => {
                 &format!("The command '{command}' exists but is not marked as executable")
             }
+            ProcessError::MissingSetupScript(command) => &format!(
+                "The setup script '{command}' is missing from the install directory. Re-download the version or use the desktop pipeline setup."
+            ),
             ProcessError::RequiredDependency(game_id, version_id) => &format!(
                 "Missing a required dependency to launch this game: {} {}",
                 game_id, version_id

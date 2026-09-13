@@ -12,7 +12,7 @@ use std::{
 
 use database::{
     DownloadableMetadata, GameDownloadStatus, borrow_db_checked, borrow_db_mut_checked,
-    db::DATA_ROOT_DIR, models::data::InstalledGameType,
+    db::DATA_ROOT_DIR, models::data::InstalledGameType, platform::Platform,
 };
 use games::{library::push_game_update, state::GameStatusManager};
 use log::{debug, error, info, warn};
@@ -253,6 +253,58 @@ pub fn prepare_pipeline(game_id: &str) -> Result<PreparedPipeline, String> {
 pub async fn run_pipeline_for_game(app_handle: AppHandle, game_id: String) -> Result<u64, String> {
     let prepared = prepare_pipeline(&game_id)?;
     run_prepared_pipeline(app_handle, game_id, prepared).await
+}
+
+/// Names written as setup scripts must stay inside the install directory.
+fn safe_script_name(name: &str) -> bool {
+    !name.is_empty()
+        && !name.contains(['/', '\\'])
+        && !name.contains("..")
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_'))
+}
+
+/// Writes the recipe's generated fallback setup script into `install_dir`.
+///
+/// The native pipeline is the primary setup path; this keeps the legacy
+/// `setups` fallback runnable when the client cannot execute the recipe.
+pub fn materialize_setup_script(
+    manifest: &serde_json::Value,
+    install_dir: &Path,
+    platform: &Platform,
+) -> Result<Option<String>, String> {
+    let Some(recipe_value) = manifest.get("recipe") else {
+        return Ok(None);
+    };
+    let recipe: PipelineRecipe = serde_json::from_value(recipe_value.clone())
+        .map_err(|e| format!("Failed to parse pipeline recipe: {e}"))?;
+
+    let (script, default_name) = match platform {
+        Platform::Windows => (recipe.setup_script_windows, "drop-pipeline-setup.bat"),
+        _ => (recipe.setup_script_linux, "drop-pipeline-setup.sh"),
+    };
+    let Some(script) = script else {
+        return Ok(None);
+    };
+
+    let name = recipe
+        .setup_command
+        .unwrap_or_else(|| default_name.to_string());
+    if !safe_script_name(&name) {
+        return Err("refusing to write an unsafe setup script name".to_string());
+    }
+
+    let path = install_dir.join(&name);
+    fs::write(&path, script).map_err(|e| format!("failed to write {name}: {e}"))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if let Err(e) = fs::set_permissions(&path, fs::Permissions::from_mode(0o755)) {
+            warn!("failed to mark {name} executable: {e}");
+        }
+    }
+    Ok(Some(name))
 }
 
 pub async fn run_prepared_pipeline(
@@ -1312,5 +1364,46 @@ mod tests {
         assert!(!p1.exists());
         assert!(!p2.exists());
         assert!(keep.exists());
+    }
+
+    #[test]
+    fn test_materialize_setup_script() {
+        let temp = tempfile::tempdir().unwrap();
+        let manifest = serde_json::json!({
+            "recipe": {
+                "distributionType": "ArchiveBundle",
+                "steps": [],
+                "targetExecutable": "Game.exe",
+                "setupCommand": "drop-pipeline-setup.bat",
+                "setupScriptWindows": "@echo off\necho hello\n",
+                "setupScriptLinux": "#!/bin/bash\necho hello\n"
+            }
+        });
+
+        let written =
+            materialize_setup_script(&manifest, temp.path(), &Platform::Windows).unwrap();
+        assert_eq!(written.as_deref(), Some("drop-pipeline-setup.bat"));
+        let script =
+            fs::read_to_string(temp.path().join("drop-pipeline-setup.bat")).unwrap();
+        assert!(script.contains("echo hello"));
+
+        assert!(
+            materialize_setup_script(&serde_json::json!({}), temp.path(), &Platform::Windows)
+                .unwrap()
+                .is_none()
+        );
+
+        let unsafe_name = serde_json::json!({
+            "recipe": {
+                "distributionType": "ArchiveBundle",
+                "steps": [],
+                "targetExecutable": "Game.exe",
+                "setupCommand": "../evil.bat",
+                "setupScriptWindows": "@echo off\n"
+            }
+        });
+        assert!(
+            materialize_setup_script(&unsafe_name, temp.path(), &Platform::Windows).is_err()
+        );
     }
 }
