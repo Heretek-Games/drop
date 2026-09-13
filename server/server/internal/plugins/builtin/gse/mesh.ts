@@ -112,8 +112,8 @@ export class InMemoryMeshBackend implements MeshBackend {
 export type FetchLike = (
   input: string,
   init?: {
-    method?: string | undefined;
-    headers?: Record<string, string> | undefined;
+    method?: string;
+    headers?: Record<string, string>;
     body?: string;
   },
 ) => Promise<{

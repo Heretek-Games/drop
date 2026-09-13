@@ -958,7 +958,7 @@ export class SteamProvider implements MetadataProvider {
     // Neutralize HTML comments by removing every '<!--' opener regardless of
     // whether a matching '-->' exists, so no fragment of a comment can
     // survive — including crafted input like "<!--><!-->".
-    markdown = markdown.replace(/<!--[\s\S]*?(?:-->|$)/g, "");
+    markdown = this._stripHtmlComments(markdown);
 
     // Convert the bullet points and tabs to markdown list format
     markdown = markdown.replace(/• *\t+/g, "\n- ");
@@ -1054,14 +1054,60 @@ export class SteamProvider implements MetadataProvider {
     return markdown;
   }
 
+  /**
+   * Removes HTML comments with plain string scanning: every `<!--` opener is
+   * removed to its first `-->`, and an unterminated opener removes the rest of
+   * the input so no fragment of a comment can survive.
+   */
+  private _stripHtmlComments(markdown: string): string {
+    let result = "";
+    let index = 0;
+    while (index < markdown.length) {
+      const start = markdown.indexOf("<!--", index);
+      if (start === -1) {
+        result += markdown.slice(index);
+        break;
+      }
+      result += markdown.slice(index, start);
+      const end = markdown.indexOf("-->", start + "<!--".length);
+      if (end === -1) break;
+      index = end + "-->".length;
+    }
+    return result;
+  }
+
   private _cleanupBasicFormatting(markdown: string): string {
     // Clean up spaces before newlines
-    markdown = markdown.replace(/[^\S\r\n]+\n/g, "\n");
+    markdown = markdown
+      .split("\n")
+      .map((line) => line.trimEnd())
+      .join("\n");
 
     // Clean up excessive spacing around punctuation
-    markdown = markdown.replace(/[^\S]+([.,!?;:])/g, "$1");
+    markdown = this._collapseWhitespaceBeforePunctuation(markdown);
 
     return markdown;
+  }
+
+  /** Removes whitespace runs that sit immediately before sentence punctuation. */
+  private _collapseWhitespaceBeforePunctuation(markdown: string): string {
+    const punctuation = new Set([".", ",", "!", "?", ";", ":"]);
+    let result = "";
+    let whitespace = "";
+    for (const char of markdown) {
+      if (/\s/.test(char)) {
+        whitespace += char;
+        continue;
+      }
+      if (punctuation.has(char)) {
+        whitespace = "";
+      } else {
+        result += whitespace;
+        whitespace = "";
+      }
+      result += char;
+    }
+    return result + whitespace;
   }
 
   private _processImagePlaceholders(

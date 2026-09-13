@@ -162,7 +162,6 @@ function checkReset(v: QueueState) {
   if (!currentGame && previousGameId.value) {
     previousGameId.value = undefined;
     resetHistoryGraph();
-    return;
   }
   // If we don't have a game
   if (!currentGame) return;

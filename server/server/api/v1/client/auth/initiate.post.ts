@@ -47,7 +47,6 @@ export default defineEventHandler(async (h3) => {
   ) as Array<[InternalClientCapability, object]>;
 
   if (
-    capabilityIterable.length > 0 &&
     capabilityIterable.some(
       ([capability, configuration]) =>
         !capabilityManager.validateCapabilityConfiguration(

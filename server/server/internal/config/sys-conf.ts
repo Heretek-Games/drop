@@ -28,9 +28,7 @@ class SystemConfig {
       string | undefined;
 
     // default to true if not set
-    this.oidcRequireHttps = !(
-      oidcRequireHttps?.toLocaleLowerCase() === "false"
-    );
+    this.oidcRequireHttps = oidcRequireHttps?.toLocaleLowerCase() !== "false";
   }
 
   getLibraryFolder() {

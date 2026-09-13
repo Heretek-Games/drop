@@ -236,20 +236,19 @@ export function Sponsors() {
         <div className="flex justify-between">
           <CallToAction />
           <div className="hidden sm:flex sm:gap-2">
-            {sponsors &&
-              sponsors.map(({ name }, i) => (
-                <Headless.Button
-                  key={name}
-                  onClick={() => scrollTo(i)}
-                  data-active={activeIndex === i ? true : undefined}
-                  aria-label={`Scroll to sponsorship from ${name}`}
-                  className={clsx(
-                    'size-2.5 cursor-pointer rounded-full border border-transparent bg-zinc-600 transition',
-                    'data-active:bg-blue-700 data-hover:bg-zinc-900',
-                    'forced-colors:data-active:bg-[Highlight] forced-colors:data-focus:outline-offset-4',
-                  )}
-                />
-              ))}
+            {sponsors?.map(({ name }, i) => (
+              <Headless.Button
+                key={name}
+                onClick={() => scrollTo(i)}
+                data-active={activeIndex === i ? true : undefined}
+                aria-label={`Scroll to sponsorship from ${name}`}
+                className={clsx(
+                  'size-2.5 cursor-pointer rounded-full border border-transparent bg-zinc-600 transition',
+                  'data-active:bg-blue-700 data-hover:bg-zinc-900',
+                  'forced-colors:data-active:bg-[Highlight] forced-colors:data-focus:outline-offset-4',
+                )}
+              />
+            ))}
           </div>
         </div>
       </Container>

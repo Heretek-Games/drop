@@ -5,12 +5,14 @@ import {
   type PipelineStep,
 } from "./types";
 
+const ESCAPED_SINGLE_QUOTE = String.raw`'\''`;
+
 /**
  * Quotes a value as a single-quoted POSIX shell word. Single quotes are
  * escaped by closing the quote, emitting an escaped quote, and reopening it.
  */
 export function shellQuote(value: string): string {
-  return `'${value.replaceAll("'", String.raw`'\''`)}'`;
+  return `'${value.replaceAll("'", ESCAPED_SINGLE_QUOTE)}'`;
 }
 
 /**

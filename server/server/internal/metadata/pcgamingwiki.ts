@@ -58,9 +58,9 @@ interface PCGamingWikiGame extends PCGamingWikiSearchStub {
   Perspectives: WikiStringList; // ie: First-person
   Genres: WikiStringList; // ie: Action, FPS
   "Art styles": WikiStringList; // ie: Stylized
-  Themes: string | string[] | null; // ie: Post-apocalyptic, Sci-fi, Space
-  Modes: string | string[] | null; // ie: Singleplayer, Multiplayer
-  Pacing: string | string[] | null; // ie: Real-time
+  Themes: WikiStringList; // ie: Post-apocalyptic, Sci-fi, Space
+  Modes: WikiStringList; // ie: Singleplayer, Multiplayer
+  Pacing: WikiStringList; // ie: Real-time
 }
 
 interface PCGamingWikiCompany extends PCGamingWikiPage {
