@@ -87,47 +87,61 @@ impl BackupOutcome {
 }
 
 /// Back up `binaries` inside `game_dir` as `<name>.orig`.
-pub fn backup_originals(
-    game_dir: &Path,
-    binaries: &[&str],
-) -> Result<BackupOutcome, EngineError> {
+pub fn backup_originals(game_dir: &Path, binaries: &[&str]) -> Result<BackupOutcome, EngineError> {
     ensure_game_dir(game_dir)?;
     let mut manifest = load_manifest(game_dir)?;
     let mut outcome = BackupOutcome::default();
 
     for name in binaries {
         let src = game_dir.join(name);
-        if !std::fs::metadata(&src).map(|m| m.is_file()).unwrap_or(false) {
+        if !std::fs::metadata(&src)
+            .map(|m| m.is_file())
+            .unwrap_or(false)
+        {
             continue;
         }
         let dst = game_dir.join(format!("{name}.orig"));
         let live_digest = sha256_of(&src)?;
 
         match manifest.entries.get(*name) {
-            Some(recorded) => match sha256_of(&dst) {
-                Ok(d) if d == *recorded && live_digest == *recorded => {
-                    outcome.states.insert(name.to_string(), BackupState::BackedUp);
-                }
-                Ok(d) if d == *recorded => {
-                    // Verified backup + modified live file: preserve original.
+            Some(recorded) => {
+                let backup_digest = sha256_of(&dst).ok();
+                if backup_digest.as_deref() == Some(recorded.as_str()) {
+                    if live_digest == *recorded {
+                        outcome
+                            .states
+                            .insert(name.to_string(), BackupState::BackedUp);
+                    } else {
+                        // Verified backup + modified live file: preserve original.
+                        outcome
+                            .states
+                            .insert(name.to_string(), BackupState::AlreadyPatched);
+                    }
+                } else if live_digest == *recorded {
+                    // The backup is missing/corrupt but the live binary is the
+                    // recorded original, so refreshing the backup is safe.
+                    std::fs::copy(&src, &dst)?;
+                    manifest.entries.insert(name.to_string(), sha256_of(&dst)?);
                     outcome
                         .states
-                        .insert(name.to_string(), BackupState::AlreadyPatched);
+                        .insert(name.to_string(), BackupState::BackedUp);
+                } else {
+                    // Never re-back-up a modified live file over a missing or
+                    // stale backup: that would record the patched bytes as the
+                    // original and lose the real one irrecoverably.
+                    return Err(EngineError::ManifestMismatch {
+                        path: name.to_string(),
+                        expected: recorded.clone(),
+                        found: backup_digest.unwrap_or_else(|| "<backup missing>".to_string()),
+                    });
                 }
-                _ => {
-                    std::fs::copy(&src, &dst)?;
-                    manifest
-                        .entries
-                        .insert(name.to_string(), sha256_of(&dst)?);
-                    outcome.states.insert(name.to_string(), BackupState::BackedUp);
-                }
-            },
+            }
             None => {
                 std::fs::copy(&src, &dst)?;
-                manifest
-                    .entries
-                    .insert(name.to_string(), sha256_of(&dst)?);
-                outcome.states.insert(name.to_string(), BackupState::BackedUp);
+                manifest.entries.insert(name.to_string(), sha256_of(&dst)?);
+                outcome
+                    .states
+                    .insert(name.to_string(), BackupState::BackedUp);
             }
         }
     }
@@ -167,10 +181,7 @@ pub fn restore_originals(game_dir: &Path, binaries: &[&str]) -> Result<(), Engin
         if !manifest.entries.contains_key(*name) {
             continue;
         }
-        std::fs::copy(
-            game_dir.join(format!("{name}.orig")),
-            game_dir.join(name),
-        )?;
+        std::fs::copy(game_dir.join(format!("{name}.orig")), game_dir.join(name))?;
     }
 
     for name in binaries {
@@ -201,13 +212,19 @@ mod tests {
         std::fs::write(dir.join("steam_api64.dll"), b"original").unwrap();
 
         let outcome = backup_originals(dir, TARGET_BINARIES).unwrap();
-        assert_eq!(outcome.state("steam_api64.dll"), Some(BackupState::BackedUp));
+        assert_eq!(
+            outcome.state("steam_api64.dll"),
+            Some(BackupState::BackedUp)
+        );
         assert!(dir.join("steam_api64.dll.orig").exists());
 
         std::fs::write(dir.join("steam_api64.dll"), b"patched").unwrap();
         restore_originals(dir, TARGET_BINARIES).unwrap();
 
-        assert_eq!(std::fs::read(dir.join("steam_api64.dll")).unwrap(), b"original");
+        assert_eq!(
+            std::fs::read(dir.join("steam_api64.dll")).unwrap(),
+            b"original"
+        );
         assert!(!dir.join("steam_api64.dll.orig").exists());
         assert!(!dir.join(MANIFEST_FILE).exists());
     }
@@ -242,6 +259,54 @@ mod tests {
 
         let err = restore_originals(dir, &["steam_api64.dll"]).unwrap_err();
         assert!(matches!(err, EngineError::ManifestMismatch { .. }));
-        assert_eq!(std::fs::read(dir.join("steam_api64.dll")).unwrap(), b"patched");
+        assert_eq!(
+            std::fs::read(dir.join("steam_api64.dll")).unwrap(),
+            b"patched"
+        );
+    }
+
+    #[test]
+    fn stale_backup_is_not_replaced_with_patched_binary() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        std::fs::write(dir.join("steam_api64.dll"), b"original").unwrap();
+        backup_originals(dir, &["steam_api64.dll"]).unwrap();
+        std::fs::write(dir.join("steam_api64.dll"), b"patched").unwrap();
+        std::fs::write(dir.join("steam_api64.dll.orig"), b"tampered").unwrap();
+
+        let err = backup_originals(dir, &["steam_api64.dll"]).unwrap_err();
+        assert!(matches!(err, EngineError::ManifestMismatch { .. }));
+        assert_eq!(
+            std::fs::read(dir.join("steam_api64.dll.orig")).unwrap(),
+            b"tampered",
+            "a stale backup must never be overwritten with patched bytes"
+        );
+    }
+
+    #[test]
+    fn missing_backup_is_recreated_only_from_the_recorded_original() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        std::fs::write(dir.join("steam_api64.dll"), b"original").unwrap();
+        backup_originals(dir, &["steam_api64.dll"]).unwrap();
+        std::fs::remove_file(dir.join("steam_api64.dll.orig")).unwrap();
+
+        // Live file still matches the recorded original: safe to refresh.
+        let outcome = backup_originals(dir, &["steam_api64.dll"]).unwrap();
+        assert_eq!(
+            outcome.state("steam_api64.dll"),
+            Some(BackupState::BackedUp)
+        );
+        assert_eq!(
+            std::fs::read(dir.join("steam_api64.dll.orig")).unwrap(),
+            b"original"
+        );
+
+        // Patched live file with the backup gone: refuse, keeping the patched
+        // bytes out of the backup.
+        std::fs::remove_file(dir.join("steam_api64.dll.orig")).unwrap();
+        std::fs::write(dir.join("steam_api64.dll"), b"patched").unwrap();
+        assert!(backup_originals(dir, &["steam_api64.dll"]).is_err());
+        assert!(!dir.join("steam_api64.dll.orig").exists());
     }
 }
