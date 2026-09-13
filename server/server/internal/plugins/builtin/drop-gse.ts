@@ -8,6 +8,8 @@ import {
   TailscaleBackend,
   ZeroTierBackend,
 } from "./gse/mesh";
+import type { RoomPersistence } from "./gse/persistence";
+import { PrismaRoomPersistence } from "./gse/prisma-persistence";
 import { RoomStore } from "./gse/room-store";
 import { toDiscoverable } from "./gse/types";
 import type { EmulatorBinding, MeshBackend } from "./gse/types";
@@ -57,6 +59,12 @@ export class DropGseServerPlugin implements ServerPlugin {
   private ctx!: PluginContext;
   private pruneTimer: ReturnType<typeof setInterval> | undefined;
 
+  /**
+   * `persistence` defaults to Postgres (`PrismaRoomPersistence`). Tests inject
+   * a `StorageRoomPersistence` so no database is required.
+   */
+  constructor(private readonly persistence?: RoomPersistence) {}
+
   private resolveBackend(): MeshBackend {
     const selected = (process.env.GSE_MESH_BACKEND ?? "").toLowerCase();
 
@@ -90,7 +98,7 @@ export class DropGseServerPlugin implements ServerPlugin {
     this.ctx = ctx;
     const compat = new CompatRegistry(compatFromEnv());
     this.store = new RoomStore(
-      ctx.storage,
+      this.persistence ?? new PrismaRoomPersistence(),
       this.resolveBackend(),
       Date.now,
       compat,

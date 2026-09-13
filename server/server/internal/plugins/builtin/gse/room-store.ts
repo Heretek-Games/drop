@@ -1,13 +1,12 @@
 import { randomUUID } from "node:crypto";
-import type { PluginStorage } from "../../types";
 import type { CompatRegistry } from "./compat";
+import type { RoomPersistence } from "./persistence";
 import type {
   DiscoverableRoom,
   EmulatorBinding,
   MeshBackend,
   MeshCredential,
   Room,
-  RoomMember,
 } from "./types";
 import { toDiscoverable } from "./types";
 
@@ -24,13 +23,6 @@ export const MAX_ROOMS_PER_HOST = 5;
 /** Global room cap. */
 export const MAX_ROOMS = 200;
 
-const ROOMS_KEY = "rooms";
-const CREDENTIALS_KEY = "credentials";
-
-interface CredentialMap {
-  [roomId: string]: { [userId: string]: MeshCredential };
-}
-
 export interface CreateRoomInput {
   gameId: string;
   versionId: string;
@@ -40,60 +32,44 @@ export interface CreateRoomInput {
 }
 
 /**
- * Durable, storage-backed room registry with distributed-ish host leases.
+ * Room registry with distributed-ish host leases, backed by a
+ * {@link RoomPersistence} (Postgres in production, plugin storage in tests).
  *
- * All state lives in plugin storage (`rooms`, `credentials`), so it survives a
- * coordinator restart. Host migration is first-writer-wins: any member may
- * claim an expired lease on join/heartbeat.
+ * Host migration is first-writer-wins: any member may claim an expired lease
+ * on join/heartbeat.
  */
 export class RoomStore {
   constructor(
-    private readonly storage: PluginStorage,
+    private readonly persistence: RoomPersistence,
     private readonly backend: MeshBackend,
     private readonly now: () => number = Date.now,
     private readonly compat?: CompatRegistry,
   ) {}
 
-  private async loadRooms(): Promise<Record<string, Room>> {
-    return (await this.storage.get<Record<string, Room>>(ROOMS_KEY)) ?? {};
-  }
-
-  private async saveRooms(rooms: Record<string, Room>): Promise<void> {
-    await this.storage.set(ROOMS_KEY, rooms);
-  }
-
-  private async loadCredentials(): Promise<CredentialMap> {
-    return (await this.storage.get<CredentialMap>(CREDENTIALS_KEY)) ?? {};
-  }
-
   /** Drop expired rooms and tear their mesh down. Returns count removed. */
   async pruneExpired(): Promise<number> {
-    const rooms = await this.loadRooms();
+    const rooms = await this.persistence.listRooms();
     const now = this.now();
-    const expired = Object.entries(rooms)
-      .filter(([, room]) => room.expiresAt <= now)
-      .map(([id]) => id);
-    for (const id of expired) {
-      Reflect.deleteProperty(rooms, id);
-      await this.backend.teardown(id);
-    }
-    if (expired.length > 0) {
-      await this.saveRooms(rooms);
+    const expired = rooms.filter((room) => room.expiresAt <= now);
+    for (const room of expired) {
+      await this.persistence.deleteRoom(room.id);
+      await this.persistence.deleteCredentials(room.id);
+      await this.backend.teardown(room.id);
     }
     return expired.length;
   }
 
   async create(input: CreateRoomInput): Promise<Room> {
-    const rooms = await this.loadRooms();
+    const rooms = await this.persistence.listRooms();
     const now = this.now();
 
-    const hostRooms = Object.values(rooms).filter(
+    const hostRooms = rooms.filter(
       (room) => room.hostUserId === input.hostUserId && room.expiresAt > now,
     );
     if (hostRooms.length >= MAX_ROOMS_PER_HOST) {
       throw new Error("room limit reached for this host");
     }
-    if (Object.keys(rooms).length >= MAX_ROOMS) {
+    if (rooms.length >= MAX_ROOMS) {
       throw new Error("global room limit reached");
     }
     if (this.compat?.isBlocked(input.gameId, input.appId)) {
@@ -103,7 +79,6 @@ export class RoomStore {
     const roomId = randomUUID();
     const expiresAt = now + ROOM_TTL_MS;
     const mesh = await this.backend.provision(roomId, expiresAt);
-    const host: RoomMember = { userId: input.hostUserId, joinedAt: now };
 
     const room: Room = {
       id: roomId,
@@ -113,27 +88,25 @@ export class RoomStore {
       emulator: input.emulator,
       hostUserId: input.hostUserId,
       hostHeartbeatAt: now,
-      members: [host],
+      members: [{ userId: input.hostUserId, joinedAt: now }],
       mesh,
       createdAt: now,
       expiresAt,
     };
-    rooms[roomId] = room;
-    await this.saveRooms(rooms);
+    await this.persistence.saveRoom(room);
     return room;
   }
 
   async get(roomId: string): Promise<Room | undefined> {
-    const rooms = await this.loadRooms();
-    const room = rooms[roomId];
+    const room = await this.persistence.getRoom(roomId);
     if (!room || room.expiresAt <= this.now()) return undefined;
     return room;
   }
 
   async list(gameId?: string): Promise<DiscoverableRoom[]> {
-    const rooms = await this.loadRooms();
+    const rooms = await this.persistence.listRooms();
     const now = this.now();
-    return Object.values(rooms)
+    return rooms
       .filter((room) => room.expiresAt > now)
       .filter((room) => !gameId || room.gameId === gameId)
       .map(toDiscoverable);
@@ -153,8 +126,7 @@ export class RoomStore {
   }
 
   async join(roomId: string, userId: string): Promise<Room> {
-    const rooms = await this.loadRooms();
-    const room = rooms[roomId];
+    const room = await this.persistence.getRoom(roomId);
     if (!room || room.expiresAt <= this.now()) {
       throw new Error("room not found");
     }
@@ -162,7 +134,7 @@ export class RoomStore {
       room.members.push({ userId, joinedAt: this.now() });
     }
     this.claimExpiredLease(room);
-    await this.saveRooms(rooms);
+    await this.persistence.saveRoom(room);
     return room;
   }
 
@@ -175,8 +147,7 @@ export class RoomStore {
     userId: string,
     memberId: string,
   ): Promise<Room> {
-    const rooms = await this.loadRooms();
-    const room = rooms[roomId];
+    const room = await this.persistence.getRoom(roomId);
     if (!room || room.expiresAt <= this.now()) {
       throw new Error("room not found");
     }
@@ -189,15 +160,14 @@ export class RoomStore {
       const address = await this.backend.authorizeMember(roomId, memberId);
       if (address) {
         member.meshAddress = address;
-        await this.saveRooms(rooms);
+        await this.persistence.saveRoom(room);
       }
     }
     return room;
   }
 
   async heartbeat(roomId: string, userId: string): Promise<Room> {
-    const rooms = await this.loadRooms();
-    const room = rooms[roomId];
+    const room = await this.persistence.getRoom(roomId);
     if (!room || room.expiresAt <= this.now()) {
       throw new Error("room not found");
     }
@@ -205,7 +175,7 @@ export class RoomStore {
     if (room.hostUserId === userId) {
       room.hostHeartbeatAt = this.now();
     }
-    await this.saveRooms(rooms);
+    await this.persistence.saveRoom(room);
     return room;
   }
 
@@ -213,30 +183,25 @@ export class RoomStore {
     roomId: string,
     userId: string,
   ): Promise<{ closed: boolean; room?: Room }> {
-    const rooms = await this.loadRooms();
-    const room = rooms[roomId];
+    const room = await this.persistence.getRoom(roomId);
     if (!room) return { closed: false };
 
     if (room.hostUserId === userId) {
-      Reflect.deleteProperty(rooms, roomId);
-      const credentials = await this.loadCredentials();
-      Reflect.deleteProperty(credentials, roomId);
-      await this.storage.set(CREDENTIALS_KEY, credentials);
-      await this.saveRooms(rooms);
+      await this.persistence.deleteRoom(roomId);
+      await this.persistence.deleteCredentials(roomId);
       await this.backend.teardown(roomId);
       return { closed: true };
     }
 
     room.members = room.members.filter((member) => member.userId !== userId);
     await this.backend.revokeMember(roomId, userId);
-    await this.saveRooms(rooms);
+    await this.persistence.saveRoom(room);
     return { closed: false, room };
   }
 
   /** Issue (or return the existing) server-side credential for a member. */
   async credential(roomId: string, userId: string): Promise<MeshCredential> {
-    const rooms = await this.loadRooms();
-    const room = rooms[roomId];
+    const room = await this.persistence.getRoom(roomId);
     if (!room || room.expiresAt <= this.now()) {
       throw new Error("room not found");
     }
@@ -245,8 +210,7 @@ export class RoomStore {
       throw new Error("not a room member");
     }
 
-    const credentials = await this.loadCredentials();
-    const roomCredentials = credentials[roomId] ?? {};
+    const roomCredentials = await this.persistence.getCredentials(roomId);
     const existing = roomCredentials[userId];
     // Return a cached credential unless it is close to expiry (rotate).
     if (
@@ -273,12 +237,10 @@ export class RoomStore {
     // Record the assigned mesh address so peers see it in the room view.
     if (issued.address) {
       member.meshAddress = issued.address;
-      await this.saveRooms(rooms);
+      await this.persistence.saveRoom(room);
     }
 
-    roomCredentials[userId] = credential;
-    credentials[roomId] = roomCredentials;
-    await this.storage.set(CREDENTIALS_KEY, credentials);
+    await this.persistence.saveCredential(roomId, credential);
     return credential;
   }
 }

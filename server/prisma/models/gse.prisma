@@ -1,0 +1,27 @@
+// drop-gse room coordinator durability (Track B).
+//
+// `payload` holds the serialized Room / MeshCredential; the scalar columns are
+// for querying and the TTL sweep. See
+// server/internal/plugins/builtin/gse/persistence.ts.
+
+model GseRoom {
+  id         String   @id
+  gameId     String
+  hostUserId String
+  expiresAt  BigInt
+  payload    Json
+  updatedAt  DateTime @updatedAt
+
+  @@index([gameId])
+  @@index([expiresAt])
+}
+
+model GseCredential {
+  roomId    String
+  userId    String
+  expiresAt BigInt
+  payload   Json
+  updatedAt DateTime @updatedAt
+
+  @@id([roomId, userId])
+}

@@ -166,10 +166,10 @@ blocked only when opted in; kill mid-patch restores on next startup.
 Owner: TBD · Depends on: M0, M2
 
 - [x] **B1** `MeshBackend` + `InMemoryMeshBackend` (`builtin/gse/mesh.ts`)
-- [x] **B2** Durable rooms/memberships/credentials via plugin storage +
-      host lease (heartbeat 15s / expiry 45s, first-writer-wins migration) in
-      `builtin/gse/room-store.ts`. **Deviation:** used plugin storage instead of
-      additive Prisma models (no core migration; still durable on disk).
+- [x] **B2** Durable rooms/memberships/credentials via additive Prisma models
+      (`GseRoom`, `GseCredential`; migration `20260914000000_add_gse_rooms`),
+      with a `StorageRoomPersistence` fallback for tests/dev; host lease
+      (heartbeat 15s / expiry 45s, first-writer-wins) in `room-store.ts`.
 - [x] **B3** Membership-gated credential issuance, cached per member, rotated
       10 min before expiry, never in the public room view. A `credential_available`
       event is broadcast on the room channel; the secret itself is only returned

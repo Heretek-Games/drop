@@ -6,6 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { PluginManager } from "../manager";
 import { DropGseServerPlugin } from "../builtin/drop-gse";
+import { StorageRoomPersistence } from "../builtin/gse/persistence";
 import { HelloWorldPlugin } from "../builtin/hello-world";
 import { PLUGIN_API_VERSION } from "../types";
 import type { PluginContext, PluginStorage, ServerPlugin } from "../types";
@@ -167,7 +168,9 @@ test("PluginManager event bus broadcast and subscribe", async () => {
 
 test("DropGseServerPlugin rooms lifecycle", async () => {
   const manager = createTestManager();
-  const gsePlugin = new DropGseServerPlugin();
+  const gsePlugin = new DropGseServerPlugin(
+    new StorageRoomPersistence(new MemoryStorage()),
+  );
   await manager.registerPlugin(gsePlugin);
 
   const mockEvent = {

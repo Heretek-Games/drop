@@ -8,6 +8,7 @@ import {
   roomCidr,
 } from "../builtin/gse/mesh";
 import { CompatRegistry, compatFromEnv } from "../builtin/gse/compat";
+import { StorageRoomPersistence } from "../builtin/gse/persistence";
 import {
   CREDENTIAL_ROTATION_WINDOW_MS,
   HOST_LEASE_MS,
@@ -56,7 +57,11 @@ interface Harness {
 function harness(): Harness {
   let now = 1_000_000;
   const backend = new InMemoryMeshBackend();
-  const store = new RoomStore(new MemoryStorage(), backend, () => now);
+  const store = new RoomStore(
+    new StorageRoomPersistence(new MemoryStorage()),
+    backend,
+    () => now,
+  );
   return { store, backend, setNow: (value: number) => (now = value) };
 }
 
@@ -323,7 +328,7 @@ test("RoomStore records the address authorized for a member node", async () => {
 
 test("RoomStore rejects known-incompatible games and pins AppID", async () => {
   const store = new RoomStore(
-    new MemoryStorage(),
+    new StorageRoomPersistence(new MemoryStorage()),
     new InMemoryMeshBackend(),
     () => 1_000_000,
     new CompatRegistry({ blockedAppIds: [1234], blockedGameIds: ["bad-game"] }),
