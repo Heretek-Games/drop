@@ -74,9 +74,10 @@ jobs:
         run: node server/dev-tools/ztnet-bootstrap.mjs >> "$GITHUB_ENV"
 
       - name: Run ZTNET backend check
+        working-directory: server
         env:
           GSE_ZTNET_URL: http://localhost:3001
-        run: pnpm --filter drop exec jiti dev-tools/gse-ztnet-check.ts
+        run: pnpm exec jiti dev-tools/gse-ztnet-check.ts
 
       - name: Tear down
         if: always()

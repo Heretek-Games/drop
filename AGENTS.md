@@ -269,13 +269,15 @@ pnpm --filter drop run test
 
 # drop-gse — engine + integration checks
 cargo +nightly test --manifest-path desktop/src-tauri/Cargo.toml -p gse-engine
+# Note: both the root package and `server/` are named "drop", so `pnpm
+# --filter drop exec` runs in both — run these from `server/` instead.
 DATABASE_URL=postgres://drop:drop@localhost:5432/drop \
-  pnpm --filter drop exec jiti dev-tools/gse-prisma-check.ts   # Prisma room store
+  (cd server && pnpm exec jiti dev-tools/gse-prisma-check.ts)   # Prisma room store
 # ZTNET mesh E2E (needs Docker) — see .github/workflows/ztnet-e2e.yml
 (cd server/deploy-template && docker compose -f compose.yml -f compose.ztnet.yaml \
   --env-file .env.ztnet up -d ztnet zerotier ztnet-postgres)
 node server/dev-tools/ztnet-bootstrap.mjs    # prints GSE_ZTNET_ORG / GSE_ZTNET_TOKEN
-pnpm --filter drop exec jiti dev-tools/gse-ztnet-check.ts
+cd server && pnpm exec jiti dev-tools/gse-ztnet-check.ts
 
 # Desktop frontend (separate workspace; not gated)
 pnpm -C desktop/main install
