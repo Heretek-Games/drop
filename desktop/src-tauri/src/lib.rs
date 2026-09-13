@@ -290,6 +290,8 @@ pub fn run() {
             start_pipeline_setup,
             cancel_pipeline_setup,
             reclaim_pipeline_space,
+            gse_mesh_join,
+            gse_mesh_leave,
             #[cfg(target_os = "linux")]
             ::process::compat::fetch_proton_paths,
             #[cfg(target_os = "linux")]

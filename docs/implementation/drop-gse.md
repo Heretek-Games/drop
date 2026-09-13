@@ -32,7 +32,8 @@ tracks:
      define this privileged tier explicitly (M4 / P6).
 4. Server ships as an external plugin bundle; durable rooms use additive Prisma
    models.
-5. Mesh backend order: **ZeroTier self-hosted controller first**, Tailscale
+5. Mesh controller: **ZTNET-managed self-hosted ZeroTier is the default**
+   (`GSE_ZTNET_*`); raw ZeroTier controller is an advanced fallback; Tailscale
    second.
 6. License review required: GPL-3.0-or-later (drop-gse) + LGPL-3.0 (emulator
    binaries) combined into AGPL-3.0-or-later (Drop).
@@ -177,14 +178,20 @@ Owner: TBD · Depends on: M0, M2
       authenticated at the upgrade; `gse:credential` delivers the secret only to
       the authenticated requester (client `plugin_request_ws`, HTTP fallback).
       `credential_available` is broadcast without the secret.
-- [x] **B4** `ZeroTierBackend` creates networks (per-room /24, `enableBroadcast`),
-      authorizes a joined member and returns its assigned address, and deletes
-      the network on teardown (mock-fetch tests). Per-user revoke still a stub.
+- [x] **B4** Default controller path is **ZTNET** (`ZtnetBackend` org REST API:
+      create + configure per-room /24 and routes, authorize members via
+      `ipAssignments`, revoke, delete), selected by `GSE_ZTNET_*` or
+      `GSE_MESH_BACKEND=ztnet`. Raw `ZeroTierBackend` remains as an advanced
+      fallback (now also revokes). `compose.ztnet.yaml` + `.env.ztnet.example`
+      ship with the deploy template; `dev-tools/gse-ztnet-check.ts` verifies a
+      live stack. ZTNET's update API does not expose `enableBroadcast` (unicast
+      `custom_broadcasts.txt` covers discovery).
 - [x] **B6** Client requests its credential after host/join, refreshes the room
       so assigned mesh addresses reach `custom_broadcasts.txt` via the A↔B
-      contract, and tracks `selfAddress`/`meshReady` (the credential's assigned
-      address) as a membership validator surfaced in the modal. OS-level VPN
-      status checks remain a future enhancement.
+      contract, tracks `selfAddress`/`meshReady`, and joins/leaves the network
+      through `zerotier-cli` (`gse_mesh_join`/`gse_mesh_leave`) with an
+      actionable error when ZeroTier is missing. OS-level VPN status checks
+      remain a future enhancement.
 - [x] **B7** TTL sweeper (60s, unref'd), per-host + global caps, auth on room
       reads (member view vs discovery), credential/join/heartbeat auth
 
@@ -246,9 +253,10 @@ The checklists above are authoritative. Summary:
   and verifies an emulator release into `<dataDir>/tools/gse/`.
 - **M2 complete** — opt-in room-gated interceptor, crash recovery, AppID
   pinning end-to-end, compat registry + consent UI.
-- **M3 — all except B6 client-side VPN validators**: durable store, host lease,
-  credential rotation + WS hint, ZeroTier provision/authorize/teardown,
-  hardening.
+- **M3 complete** — durable Prisma store, host lease, credential issuance/
+  rotation + authenticated WS delivery, **ZTNET-backed** ZeroTier
+  provision/authorize/revoke/teardown (raw controller + Tailscale fallbacks),
+  client join/leave + `meshReady`, hardening.
 - **M4 complete** — `TailscaleBackend` + `TailscaleApiProvisioner` selectable
   (both backends); live WS UI + client WS consumption; P6 ABI decision. The
   embedded `tailscale` crate with isolated state is a future enhancement.

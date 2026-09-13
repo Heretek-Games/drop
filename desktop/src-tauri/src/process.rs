@@ -93,3 +93,15 @@ pub fn cancel_pipeline_setup(game_id: String) -> bool {
 pub fn reclaim_pipeline_space(game_id: String) -> Result<u64, String> {
     ::process::pipeline::reclaim_pipeline_space_for_game(&game_id)
 }
+
+/// Join a ZeroTier room network via the local ZeroTier One service.
+#[tauri::command]
+pub fn gse_mesh_join(network_id: String) -> Result<(), String> {
+    ::process::zerotier::join_network(&network_id)
+}
+
+/// Leave a ZeroTier room network via the local ZeroTier One service.
+#[tauri::command]
+pub fn gse_mesh_leave(network_id: String) -> Result<(), String> {
+    ::process::zerotier::leave_network(&network_id)
+}

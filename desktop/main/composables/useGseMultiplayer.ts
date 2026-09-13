@@ -40,6 +40,7 @@ export const useGseMultiplayer = (gameId: string) => {
   const error = ref<string | null>(null);
   /** This client's assigned mesh address (set once the server authorizes it). */
   const selfAddress = ref<string | null>(null);
+  const selfNetworkId = ref<string | null>(null);
   const meshReady = computed(() => selfAddress.value !== null);
 
   if (!activeRoomsMap.value[gameId]) {
@@ -147,6 +148,23 @@ export const useGseMultiplayer = (gameId: string) => {
    * Request this member's mesh credential. This is what causes the server to
    * assign the member a mesh address (reflected in the room member list).
    */
+  /**
+   * Join the room's ZeroTier network via the local ZeroTier One service. The
+   * credential encodes the network id as `zerotier:<nwid>:<room>:<user>`.
+   * Missing ZeroTier is surfaced as an error but does not abort the room.
+   */
+  async function joinMesh(secret: string): Promise<void> {
+    if (!secret.startsWith("zerotier:")) return;
+    const networkId = secret.split(":")[1];
+    if (!networkId) return;
+    selfNetworkId.value = networkId;
+    try {
+      await invoke("gse_mesh_join", { networkId });
+    } catch (e) {
+      error.value = (e as string).toString();
+    }
+  }
+
   async function requestCredential(
     roomId: string,
   ): Promise<{ secret: string; address?: string } | null> {
@@ -161,6 +179,7 @@ export const useGseMultiplayer = (gameId: string) => {
       });
       if (res?.credential) {
         selfAddress.value = res.credential.address ?? null;
+        await joinMesh(res.credential.secret);
         return res.credential;
       }
     } catch {
@@ -178,6 +197,7 @@ export const useGseMultiplayer = (gameId: string) => {
       if (res.credential) {
         // The assigned address is this client's mesh-membership proof.
         selfAddress.value = res.credential.address ?? null;
+        await joinMesh(res.credential.secret);
         return res.credential;
       }
       return null;
@@ -217,6 +237,16 @@ export const useGseMultiplayer = (gameId: string) => {
       if (currentRoom.value?.id === roomId) {
         currentRoom.value = null;
         selfAddress.value = null;
+      }
+      if (selfNetworkId.value) {
+        try {
+          await invoke("gse_mesh_leave", {
+            networkId: selfNetworkId.value,
+          });
+        } catch {
+          // Best-effort; the network also expires server-side.
+        }
+        selfNetworkId.value = null;
       }
       await fetchRooms();
       return true;
@@ -277,6 +307,7 @@ export const useGseMultiplayer = (gameId: string) => {
     rooms,
     currentRoom,
     selfAddress,
+    selfNetworkId,
     meshReady,
     isLoading,
     error,

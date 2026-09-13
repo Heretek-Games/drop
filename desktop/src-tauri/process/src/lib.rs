@@ -25,6 +25,7 @@ pub mod peer_source;
 pub mod pipeline;
 pub mod process_handlers;
 pub mod process_manager;
+pub mod zerotier;
 
 pub struct ProcessManagerWrapper(OnceLock<Mutex<ProcessManager<'static>>>);
 impl ProcessManagerWrapper {
