@@ -132,10 +132,10 @@ Owner: TBD · Depends on: M0
 - [x] **A6** Emulator release manager: `release.json` + SHA-256 verify/stage and
       a transport-agnostic `fetch_release` hook (`dist.rs`; 19 engine tests).
       The desktop supplies the reqwest-backed fetch.
-- [~] **P5/P7/P9** Bundle integrity: `checksum`/`signature` verified before an
-  external bundle is imported (`DROP_PLUGIN_SIGNING_KEY`,
-  `DROP_PLUGIN_REQUIRE_SIGNATURE`), tested. P9 done via the `hello-world`
-  reference plugin. Install/update/remove UI + registry (P7/P5) pending.
+- [x] **P5/P7/P9** Bundle integrity: `checksum`/`signature` verified before an
+      external bundle is imported (`DROP_PLUGIN_SIGNING_KEY`,
+      `DROP_PLUGIN_REQUIRE_SIGNATURE`); P9 via the `hello-world` reference plugin;
+      install/remove API + Settings UI; registry pinning.
 
 **Acceptance:** engine patches/configures/restores a real game offline on
 Windows and Linux; idempotent; interrupted runs recover; digest mismatch refuses
@@ -213,9 +213,9 @@ Owner: TBD · Depends on: M0–M4
 - [x] Checksum + optional signature verification on load, with the
       `dev-tools/sign-plugin.mjs` signer and a `sample-plugin/` bundle
 - [x] Install/update/remove: `PluginManager.installBundle` /
-      `removeBundle` with checksum/signature verification and admin routes
+      `removeBundle` with checksum/signature verification, admin routes
       (`POST /api/v1/plugins/install`, `DELETE /api/v1/plugins/<id>/bundle`),
-      tested.
+      and install/remove controls in Settings → Plugins.
 - [x] Registry/version pinning: `PluginRegistry` allow-list with pinned
       version/checksum (`DROP_PLUGIN_REGISTRY`), enforced on install and load;
       tested.

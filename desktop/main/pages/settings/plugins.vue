@@ -30,6 +30,32 @@
     </div>
   </div>
 
+  <div
+    class="mt-6 rounded-xl border border-zinc-800 bg-zinc-850/60 p-5 space-y-3"
+  >
+    <h4 class="text-sm font-semibold text-zinc-100">Install external bundle</h4>
+    <p class="text-xs text-zinc-400">
+      Paste a bundle as JSON:
+      <code class="font-mono"
+        >{ "manifest": {...}, "entry": "&lt;base64&gt;" }</code
+      >.
+    </p>
+    <textarea
+      v-model="installJson"
+      rows="4"
+      class="w-full rounded-md bg-zinc-900 border border-zinc-700 px-3 py-2 text-xs font-mono text-zinc-200 focus:outline-none focus:border-purple-500"
+      placeholder='{"manifest":{"id":"my-plugin","name":"My Plugin","version":"1.0.0","apiVersion":1,"capabilities":["routes"]},"entry":"<base64>"}'
+    ></textarea>
+    <button
+      type="button"
+      @click="handleInstallBundle"
+      :disabled="isLoading || !installReady"
+      class="inline-flex items-center rounded-md bg-purple-600 px-3 py-2 text-xs font-semibold text-white hover:bg-purple-500 transition disabled:opacity-50"
+    >
+      Install
+    </button>
+  </div>
+
   <div class="mt-6 space-y-4">
     <div
       v-if="plugins.length === 0 && !isLoading"
@@ -84,22 +110,33 @@
           </p>
         </div>
 
-        <Switch
-          :model-value="plugin.status === 'active'"
-          @update:model-value="(val) => handleTogglePlugin(plugin.id, val)"
-          :disabled="isLoading"
-          :class="[
-            plugin.status === 'active' ? 'bg-purple-600' : 'bg-zinc-700',
-            'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out',
-          ]"
-        >
-          <span
+        <div class="flex items-center gap-x-3">
+          <button
+            v-if="!plugin.builtin"
+            type="button"
+            @click="handleRemovePlugin(plugin.id)"
+            :disabled="isLoading"
+            class="text-xs font-medium text-red-400 hover:text-red-300 transition disabled:opacity-50"
+          >
+            Remove
+          </button>
+          <Switch
+            :model-value="plugin.status === 'active'"
+            @update:model-value="(val) => handleTogglePlugin(plugin.id, val)"
+            :disabled="isLoading"
             :class="[
-              plugin.status === 'active' ? 'translate-x-5' : 'translate-x-0',
-              'pointer-events-none relative inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out',
+              plugin.status === 'active' ? 'bg-purple-600' : 'bg-zinc-700',
+              'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out',
             ]"
-          />
-        </Switch>
+          >
+            <span
+              :class="[
+                plugin.status === 'active' ? 'translate-x-5' : 'translate-x-0',
+                'pointer-events-none relative inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out',
+              ]"
+            />
+          </Switch>
+        </div>
       </div>
 
       <p v-if="plugin.description" class="text-sm text-zinc-300">
@@ -198,6 +235,54 @@ async function reloadPlugins() {
       method: "POST",
       path: "",
     });
+    await fetchPlugins();
+  } catch (e) {
+    error.value = (e as string).toString();
+  } finally {
+    isLoading.value = false;
+  }
+}
+
+async function handleRemovePlugin(id: string) {
+  isLoading.value = true;
+  error.value = null;
+  try {
+    await invoke("plugin_request", {
+      pluginId: `${id}/bundle`,
+      method: "DELETE",
+      path: "",
+    });
+    await fetchPlugins();
+  } catch (e) {
+    error.value = (e as string).toString();
+  } finally {
+    isLoading.value = false;
+  }
+}
+
+const installJson = ref("");
+const installReady = computed(() => installJson.value.trim().length > 0);
+
+async function handleInstallBundle() {
+  isLoading.value = true;
+  error.value = null;
+  try {
+    const parsed = JSON.parse(installJson.value) as {
+      manifest?: unknown;
+      entry?: string;
+    };
+    if (!parsed?.manifest || typeof parsed.entry !== "string") {
+      throw new Error(
+        'Bundle must be { "manifest": {...}, "entry": "<base64>" }',
+      );
+    }
+    await invoke("plugin_request", {
+      pluginId: "install",
+      method: "POST",
+      path: "",
+      body: parsed,
+    });
+    installJson.value = "";
     await fetchPlugins();
   } catch (e) {
     error.value = (e as string).toString();
