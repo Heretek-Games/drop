@@ -9,7 +9,7 @@ on:
     - cron: "0 2 * * *" # run at 2 AM UTC
 
 env:
-  REGISTRY_IMAGE: ghcr.io/${{ github.repository }}
+  REGISTRY_IMAGE: ghcr.io/heretek-games/drop
 
 jobs:
   build:
