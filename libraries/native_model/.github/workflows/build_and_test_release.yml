@@ -16,7 +16,7 @@ jobs:
         os: [ubuntu-latest, windows-latest, macOS-latest]
         toolchain: [stable]
     steps:
-      - uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6
+      - uses: actions/checkout@v7
       - name: Setup Rust
         uses: actions-rs/toolchain@v1
         with:
@@ -42,13 +42,13 @@ jobs:
       packages: write
     steps:
       - name: Checkout code
-        uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6
+        uses: actions/checkout@v7
         with:
           ref: main
           fetch-depth: 0
 
       - name: install npm
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
           node-version: "20"
 

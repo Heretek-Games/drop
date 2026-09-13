@@ -13,7 +13,6 @@ cd "$repo_root" || exit 1
 crates=(
   cli
   torrential
-  desktop/src-tauri
   libraries/droplet
   libraries/droplet_types
   libraries/libarchive
