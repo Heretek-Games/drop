@@ -7,6 +7,10 @@ use std::{
 
 use axum::{
     Router,
+    extract::Request,
+    http::StatusCode,
+    middleware::{self, Next},
+    response::Response,
     routing::{get, post},
 };
 use dashmap::DashMap;
@@ -81,16 +85,55 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Gate the catalog and cache-invalidation routes behind a shared token.
+///
+/// When `TORRENTIAL_HTTP_TOKEN` is unset the routes remain open (backwards
+/// compatible for single-tenant deployments); setting it requires callers to
+/// present it as `Authorization: Bearer <token>` or `x-torrential-token`.
+async fn require_depot_token(request: Request, next: Next) -> Result<Response, StatusCode> {
+    let Ok(expected) = std::env::var("TORRENTIAL_HTTP_TOKEN") else {
+        return Ok(next.run(request).await);
+    };
+    let expected = expected.trim();
+    if expected.is_empty() {
+        return Ok(next.run(request).await);
+    }
+
+    let presented = request
+        .headers()
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.strip_prefix("Bearer "))
+        .or_else(|| {
+            request
+                .headers()
+                .get("x-torrential-token")
+                .and_then(|value| value.to_str().ok())
+        });
+
+    if presented.is_some_and(|token| token == expected) {
+        Ok(next.run(request).await)
+    } else {
+        Err(StatusCode::UNAUTHORIZED)
+    }
+}
+
 fn setup_app(shared_state: Arc<AppState>) -> Router {
+    // The manifest catalog and cache invalidation are not needed by anonymous
+    // depot downloads, so they can require a token.
+    let protected = Router::new()
+        .route("/api/v1/depot/manifest.json", get(handlers::manifest))
+        .route("/invalidate", post(handlers::invalidate))
+        .route_layer(middleware::from_fn(require_depot_token));
+
     Router::new()
         .route(
             "/api/v1/depot/content/{game_id}/{version_name}/{chunk_id}",
             get(serve::serve_file),
         )
-        .route("/api/v1/depot/manifest.json", get(handlers::manifest))
         .route("/api/v1/depot/speedtest", get(handlers::speedtest))
         .route("/healthcheck", get(handlers::healthcheck))
-        .route("/invalidate", post(handlers::invalidate))
+        .merge(protected)
         .with_state(shared_state)
 }
 
