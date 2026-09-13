@@ -140,7 +140,8 @@
                       class="absolute inset-0"
                       @click="
                         fullscreenImage =
-                          game.mImageCarouselObjectIds[currentImageIndex]
+                          game.mImageCarouselObjectIds[currentImageIndex] ??
+                          null
                       "
                     >
                       <TransitionGroup name="slide" tag="div" class="h-full">
@@ -735,7 +736,7 @@ import { useGseMultiplayer } from "~/composables/useGseMultiplayer";
 
 const route = useRoute();
 const router = useRouter();
-const id = route.params.id.toString();
+const id = route.params.id?.toString() ?? "";
 
 const { game, status, version } = await useGame(id);
 const { currentRoom } = useGseMultiplayer(id);
@@ -785,6 +786,7 @@ async function install() {
     installLoading.value = true;
     const versionOption =
       versionOptions.value[Math.max(installVersionIndex.value, 0)];
+    if (!versionOption) throw new Error("Version option not found");
     const isLatest = installVersionIndex.value == -1;
 
     const games = [
@@ -819,6 +821,7 @@ const currentVersionOption = computed(
 function formatVersionOptionText(index: number) {
   if (!versionOptions.value) return undefined;
   const versionOption = versionOptions.value[Math.max(index, 0)];
+  if (!versionOption) return undefined;
   const template = `${versionOption.displayName || versionOption.versionPath} on ${versionOption.platform}, ${formatKilobytes(versionOption.size.installSize / 1024)}B`;
   if (index == -1) {
     return `Latest (${template})`;

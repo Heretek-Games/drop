@@ -1,5 +1,7 @@
 // https://nuxt.com/docs/api/configuration/nuxt-config
-export default defineNuxtConfig({
+import type { NuxtConfig } from "nuxt/schema";
+
+export default {
   compatibilityDate: "2024-04-03",
 
   postcss: {
@@ -24,4 +26,4 @@ export default defineNuxtConfig({
       ],
     },
   },
-});
+} satisfies NuxtConfig;
