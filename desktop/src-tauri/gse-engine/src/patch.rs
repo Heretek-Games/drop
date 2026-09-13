@@ -33,11 +33,20 @@ pub fn apply_plan(
 
     let mut report = PatchReport::default();
     for name in &plan.targets {
-        let src = emulator_dir.join(name);
+        // The emulator payload is flat (one file per target name); the
+        // destination preserves the target's relative path in the game dir.
+        let Some(file_name) = Path::new(name).file_name() else {
+            continue;
+        };
+        let src = emulator_dir.join(file_name);
         if !src.is_file() {
             continue;
         }
-        std::fs::copy(&src, game_dir.join(name))?;
+        let dest = game_dir.join(name);
+        if let Some(parent) = dest.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::copy(&src, &dest)?;
         report.patched.push(name.clone());
     }
 

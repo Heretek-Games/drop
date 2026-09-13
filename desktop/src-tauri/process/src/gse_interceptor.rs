@@ -3,8 +3,8 @@ use std::{
     process::Command,
 };
 
-use gse_engine::anticheat;
 use gse_engine::dll::{MANIFEST_FILE, TARGET_BINARIES, backup_originals, restore_originals};
+use gse_engine::{EmulatorFlavor, PatchPlan, anticheat, apply_plan, restore, scanner};
 use log::{info, warn};
 
 use crate::{error::ProcessError, interceptor::LaunchInterceptor};
@@ -58,10 +58,41 @@ pub fn recover_interrupted_sessions(install_dirs: &[PathBuf]) -> usize {
     recovered
 }
 
+/// Read the pinned AppID, if `gse_write_room_config` wrote one.
+fn read_app_id(install_dir: &Path) -> u32 {
+    std::fs::read_to_string(install_dir.join("steam_settings/steam_appid.txt"))
+        .ok()
+        .and_then(|value| value.trim().parse::<u32>().ok())
+        .unwrap_or(0)
+}
+
+/// Read room peer addresses written by `gse_write_room_config`.
+fn read_broadcast_peers(install_dir: &Path) -> Vec<String> {
+    std::fs::read_to_string(install_dir.join("steam_settings/custom_broadcasts.txt"))
+        .map(|content| {
+            content
+                .lines()
+                .map(str::trim)
+                .filter(|line| !line.is_empty())
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Default staged emulator payload location under Drop's data directory.
+fn default_payload_dir() -> Option<PathBuf> {
+    let dir = database::db::DATA_ROOT_DIR.join("tools/gse/gbe_fork");
+    dir.is_dir().then_some(dir)
+}
+
 /// Interceptor that manages the Goldberg-family Steam emulator lifecycle around
-/// a launch. Backup/restore and anti-cheat detection are delegated to the
-/// tested `gse-engine` crate.
-pub struct GseLaunchInterceptor;
+/// a launch. Patching, backup/restore and anti-cheat detection are delegated to
+/// the tested `gse-engine` crate.
+pub struct GseLaunchInterceptor {
+    /// Staged emulator payload (replacement Steam API binaries), if any.
+    payload_dir: Option<PathBuf>,
+}
 
 impl Default for GseLaunchInterceptor {
     fn default() -> Self {
@@ -70,8 +101,16 @@ impl Default for GseLaunchInterceptor {
 }
 
 impl GseLaunchInterceptor {
+    /// Use the default staged payload location under Drop's data directory.
     pub fn new() -> Self {
-        Self
+        Self {
+            payload_dir: default_payload_dir(),
+        }
+    }
+
+    /// Construct with an explicit payload directory (tests / release manager).
+    pub fn with_payload_dir(payload_dir: Option<PathBuf>) -> Self {
+        Self { payload_dir }
     }
 }
 
@@ -113,26 +152,45 @@ impl LaunchInterceptor for GseLaunchInterceptor {
             Err(err) => return Err(gse_error("anti-cheat scan failed", err)),
         }
 
-        // 2. Back up target binaries that exist in this layout.
-        let targets: Vec<&str> = TARGET_BINARIES
+        // 2. Find Steam API targets (relative paths, possibly nested).
+        let targets: Vec<String> = scanner::find_targets(install_dir)
+            .map_err(|err| gse_error("failed to scan for Steam API binaries", err))?
             .iter()
-            .copied()
-            .filter(|binary| install_dir.join(binary).is_file())
+            .map(|path| path.to_string_lossy().to_string())
             .collect();
         if targets.is_empty() {
-            info!("no Steam API binaries found for {}; skipping GSE setup", game_id);
+            info!(
+                "no Steam API binaries found for {}; skipping GSE setup",
+                game_id
+            );
             return Ok(());
         }
-        backup_originals(install_dir, &targets)
-            .map_err(|err| gse_error("failed to back up Steam API binaries", err))?;
 
-        // 3. Preserve a room-provided broadcast config; seed a LAN default only
-        //    when none exists.
-        let settings_dir = install_dir.join("steam_settings");
-        std::fs::create_dir_all(&settings_dir).map_err(ProcessError::from)?;
-        let broadcasts = settings_dir.join("custom_broadcasts.txt");
-        if !broadcasts.exists() {
-            std::fs::write(&broadcasts, DEFAULT_BROADCAST).map_err(ProcessError::from)?;
+        // 3. Apply the staged emulator payload when present; otherwise only back
+        //    up originals and seed a LAN broadcast file (offline/no-payload mode).
+        match &self.payload_dir {
+            Some(payload) => {
+                let plan = PatchPlan {
+                    flavor: EmulatorFlavor::GbeFork,
+                    app_id: read_app_id(install_dir),
+                    targets,
+                    broadcast_peers: read_broadcast_peers(install_dir),
+                };
+                apply_plan(&plan, install_dir, payload)
+                    .map_err(|err| gse_error("failed to apply GSE emulator payload", err))?;
+            }
+            None => {
+                let refs: Vec<&str> = targets.iter().map(String::as_str).collect();
+                backup_originals(install_dir, &refs)
+                    .map_err(|err| gse_error("failed to back up Steam API binaries", err))?;
+                let settings_dir = install_dir.join("steam_settings");
+                std::fs::create_dir_all(&settings_dir).map_err(ProcessError::from)?;
+                let broadcasts = settings_dir.join("custom_broadcasts.txt");
+                if !broadcasts.exists() {
+                    std::fs::write(&broadcasts, DEFAULT_BROADCAST)
+                        .map_err(ProcessError::from)?;
+                }
+            }
         }
 
         command.env("DROP_GSE_ACTIVE", "1");
@@ -155,19 +213,27 @@ impl LaunchInterceptor for GseLaunchInterceptor {
             game_id, exit_status
         );
 
-        // Restore in reverse order of mutation.
-        let targets: Vec<&str> = TARGET_BINARIES.to_vec();
-        if let Err(err) = restore_originals(install_dir, &targets) {
+        // Restore in reverse order of mutation: current targets plus the
+        // default names (in case the original was replaced and then removed).
+        let mut targets: Vec<String> = scanner::find_targets(install_dir)
+            .map(|paths| {
+                paths
+                    .iter()
+                    .map(|p| p.to_string_lossy().to_string())
+                    .collect()
+            })
+            .unwrap_or_default();
+        for name in TARGET_BINARIES {
+            if !targets.iter().any(|target| target == name) {
+                targets.push((*name).to_string());
+            }
+        }
+
+        if let Err(err) = restore(install_dir, &targets) {
             warn!(
                 "GSE restore failed for {}: {err}; backups left in place for the next launch",
                 game_id
             );
-        }
-
-        let settings_dir = install_dir.join("steam_settings");
-        if settings_dir.exists() {
-            let _ = std::fs::remove_file(settings_dir.join("custom_broadcasts.txt"));
-            let _ = std::fs::remove_dir(&settings_dir);
         }
 
         Ok(())
@@ -205,6 +271,36 @@ mod tests {
         assert!(!dir.join("steam_settings/configs.main.ini").exists());
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn applies_staged_payload_and_restores() {
+        let dir = create_test_dir("payload");
+        std::fs::write(dir.join("steam_api64.dll"), b"original-valve").unwrap();
+        mark_room_requested(&dir);
+
+        let payload = create_test_dir("payload-src");
+        std::fs::write(payload.join("steam_api64.dll"), b"goldberg-patched").unwrap();
+
+        let interceptor = GseLaunchInterceptor::with_payload_dir(Some(payload.clone()));
+        let mut cmd = Command::new("echo");
+        assert!(interceptor.pre_launch("game-test", &dir, &mut cmd).is_ok());
+
+        // The emulator payload replaced the DLL and the original was backed up.
+        assert_eq!(
+            std::fs::read(dir.join("steam_api64.dll")).unwrap(),
+            b"goldberg-patched"
+        );
+        assert!(dir.join("steam_api64.dll.orig").exists());
+
+        assert!(interceptor.post_exit("game-test", &dir, Some(0)).is_ok());
+        assert_eq!(
+            std::fs::read(dir.join("steam_api64.dll")).unwrap(),
+            b"original-valve"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_dir_all(&payload);
     }
 
     #[test]

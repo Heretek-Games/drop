@@ -122,8 +122,10 @@ Owner: TBD · Depends on: M0
 
 - [x] **A1** Scanner for `steam_api*.dll` / `libsteam_api.so` / `steamclient*.dll`
       (depth-limited, prefix-aware) — `gse-engine/src/scanner.rs`
-- [x] **A2** Replaced `process/src/gse_interceptor.rs` backup/restore + anti-cheat
-      with the tested `gse-engine` crate
+- [x] **A2** `process/src/gse_interceptor.rs` delegates to `gse-engine` and now
+      **applies a staged emulator payload** (backup → replace → config) when
+      `<dataDir>/tools/gse/gbe_fork` exists, falling back to backup-only. The
+      payload dir is injectable for tests; a release manager populates it.
 - [x] **A3** Interface extractor → `steam_interfaces.txt` (`interfaces.rs`)
 - [x] **A4** Patcher/replacer + digest verify + rollback (`patch.rs`/`dll.rs`)
 - [x] **A5** Per-flavor config generation (`config.rs`)
@@ -244,8 +246,9 @@ Delivered in the working tree:
   each (10 plugin tests + 7 pipeline tests pass).
 
 M0 complete. **M1 engine (A1–A6) landed** as the `desktop/src-tauri/gse-engine`
-crate (18 unit tests pass) and the `process` interceptor now delegates to it.
-Remaining in M1: P5/P7/P9 packaging, and wiring a real emulator payload.
+crate (19 unit tests pass) and the `process` interceptor now delegates to it and
+applies a staged payload when one is present. Remaining in M1: a release manager
+that populates `<dataDir>/tools/gse/`, and the desktop install/update UI.
 
 M2 A7/A8 landed: the interceptor is opt-in (room config or `DROP_GSE_ENABLE`)
 and the client restores interrupted sessions on startup. Remaining: A9/A10 and
