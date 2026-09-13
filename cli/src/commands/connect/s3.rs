@@ -35,7 +35,7 @@ impl Configure for S3ConfigCli {
         interactive_variable!(self, region, "S3 Region");
         interactive_variable!(self, bucket_name, "S3 Bucket Name");
         interactive_variable!(self, endpoint, "S3 Endpoint");
-        if let None = name {
+        if name.is_none() {
             *name = Some(endpoint.clone());
         }
         Ok(ConfigOption::S3(S3Config {
@@ -60,7 +60,7 @@ impl OperatorBuilder for S3Config {
             .bucket(&self.bucket_name)
             .disable_config_load();
 
-        let op: Operator = Operator::new(builder)?.finish();
+        let op: Operator = Operator::new(builder)?;
 
         Ok(op)
     }

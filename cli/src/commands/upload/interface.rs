@@ -26,18 +26,17 @@ pub async fn upload(
 
     info!("Uploading chunks");
 
-    let v2_manifest = generate_v2_manifest(
+    generate_v2_manifest(
         Path::new(&path),
         ClosureFactory::new(
             async move |id: String| {
                 info!("Uploading chunk id {id}");
-                let writer = operator
+                operator
                     .writer(&format!("{game_id}/{version_id}/{id}"))
                     .await
                     .unwrap()
                     .into_futures_async_write()
-                    .compat_write();
-                writer
+                    .compat_write()
             },
             |writer: Compat<FuturesAsyncWriter>| async {
                 writer.into_inner().close().await.unwrap();

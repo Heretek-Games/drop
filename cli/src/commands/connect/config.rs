@@ -46,7 +46,7 @@ impl Config {
             .expect("Apparently your home directory doesn't exist") // Should probably formalise that error
             .join(CONFIG_DIR);
         if fs::exists(&save_path)
-            .unwrap_or_else(|_| panic!("Could not read save path {:#?}", &save_path))
+            .unwrap_or_else(|_| panic!("Could not read save path {:#?}", save_path))
         {
             serde_json::from_str(&fs::read_to_string(save_path).unwrap()).unwrap()
         } else {
