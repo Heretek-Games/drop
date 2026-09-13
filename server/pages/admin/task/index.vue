@@ -260,6 +260,14 @@ const scheduledTasks: {
     name: "Check Integrity",
     description: "Re-imports all versions and updates their manifests.",
   },
+  "import:discover": {
+    name: "Discover Games",
+    description: "Scans libraries for unimported game directories.",
+  },
+  "import:bulk": {
+    name: "Bulk Import",
+    description: "Imports selected discovered games and their versions.",
+  },
 };
 
 async function startTask(taskGroup: string) {

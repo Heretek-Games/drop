@@ -31,6 +31,8 @@ model Library {
     options Json
 
     games Game[]
+
+    discoveredGames DiscoveredGame[]
 }
 
 model Depot {

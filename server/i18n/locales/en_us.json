@@ -332,6 +332,7 @@
   "header": {
     "admin": {
       "admin": "Admin",
+      "bulkImport": "Bulk Import",
       "home": "Home",
       "library": "Library",
       "metadata": "Meta",

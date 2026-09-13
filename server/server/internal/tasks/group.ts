@@ -20,6 +20,12 @@ export const taskGroups = {
   "import:check-integrity": {
     concurrency: false,
   },
+  "import:discover": {
+    concurrency: false,
+  },
+  "import:bulk": {
+    concurrency: false,
+  },
 } as const;
 
 export type TaskGroup = keyof typeof taskGroups;

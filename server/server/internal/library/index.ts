@@ -9,7 +9,7 @@ import path from "node:path";
 import prisma from "../db/database";
 import { fuzzy } from "fast-fuzzy";
 import type { TaskRunContext } from "../tasks";
-import taskHandler from "../tasks";
+import taskHandler, { wrapTaskContext } from "../tasks";
 import notificationSystem from "../notifications";
 import { GameNotFoundError, type LibraryProvider } from "./provider";
 import { logger } from "../logging";
@@ -22,7 +22,11 @@ import { GameType, Platform } from "~/prisma/client/enums";
 import { castManifest } from "./manifest/utils";
 import { Shescape } from "shescape";
 import type { Prisma } from "~/prisma/client/client";
-import { classifyDistribution, generatePipelineRecipe } from "./pipeline";
+import {
+  classifyDistribution,
+  generatePipelineRecipe,
+  DistributionType,
+} from "./pipeline";
 
 export function createGameImportTaskId(libraryId: string, libraryPath: string) {
   return createHash("sha256")
@@ -211,6 +215,146 @@ class LibraryManager {
       }
       throw e;
     }
+  }
+
+  /**
+   * Scans every configured library for unimported game directories, infers
+   * their distribution format, and persists the results for admin review.
+   * Decisions already recorded (Imported / Ignored) are preserved between
+   * scans; only Pending rows are refreshed.
+   */
+  async discoverUnimportedGames(): Promise<number> {
+    const unimported = await this.fetchUnimportedGames();
+    const results: Array<{
+      libraryId: string;
+      libraryPath: string;
+      inferredType: string;
+      suggestedName: string;
+    }> = [];
+
+    for (const [libraryId, paths] of Object.entries(unimported)) {
+      const provider = this.libraries.get(libraryId);
+      if (!provider) continue;
+      const baseDir =
+        (provider as unknown as { config?: { baseDir?: string } }).config
+          ?.baseDir ?? "";
+
+      for (const libraryPath of paths) {
+        const suggestedName = libraryPath
+          .replace(/[._]+/g, " ")
+          .replace(/\s+/g, " ")
+          .trim();
+        const gameDir =
+          baseDir.length > 0 ? path.join(baseDir, libraryPath) : libraryPath;
+
+        let inferredType: DistributionType = DistributionType.Unknown;
+        try {
+          inferredType = classifyDistribution(gameDir, suggestedName).type;
+          if (inferredType === DistributionType.Unknown) {
+            const versions = await provider.listVersions(libraryPath, []);
+            for (const version of versions) {
+              if (version === "default") continue;
+              const candidate = classifyDistribution(
+                path.join(gameDir, version),
+                suggestedName,
+              ).type;
+              if (candidate !== DistributionType.Unknown) {
+                inferredType = candidate;
+                break;
+              }
+            }
+          }
+        } catch {
+          // Directory is unreadable or not a plain folder; keep Unknown.
+        }
+
+        results.push({
+          libraryId,
+          libraryPath,
+          inferredType,
+          suggestedName,
+        });
+      }
+    }
+
+    await prisma.discoveredGame.deleteMany({ where: { decision: "Pending" } });
+    if (results.length > 0) {
+      await prisma.discoveredGame.createMany({
+        data: results,
+        skipDuplicates: true,
+      });
+    }
+
+    return results.length;
+  }
+
+  /**
+   * Imports every unimported version of a game, auto-generating pipeline
+   * recipes via the classification engine. Used by the bulk import job after
+   * the game record has been created.
+   */
+  async importUnimportedVersionsForGame(
+    gameId: string,
+    libraryId: string,
+    libraryPath: string,
+    context: TaskRunContext,
+  ): Promise<number> {
+    const versions = await this.fetchUnimportedGameVersions(
+      libraryId,
+      libraryPath,
+      { gameId, versions: [], depotVersions: [] },
+    );
+    if (!versions || versions.length === 0) return 0;
+
+    let imported = 0;
+    let index = 0;
+    for (const version of versions) {
+      const preload = await this.fetchUnimportedVersionInformation(
+        gameId,
+        version,
+      );
+      const chosen = preload?.at(0);
+      if (!chosen) {
+        context.logger.warn(
+          `No executable could be auto-detected for ${libraryPath} (${version.name}); skipping`,
+        );
+        index++;
+        continue;
+      }
+
+      const min = (index / versions.length) * 100;
+      const max = ((index + 1) / versions.length) * 100;
+      await this.importVersion(
+        gameId,
+        version,
+        {
+          id: gameId,
+          version,
+          launches: [
+            {
+              platform: chosen.platform,
+              launch: chosen.filename,
+              name: "Play",
+            },
+          ],
+          // Empty setups lets importVersion auto-attach the generated
+          // drop-pipeline-setup command for formats that need one.
+          setups: [],
+          onlySetup: false,
+          delta: false,
+          requiredContent: [],
+        },
+        wrapTaskContext(context, {
+          min,
+          max,
+          prefix: `${libraryPath} (${version.name})`,
+        }),
+      );
+      imported++;
+      index++;
+    }
+
+    return imported;
   }
 
   async fetchGamesWithStatus(

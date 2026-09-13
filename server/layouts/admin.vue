@@ -199,6 +199,7 @@ import {
   UserGroupIcon,
   RectangleStackIcon,
   DocumentIcon,
+  SquaresPlusIcon,
 } from "@heroicons/vue/24/outline";
 import type { NavigationItem } from "~/composables/types";
 import { useCurrentNavigationIndex } from "~/composables/current-page-engine";
@@ -220,6 +221,12 @@ const navigation: Array<NavigationItem & { icon: Component }> = [
     route: "/admin/library",
     prefix: "/admin/library",
     icon: ServerStackIcon,
+  },
+  {
+    label: $t("header.admin.bulkImport"),
+    route: "/admin/import/bulk",
+    prefix: "/admin/import/bulk",
+    icon: SquaresPlusIcon,
   },
   {
     label: $t("header.admin.metadata"),

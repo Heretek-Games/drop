@@ -1,0 +1,25 @@
+enum DiscoveredGameDecision {
+  Pending
+  Imported
+  Ignored
+}
+
+model DiscoveredGame {
+  id String @id @default(uuid())
+
+  libraryId   String
+  library     Library @relation(fields: [libraryId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  libraryPath String
+
+  inferredType  String
+  suggestedName String?
+
+  decision       DiscoveredGameDecision @default(Pending)
+  importedGameId String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([libraryId, libraryPath], name: "discoveryKey")
+  @@index([decision])
+}

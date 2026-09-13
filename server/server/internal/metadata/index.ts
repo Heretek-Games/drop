@@ -124,6 +124,7 @@ export class MetadataHandler {
     libraryId: string,
     libraryPath: string,
     type: GameType,
+    parentTask?: TaskRunContext,
   ) {
     return await this.createGame(
       {
@@ -134,6 +135,7 @@ export class MetadataHandler {
       libraryId,
       libraryPath,
       type,
+      parentTask,
     );
   }
 
@@ -196,6 +198,7 @@ export class MetadataHandler {
     libraryId: string,
     libraryPath: string,
     type: GameType,
+    parentTask?: TaskRunContext,
   ) {
     const provider = this.providers.get(result.sourceId);
     if (!provider)
@@ -214,117 +217,120 @@ export class MetadataHandler {
     const gameId = randomUUID();
 
     const key = createGameImportTaskId(libraryId, libraryPath);
-    return await taskHandler.create({
-      name: `Import game "${result.name}" (${libraryPath})`,
-      key,
-      taskGroup: "import:game",
-      acls: ["system:import:game:read"],
-      async run(context) {
-        const { progress, logger } = context;
+    return await taskHandler.create(
+      {
+        name: `Import game "${result.name}" (${libraryPath})`,
+        key,
+        taskGroup: "import:game",
+        acls: ["system:import:game:read"],
+        async run(context) {
+          const { progress, logger } = context;
 
-        progress(0);
+          progress(0);
 
-        const [createObject, pullObjects, dumpObjects] =
-          metadataHandler.objectHandler.new(
-            {},
-            ["internal:read"],
-            wrapTaskContext(context, {
-              min: 60,
-              max: 95,
-              prefix: "[object import] ",
-            }),
-          );
+          const [createObject, pullObjects, dumpObjects] =
+            metadataHandler.objectHandler.new(
+              {},
+              ["internal:read"],
+              wrapTaskContext(context, {
+                min: 60,
+                max: 95,
+                prefix: "[object import] ",
+              }),
+            );
 
-        const companyLookupCache: {
-          [key: string]: Awaited<
-            ReturnType<typeof metadataHandler.fetchCompany>
-          >;
-        } = {};
-        let metadata: GameMetadata | undefined;
-        try {
-          metadata = await provider.fetchGame(
-            {
-              id: result.id,
-              name: result.name,
-              // wrap in anonymous functions to keep references to this
-              company: async (name: string) => {
-                if (companyLookupCache[name]) return companyLookupCache[name];
+          const companyLookupCache: {
+            [key: string]: Awaited<
+              ReturnType<typeof metadataHandler.fetchCompany>
+            >;
+          } = {};
+          let metadata: GameMetadata | undefined;
+          try {
+            metadata = await provider.fetchGame(
+              {
+                id: result.id,
+                name: result.name,
+                // wrap in anonymous functions to keep references to this
+                company: async (name: string) => {
+                  if (companyLookupCache[name]) return companyLookupCache[name];
 
-                const companyData = await metadataHandler.fetchCompany(name);
-                companyLookupCache[name] = companyData;
-                return companyData;
+                  const companyData = await metadataHandler.fetchCompany(name);
+                  companyLookupCache[name] = companyData;
+                  return companyData;
+                },
+                createObject,
               },
-              createObject,
+              wrapTaskContext(context, {
+                min: 0,
+                max: 60,
+                prefix: "[metadata import] ",
+              }),
+            );
+          } catch (e) {
+            dumpObjects();
+            throw e;
+          }
+
+          context?.progress(60);
+
+          logger.info(`Successfully fetched all metadata.`);
+          logger.info(`Importing objects...`);
+
+          await pullObjects();
+
+          progress(95);
+
+          await prisma.game.create({
+            data: {
+              id: gameId,
+              metadataSource: provider.source(),
+              metadataId: metadata.id,
+
+              mName: metadata.name,
+              mShortDescription: metadata.shortDescription,
+              mDescription: metadata.description,
+              mReleased: metadata.released,
+
+              mIconObjectId: metadata.icon,
+              mBannerObjectId: metadata.bannerId,
+              mCoverObjectId: metadata.coverId,
+              mImageLibraryObjectIds: metadata.images,
+
+              publishers: {
+                connect: metadata.publishers,
+              },
+              developers: {
+                connect: metadata.developers,
+              },
+
+              ratings: {
+                connectOrCreate: metadataHandler.parseRatings(metadata.reviews),
+              },
+              ageRatings: {
+                connectOrCreate: metadataHandler.parseAgeRatings(
+                  metadata.ageRatings,
+                  gameId,
+                ),
+              },
+              tags: {
+                connect: await metadataHandler.parseTags(metadata.tags),
+              },
+
+              libraryId,
+              libraryPath,
+
+              type,
             },
-            wrapTaskContext(context, {
-              min: 0,
-              max: 60,
-              prefix: "[metadata import] ",
-            }),
-          );
-        } catch (e) {
-          dumpObjects();
-          throw e;
-        }
+          });
 
-        context?.progress(60);
+          logger.info(`Finished game import.`);
+          progress(100);
 
-        logger.info(`Successfully fetched all metadata.`);
-        logger.info(`Importing objects...`);
-
-        await pullObjects();
-
-        progress(95);
-
-        await prisma.game.create({
-          data: {
-            id: gameId,
-            metadataSource: provider.source(),
-            metadataId: metadata.id,
-
-            mName: metadata.name,
-            mShortDescription: metadata.shortDescription,
-            mDescription: metadata.description,
-            mReleased: metadata.released,
-
-            mIconObjectId: metadata.icon,
-            mBannerObjectId: metadata.bannerId,
-            mCoverObjectId: metadata.coverId,
-            mImageLibraryObjectIds: metadata.images,
-
-            publishers: {
-              connect: metadata.publishers,
-            },
-            developers: {
-              connect: metadata.developers,
-            },
-
-            ratings: {
-              connectOrCreate: metadataHandler.parseRatings(metadata.reviews),
-            },
-            ageRatings: {
-              connectOrCreate: metadataHandler.parseAgeRatings(
-                metadata.ageRatings,
-                gameId,
-              ),
-            },
-            tags: {
-              connect: await metadataHandler.parseTags(metadata.tags),
-            },
-
-            libraryId,
-            libraryPath,
-
-            type,
-          },
-        });
-
-        logger.info(`Finished game import.`);
-        progress(100);
-
-        context.addAction(`View Game:/admin/library/${gameId}`);
+          context.addAction(`View Game:/admin/library/${gameId}`);
+        },
       },
-    });
+      parentTask,
+    );
   }
 
   // Careful with this function, it has no typechecking
