@@ -127,8 +127,9 @@ Owner: TBD · Depends on: M0
 - [x] **A3** Interface extractor → `steam_interfaces.txt` (`interfaces.rs`)
 - [x] **A4** Patcher/replacer + digest verify + rollback (`patch.rs`/`dll.rs`)
 - [x] **A5** Per-flavor config generation (`config.rs`)
-- [x] **A6** Emulator release manager: release.json + SHA-256 verify/stage (`dist.rs`).
-      Runtime HTTP fetch still to be wired to a cache directory.
+- [x] **A6** Emulator release manager: `release.json` + SHA-256 verify/stage and
+      a transport-agnostic `fetch_release` hook (`dist.rs`; 19 engine tests).
+      The desktop supplies the reqwest-backed fetch.
 - [~] **P5/P7/P9** Bundle integrity: `checksum`/`signature` verified before an
   external bundle is imported (`DROP_PLUGIN_SIGNING_KEY`,
   `DROP_PLUGIN_REQUIRE_SIGNATURE`), tested. P9 done via the `hello-world`

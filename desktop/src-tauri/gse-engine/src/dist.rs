@@ -71,6 +71,38 @@ pub fn stage_release(release_dir: &Path, dest: &Path) -> Result<(), EngineError>
     Ok(())
 }
 
+/// Fetch, verify and write a release's payload files into `dest_dir`.
+///
+/// `fetch` is supplied by the caller (e.g. a reqwest-backed closure) so the
+/// engine stays transport-agnostic. Each file must match its pinned SHA-256
+/// before it is written; a mismatch aborts without writing it.
+pub fn fetch_release<F>(
+    spec: &ReleaseSpec,
+    fetch: F,
+    dest_dir: &Path,
+) -> Result<(), EngineError>
+where
+    F: Fn(&str) -> Result<Vec<u8>, EngineError>,
+{
+    std::fs::create_dir_all(dest_dir)?;
+    for (name, expected) in &spec.files {
+        let bytes = fetch(name)?;
+        let digest = to_hex(&Sha256::digest(&bytes));
+        if digest != *expected {
+            return Err(EngineError::ManifestMismatch {
+                path: name.clone(),
+                expected: expected.clone(),
+                found: digest,
+            });
+        }
+        let file_name = Path::new(name)
+            .file_name()
+            .ok_or_else(|| EngineError::ScanFailed(format!("invalid release file name: {name}")))?;
+        std::fs::write(dest_dir.join(file_name), bytes)?;
+    }
+    Ok(())
+}
+
 /// Serialize a `EmulatorFlavor` for JSON.
 impl Serialize for EmulatorFlavor {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
@@ -137,6 +169,52 @@ mod tests {
             std::fs::read(dest.path().join("steam_api64.dll")).unwrap(),
             b"emulator"
         );
+    }
+
+    #[test]
+    fn fetch_release_downloads_and_verifies_payloads() {
+        let mut files = BTreeMap::new();
+        files.insert(
+            "steam_api64.dll".to_string(),
+            to_hex(&Sha256::digest(b"emulator")),
+        );
+        let spec = ReleaseSpec {
+            flavor: EmulatorFlavor::GbeFork,
+            tag: "v1".into(),
+            files,
+        };
+
+        let dest = tempfile::tempdir().unwrap();
+        fetch_release(
+            &spec,
+            |name| {
+                assert_eq!(name, "steam_api64.dll");
+                Ok(b"emulator".to_vec())
+            },
+            dest.path(),
+        )
+        .unwrap();
+        assert_eq!(
+            std::fs::read(dest.path().join("steam_api64.dll")).unwrap(),
+            b"emulator"
+        );
+
+        // A payload whose digest does not match is refused.
+        let mut bad_files = BTreeMap::new();
+        bad_files.insert(
+            "steam_api64.dll".to_string(),
+            to_hex(&Sha256::digest(b"expected")),
+        );
+        let bad = ReleaseSpec {
+            flavor: EmulatorFlavor::GbeFork,
+            tag: "v1".into(),
+            files: bad_files,
+        };
+        let dest2 = tempfile::tempdir().unwrap();
+        assert!(matches!(
+            fetch_release(&bad, |_| Ok(b"tampered".to_vec()), dest2.path()),
+            Err(EngineError::ManifestMismatch { .. })
+        ));
     }
 
     #[test]
