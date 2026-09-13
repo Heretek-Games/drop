@@ -7,6 +7,10 @@ Self-hosted game distribution platform (polyglot monorepo).
 > native pipeline runner, admin bulk auto-import, depot chunk cache, plugin SPI,
 > launch interceptors, Tauri window model), toolchain, commands, environment
 > quirks and conventions. This file only keeps Claude-specific operational notes.
+>
+> Note: `drop` is part of the [Heretek Games](https://github.com/Heretek-Games)
+> workspace. External plugins (`drop-gse`, `drop-zerotier`, `drop-plugin-sdk`,
+> `drop-gamebox`, `drop-seedbox`, `drop-federation`) live in sister repos.
 
 ## Quick orientation
 

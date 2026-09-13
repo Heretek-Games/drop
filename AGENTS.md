@@ -5,8 +5,21 @@ platform maintained by [Heretek Games](https://github.com/Heretek-Games/drop)
 (transitioned from `Drop-OSS/drop` and `Heretek-AI/drop`).
 
 This is the **canonical** guide for AI agents (opencode, Claude Code, Antigravity,
-Gemini CLI) and human developers. `CLAUDE.md` and `GEMINI.md` are thin,
+Gemini CLI) and human developers working on **`drop` core**. `CLAUDE.md` and `GEMINI.md` are thin,
 tool-specific wrappers that point back here — update this file first.
+
+> [!NOTE]
+> **Multi-Repo Workspace**: `drop` is the core platform within the [Heretek Games](https://github.com/Heretek-Games) workspace (`~/Projects/Heretek-Games/`).
+> Specialized subsystems live in dedicated sister repositories to keep `drop` lean and upstream-friendly with `Drop-OSS/drop`:
+>
+> - **GSE Multiplayer Engine**: [`drop-gse`](https://github.com/Heretek-Games/drop-gse) (`~/Projects/Heretek-Games/drop-gse`)
+> - **ZeroTier Mesh Provider**: [`drop-zerotier`](https://github.com/Heretek-Games/drop-zerotier) (`~/Projects/Heretek-Games/drop-zerotier`)
+> - **Plugin SDK & CLI**: [`drop-plugin-sdk`](https://github.com/Heretek-Games/drop-plugin-sdk) (`~/Projects/Heretek-Games/drop-plugin-sdk`)
+> - **GameBox Metadata Index**: [`drop-gamebox`](https://github.com/Heretek-Games/drop-gamebox) (`~/Projects/Heretek-Games/drop-gamebox`)
+> - **Seedbox / qBittorrent**: [`drop-seedbox`](https://github.com/Heretek-Games/drop-seedbox) (`~/Projects/Heretek-Games/drop-seedbox`)
+> - **Federation & Peering**: [`drop-federation`](https://github.com/Heretek-Games/drop-federation) (`~/Projects/Heretek-Games/drop-federation`)
+>
+> Core `drop` changes should focus on general improvements, upstream compatibility, and the generic Plugin SPI.
 
 ---
 

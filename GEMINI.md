@@ -8,6 +8,10 @@ platform maintained by [Heretek Games](https://github.com/Heretek-Games/drop).
 > commands, environment quirks and conventions. This file is a thin wrapper for
 > Gemini CLI / Google Antigravity sessions; update `AGENTS.md` first and keep
 > this in sync.
+>
+> Note: `drop` is part of the [Heretek Games](https://github.com/Heretek-Games)
+> workspace. External plugins (`drop-gse`, `drop-zerotier`, `drop-plugin-sdk`,
+> `drop-gamebox`, `drop-seedbox`, `drop-federation`) live in sister repos.
 
 ## Orientation
 
