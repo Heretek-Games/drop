@@ -176,7 +176,6 @@ function checkReset(v: QueueState) {
   if (currentGame != previousGameId.value) {
     previousGameId.value = currentGame;
     resetHistoryGraph();
-    return;
   }
 }
 watch(queue, (v) => {

@@ -963,8 +963,8 @@ export class SteamProvider implements MetadataProvider {
     // Convert the bullet points and tabs to markdown list format
     markdown = markdown.replace(/• *\t+/g, "\n- ");
 
-    // Handle numbered enumeration (1.\t, 2.\t, etc.)
-    markdown = markdown.replace(/(\d+)\. *\t+/g, "\n$1. ");
+    // Handle numbered enumeration (1.\t, 2.\t, etc.) at line starts
+    markdown = markdown.replace(/^(\d+)\. *\t+/gm, "\n$1. ");
 
     // Convert bold text
     markdown = markdown.replace(
