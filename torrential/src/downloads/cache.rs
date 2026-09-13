@@ -22,6 +22,11 @@ use log::{info, warn};
 
 const PARTIAL_EXTENSION: &str = "partial";
 
+/// Cache keys are SHA-256 hex digests; anything else cannot address an entry.
+fn is_valid_checksum(checksum: &str) -> bool {
+    checksum.len() == 64 && checksum.bytes().all(|b| b.is_ascii_hexdigit())
+}
+
 /// Creates a directory tree readable only by the current user. The cache stores
 /// decrypted game data, so it must not be world-readable.
 fn create_private_dir_all(path: &Path) -> std::io::Result<()> {
@@ -162,6 +167,12 @@ impl ChunkCache {
 
     fn path_for(&self, checksum: &str) -> Option<PathBuf> {
         let dir = self.dir.as_ref()?;
+        // Cache keys are SHA-256 plaintext digests; reject anything else so a
+        // malformed checksum cannot escape the cache directory.
+        if !is_valid_checksum(checksum) {
+            warn!("chunk cache ignoring malformed checksum");
+            return None;
+        }
         let shard = checksum.get(0..2).unwrap_or("00");
         Some(dir.join(shard).join(checksum))
     }
@@ -249,6 +260,23 @@ impl ChunkCache {
         self.evict(&mut inner);
     }
 
+    /// Drop an entry and its file, e.g. after a failed serve reveals the
+    /// cached bytes are unusable. A later request will refill from source.
+    pub fn invalidate(&self, checksum: &str) {
+        let path = self.path_for(checksum);
+        let mut inner = self
+            .inner
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(entry) = inner.entries.remove(checksum) {
+            inner.total = inner.total.saturating_sub(entry.size);
+        }
+        drop(inner);
+        if let Some(path) = path {
+            let _ = std::fs::remove_file(path);
+        }
+    }
+
     fn evict(&self, inner: &mut Inner) {
         if self.max_bytes == 0 {
             return;
@@ -310,16 +338,21 @@ mod tests {
         ChunkCache::new(Some(dir.to_path_buf()), max)
     }
 
+    /// Pads an identifier into a valid 64-character hex checksum.
+    fn key(id: &str) -> String {
+        format!("{id:0<64}")
+    }
+
     #[test]
     fn reserve_commit_and_hit() {
         let temp = tempfile::tempdir().unwrap();
         let cache = cache(temp.path(), 1024 * 1024);
 
-        let guard = cache.reserve("aabbccdd").unwrap();
+        let guard = cache.reserve(key("aabbccdd").as_str()).unwrap();
         std::fs::write(&guard.temp_path, b"hello world").unwrap();
         assert!(guard.commit(11));
 
-        let path = cache.hit("aabbccdd").unwrap();
+        let path = cache.hit(key("aabbccdd").as_str()).unwrap();
         assert_eq!(std::fs::read(path).unwrap(), b"hello world");
         assert_eq!(cache.inner.lock().unwrap().total, 11);
     }
@@ -330,15 +363,15 @@ mod tests {
         let cache = cache(temp.path(), 1024 * 1024);
 
         {
-            let guard = cache.reserve("deadbeef").unwrap();
+            let guard = cache.reserve(key("deadbeef").as_str()).unwrap();
             std::fs::write(&guard.temp_path, b"partial").unwrap();
             // No commit: drop should clean up.
         }
 
-        assert!(cache.hit("deadbeef").is_none());
-        assert!(!cache.temp_path_exists("deadbeef"));
+        assert!(cache.hit(key("deadbeef").as_str()).is_none());
+        assert!(!cache.temp_path_exists(key("deadbeef").as_str()));
         // The single-flight slot must be free again.
-        assert!(cache.reserve("deadbeef").is_some());
+        assert!(cache.reserve(key("deadbeef").as_str()).is_some());
     }
 
     #[test]
@@ -346,10 +379,10 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let cache = cache(temp.path(), 1024 * 1024);
 
-        let first = cache.reserve("00112233").unwrap();
-        assert!(cache.reserve("00112233").is_none());
+        let first = cache.reserve(key("00112233").as_str()).unwrap();
+        assert!(cache.reserve(key("00112233").as_str()).is_none());
         drop(first);
-        assert!(cache.reserve("00112233").is_some());
+        assert!(cache.reserve(key("00112233").as_str()).is_some());
     }
 
     #[test]
@@ -357,13 +390,13 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let cache = cache(temp.path(), 10);
 
-        for (i, checksum) in ["aa11", "bb22", "cc33"].iter().enumerate() {
+        for (i, checksum) in [key("aa11"), key("bb22"), key("cc33")].iter().enumerate() {
             let guard = cache.reserve(checksum).unwrap();
             std::fs::write(&guard.temp_path, vec![0u8; 6]).unwrap();
             assert!(guard.commit(6));
             // Touch the earlier entries so they are newer than the oldest.
             if i == 0 {
-                let _ = cache.hit("aa11");
+                let _ = cache.hit(key("aa11").as_str());
             }
         }
 
@@ -377,8 +410,8 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let cache = cache(temp.path(), 1024 * 1024);
 
-        cache.insert("aa11bb22".to_string(), 6);
-        cache.insert("aa11bb22".to_string(), 6);
+        cache.insert(key("aa11bb22"), 6);
+        cache.insert(key("aa11bb22"), 6);
 
         assert_eq!(cache.inner.lock().unwrap().total, 6);
     }
@@ -388,15 +421,42 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let cache = cache(temp.path(), 1024 * 1024);
 
-        let guard = cache.reserve("c0ffee00").unwrap();
+        let guard = cache.reserve(key("c0ffee00").as_str()).unwrap();
         std::fs::write(&guard.temp_path, b"data").unwrap();
         assert!(guard.commit(4));
 
-        let path = cache.hit("c0ffee00").unwrap();
+        let path = cache.hit(key("c0ffee00").as_str()).unwrap();
         std::fs::remove_file(&path).unwrap();
 
-        assert!(cache.hit("c0ffee00").is_none());
-        assert!(!cache.inner.lock().unwrap().entries.contains_key("c0ffee00"));
+        assert!(cache.hit(key("c0ffee00").as_str()).is_none());
+        assert!(!cache.inner.lock().unwrap().entries.contains_key(key("c0ffee00").as_str()));
+    }
+
+    #[test]
+    fn rejects_malformed_checksums() {
+        let temp = tempfile::tempdir().unwrap();
+        let cache = cache(temp.path(), 1024 * 1024);
+
+        assert!(cache.reserve("../../escape").is_none());
+        assert!(cache.hit("../../escape").is_none());
+        assert!(cache.reserve("aa11").is_none());
+    }
+
+    #[test]
+    fn invalidate_drops_entry_and_file() {
+        let temp = tempfile::tempdir().unwrap();
+        let cache = cache(temp.path(), 1024 * 1024);
+
+        let guard = cache.reserve(key("feed").as_str()).unwrap();
+        std::fs::write(&guard.temp_path, b"data").unwrap();
+        assert!(guard.commit(4));
+
+        let path = cache.hit(key("feed").as_str()).unwrap();
+        assert!(path.is_file());
+
+        cache.invalidate(key("feed").as_str());
+        assert!(cache.hit(key("feed").as_str()).is_none());
+        assert!(!path.exists());
     }
 
     impl ChunkCache {

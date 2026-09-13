@@ -20,8 +20,9 @@ use futures_util::{Stream, StreamExt, stream};
 use log::{error, info, warn};
 use pin_project_lite::pin_project;
 use reqwest::StatusCode;
+use sha2::{Digest, Sha256};
 use tokio::{
-    io::AsyncWriteExt,
+    io::{AsyncReadExt, AsyncWriteExt},
     sync::{Semaphore, SemaphorePermit},
 };
 use tokio_util::io::ReaderStream;
@@ -97,10 +98,13 @@ pub async fn serve_file(
     // Read-through cache: hits skip source storage entirely; misses fill the
     // cache best-effort. Any cache failure falls back to streaming directly.
     if state.chunk_cache.enabled() {
-        if let Some(path) = state.chunk_cache.hit(&chunk_data.checksum)
-            && let Some(response) = serve_from_file(&path, &context, &chunk_data).await
-        {
-            return Ok(response);
+        if let Some(path) = state.chunk_cache.hit(&chunk_data.checksum) {
+            if let Some(response) = serve_from_file(&path, &context, &chunk_data).await {
+                return Ok(response);
+            }
+            // The entry is unusable (size mismatch or unreadable): drop it so
+            // the miss path can refill instead of warning on every request.
+            state.chunk_cache.invalidate(&chunk_data.checksum);
         }
 
         if let Some(path) = fill_cache(&state.chunk_cache, &context, &chunk_data).await
@@ -217,6 +221,8 @@ async fn fill_cache(
 
     let expected: u64 = chunk_data.files.iter().map(|f| f.length as u64).sum();
     let mut written: u64 = 0;
+    let mut hasher = Sha256::new();
+    let mut buffer = vec![0u8; 64 * 1024];
 
     for file_entry in &chunk_data.files {
         let mut reader = match context
@@ -239,12 +245,21 @@ async fn fill_cache(
             }
         };
 
-        match tokio::io::copy(&mut reader, &mut file).await {
-            Ok(bytes) => written += bytes,
-            Err(e) => {
-                warn!("chunk cache fill copy failed: {e}");
+        loop {
+            let read = match reader.read(&mut buffer).await {
+                Ok(0) => break,
+                Ok(read) => read,
+                Err(e) => {
+                    warn!("chunk cache fill copy failed: {e}");
+                    return None;
+                }
+            };
+            if let Err(e) = file.write_all(&buffer[..read]).await {
+                warn!("chunk cache fill write failed: {e}");
                 return None;
             }
+            hasher.update(&buffer[..read]);
+            written += read as u64;
         }
     }
 
@@ -263,11 +278,30 @@ async fn fill_cache(
         return None;
     }
 
+    // The cache key is the SHA-256 plaintext digest. Refuse to publish bytes
+    // that do not hash to it (corrupt source, partial read, bad manifest).
+    let digest = to_hex(hasher.finalize().as_slice());
+    if !digest.eq_ignore_ascii_case(&chunk_data.checksum) {
+        warn!(
+            "chunk cache fill checksum mismatch for {}: computed {digest}",
+            chunk_data.checksum
+        );
+        return None;
+    }
+
     if guard.commit(written) {
         cache.hit(&chunk_data.checksum)
     } else {
         None
     }
+}
+
+fn to_hex(bytes: &[u8]) -> String {
+    use std::fmt::Write as _;
+    bytes.iter().fold(String::new(), |mut out, byte| {
+        let _ = write!(out, "{byte:02x}");
+        out
+    })
 }
 
 /// Applies the manifest AES-CTR keystream to a plaintext byte stream and builds
