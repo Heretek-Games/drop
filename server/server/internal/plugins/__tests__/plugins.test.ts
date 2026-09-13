@@ -515,6 +515,88 @@ test("discovery verifies external bundle checksums", async () => {
   );
 });
 
+test("PluginRegistry enforces the allow-list and version pinning", async () => {
+  const dataDir = tmpDataDir();
+  await fs.mkdir(dataDir, { recursive: true });
+  const registryPath = path.join(dataDir, "registry.json");
+
+  const entry =
+    "export default { metadata: { id: 'pinned-demo', name: 'Pinned'," +
+    " version: '2.0.0', apiVersion: 1, capabilities: ['routes'] }," +
+    " init(ctx) { ctx.registerRoute('GET', '/x', () => ({ x: 1 })); } };\n";
+  const entryBase64 = Buffer.from(entry).toString("base64");
+  const checksum = createHash("sha256").update(entry).digest("hex");
+
+  await fs.writeFile(
+    registryPath,
+    JSON.stringify({
+      plugins: [{ id: "pinned-demo", version: "2.0.0", checksum }],
+    }),
+  );
+
+  const make = (dir: string) =>
+    new PluginManager({
+      dataDir: dir,
+      registryPath,
+      storageFactory: () => new MemoryStorage(),
+      authResolver: async () => ({}),
+    });
+
+  // Pinned id/version/checksum: allowed.
+  const manager = make(dataDir);
+  await manager.installBundle(
+    {
+      id: "pinned-demo",
+      name: "Pinned",
+      version: "2.0.0",
+      apiVersion: PLUGIN_API_VERSION,
+      capabilities: ["routes"],
+      entry: "index.js",
+      checksum,
+    },
+    entryBase64,
+  );
+  assert.equal(
+    manager.listPlugins().find((p) => p.id === "pinned-demo")?.status,
+    "active",
+  );
+
+  // Unlisted plugin: rejected.
+  await assert.rejects(
+    () =>
+      make(tmpDataDir()).installBundle(
+        {
+          id: "not-listed",
+          name: "N",
+          version: "1.0.0",
+          apiVersion: PLUGIN_API_VERSION,
+          capabilities: ["routes"],
+          entry: "index.js",
+        },
+        entryBase64,
+      ),
+    /not in the registry/,
+  );
+
+  // Wrong version: rejected.
+  await assert.rejects(
+    () =>
+      make(tmpDataDir()).installBundle(
+        {
+          id: "pinned-demo",
+          name: "Pinned",
+          version: "1.0.0",
+          apiVersion: PLUGIN_API_VERSION,
+          capabilities: ["routes"],
+          entry: "index.js",
+          checksum,
+        },
+        entryBase64,
+      ),
+    /version/,
+  );
+});
+
 test("PluginManager installs and removes external bundles", async () => {
   const dataDir = tmpDataDir();
   const manager = new PluginManager({

@@ -35,6 +35,22 @@ node dev-tools/sign-plugin.mjs path/to/my-plugin
 Set `DROP_PLUGIN_SIGNING_KEY` to also write a signature. Set
 `DROP_PLUGIN_REQUIRE_SIGNATURE=true` on the server to refuse unsigned bundles.
 
+## Registry (allow-list / pinning)
+
+Set `DROP_PLUGIN_REGISTRY` to a JSON file to require that external plugins are
+listed, optionally pinning the version and entry checksum:
+
+```json
+{
+  "plugins": [
+    { "checksum": "<sha256>", "id": "sample-plugin", "version": "1.0.0" }
+  ]
+}
+```
+
+When the registry is non-empty, an unlisted plugin (or a version/checksum
+mismatch) is rejected at install time and at load time.
+
 ## Installing
 
 Install from the admin API (requires an admin token):

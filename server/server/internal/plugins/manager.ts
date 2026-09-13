@@ -13,6 +13,7 @@ import {
   PluginCapabilityError,
   PluginTrustError,
 } from "./errors";
+import { PluginRegistry } from "./registry";
 import type {
   HttpMethod,
   PluginCapability,
@@ -47,6 +48,11 @@ export interface PluginManagerOptions {
   storageFactory?: (pluginId: string) => PluginStorage;
   /** Auth resolver for dispatched routes. Defaults to Drop's ACL manager. */
   authResolver?: (event: H3Event) => Promise<PluginAuthContext>;
+  /**
+   * Path to a plugin registry JSON (allow-list + version/checksum pinning).
+   * Defaults to `DROP_PLUGIN_REGISTRY`; no registry by default.
+   */
+  registryPath?: string;
 }
 
 interface RegisteredRoute {
@@ -73,6 +79,7 @@ export class PluginManager {
   >();
   private readonly eventBus = new EventEmitter();
   private readonly log: Logger = logger.child({ name: "plugin-manager" });
+  private registryPromise: Promise<PluginRegistry> | undefined;
 
   constructor(private readonly options: PluginManagerOptions = {}) {
     this.eventBus.setMaxListeners(200);
@@ -319,11 +326,13 @@ export class PluginManager {
     return digest;
   }
 
-  private async verifyBundleIntegrity(
-    entryPath: string,
-    manifest: PluginManifest,
-  ): Promise<void> {
-    this.verifyBundleBytes(await fs.readFile(entryPath), manifest);
+  private async getRegistry(): Promise<PluginRegistry> {
+    if (!this.registryPromise) {
+      const registryPath =
+        this.options.registryPath ?? process.env.DROP_PLUGIN_REGISTRY;
+      this.registryPromise = PluginRegistry.load(registryPath);
+    }
+    return this.registryPromise;
   }
 
   /** Verify, import and register a bundle directory. */
@@ -334,7 +343,11 @@ export class PluginManager {
     const entryRel = manifest.entry || "index.js";
     const entryPath = path.resolve(pluginDir, entryRel);
 
-    this.verifyBundleBytes(await fs.readFile(entryPath), manifest);
+    const digest = this.verifyBundleBytes(
+      await fs.readFile(entryPath),
+      manifest,
+    );
+    (await this.getRegistry()).check(manifest, digest);
 
     const mod = await import(pathToFileURL(entryPath).href);
     const pluginInstance: ServerPlugin =
@@ -554,6 +567,7 @@ export class PluginManager {
 
     const bytes = Buffer.from(entryBase64, "base64");
     const digest = this.verifyBundleBytes(bytes, manifest);
+    (await this.getRegistry()).check(manifest, digest);
 
     const pluginsDir = await this.getPluginsDirectory();
     const bundleDir = path.join(pluginsDir, manifest.id);

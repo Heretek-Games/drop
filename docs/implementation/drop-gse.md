@@ -215,7 +215,10 @@ Owner: TBD · Depends on: M0–M4
 - [x] Install/update/remove: `PluginManager.installBundle` /
       `removeBundle` with checksum/signature verification and admin routes
       (`POST /api/v1/plugins/install`, `DELETE /api/v1/plugins/<id>/bundle`),
-      tested. Registry/version pinning beyond `apiVersion` still pending.
+      tested.
+- [x] Registry/version pinning: `PluginRegistry` allow-list with pinned
+      version/checksum (`DROP_PLUGIN_REGISTRY`), enforced on install and load;
+      tested.
 - [x] Docs: admin guide at `sites/docs/src/content/docs/admin/plugins.md`
 - [x] License review recorded (see **Licensing** below)
 
