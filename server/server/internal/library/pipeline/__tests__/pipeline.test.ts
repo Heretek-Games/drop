@@ -193,6 +193,11 @@ test("classifyDistribution identifies Standalone 7z Archives", () => {
   const recipe = generatePipelineRecipe(result, "10 Dead Doves");
   assert.equal(recipe.distributionType, DistributionType.ArchiveBundle);
   assert.ok(recipe.steps.some((s) => s.action === "extract_archive"));
+  assert.equal(
+    recipe.targetExecutable,
+    "",
+    "no detected executable must not produce a fabricated launch target",
+  );
 });
 
 test("attachRecipeToManifest embeds a recipe in torrential string manifests", () => {

@@ -60,11 +60,16 @@ export function generatePipelineRecipe(
   classification: ClassificationResult,
   gameName: string,
 ): PipelineRecipe {
+  // Retained for call-site compatibility; the recipe must not invent a name.
+  void gameName;
   const steps: PipelineStep[] = [];
+  // Never fabricate a launch target: an invented "<game>.exe" would produce a
+  // Play button for a file that does not exist. An empty target means the
+  // scorer found nothing and the caller must not add a launch option.
   let targetExecutable =
     classification.detectedExecutables.find((e) => e.isPrimary)?.path ||
     classification.detectedExecutables[0]?.path ||
-    `${gameName}.exe`;
+    "";
 
   let setupCommand: string | undefined = undefined;
   let setupScriptWindows: string | undefined = undefined;
@@ -268,6 +273,7 @@ echo "[Drop Pipeline] Scene release setup completed successfully!"
 
       // If extracted to app/, adjust targetExecutable if not already prefixed
       if (
+        targetExecutable &&
         !targetExecutable.startsWith("app/") &&
         !targetExecutable.startsWith("app\\")
       ) {

@@ -300,10 +300,26 @@ class LibraryManager {
     libraryPath: string,
     context: TaskRunContext,
   ): Promise<number> {
+    // Reuse the importer's filtering: passing the already-imported versions
+    // keeps retries idempotent instead of re-importing every on-disk version.
+    const game = await prisma.game.findUnique({
+      where: { id: gameId },
+      select: { versions: { select: { versionPath: true } } },
+    });
+    const depotVersions = await prisma.unimportedGameVersion.findMany({
+      where: { gameId },
+      select: { id: true, versionName: true },
+    });
     const versions = await this.fetchUnimportedGameVersions(
       libraryId,
       libraryPath,
-      { gameId, versions: [], depotVersions: [] },
+      {
+        gameId,
+        versions: (game?.versions ?? [])
+          .map((v) => v.versionPath)
+          .filter((v): v is string => v !== null),
+        depotVersions,
+      },
     );
     if (!versions || versions.length === 0) return 0;
 
@@ -537,13 +553,21 @@ class LibraryManager {
     );
     const recipe = generatePipelineRecipe(classification, game.mName);
 
+    // Only surface a launch option for a target the scorer actually detected,
+    // and escape it consistently with the other options.
+    const targetDetected = classification.detectedExecutables.some(
+      (candidate) => candidate.path === recipe.targetExecutable,
+    );
     if (
       recipe.targetExecutable &&
-      !options.some((o) => o.filename === recipe.targetExecutable)
+      targetDetected &&
+      !options.some(
+        (o) => o.filename === this.shescape.escape(recipe.targetExecutable),
+      )
     ) {
       options.unshift({
         type: "platform",
-        filename: recipe.targetExecutable,
+        filename: this.shescape.escape(recipe.targetExecutable),
         platform: Platform.Windows,
         match: 100,
       });

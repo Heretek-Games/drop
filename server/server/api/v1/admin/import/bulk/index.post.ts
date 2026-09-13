@@ -1,4 +1,5 @@
 import { type } from "arktype";
+import { randomUUID } from "node:crypto";
 import { GameType } from "~/prisma/client/enums";
 import { readDropValidatedBody, throwingArktype } from "~/server/arktype";
 import aclManager from "~/server/internal/acls";
@@ -11,6 +12,8 @@ const BulkImport = type({
   ids: "string[]",
 }).configure(throwingArktype);
 
+const MAX_BULK_IMPORT_IDS = 200;
+
 export default defineEventHandler(async (h3) => {
   const allowed = await aclManager.allowSystemACL(h3, [
     "import:game:new",
@@ -19,6 +22,12 @@ export default defineEventHandler(async (h3) => {
   if (!allowed) throw createError({ statusCode: 403 });
 
   const body = await readDropValidatedBody(h3, BulkImport);
+  if (body.ids.length > MAX_BULK_IMPORT_IDS) {
+    throw createError({
+      statusCode: 400,
+      statusMessage: `Select at most ${MAX_BULK_IMPORT_IDS} games per import`,
+    });
+  }
 
   const rows = await prisma.discoveredGame.findMany({
     where: {
@@ -34,7 +43,7 @@ export default defineEventHandler(async (h3) => {
     });
 
   const taskId = await taskHandler.create({
-    key: `bulk-import:${Date.now()}`,
+    key: `bulk-import:${randomUUID()}`,
     taskGroup: "import:bulk",
     acls: ["system:import:game:read", "system:import:version:read"],
     name: `Bulk importing ${rows.length} games`,
@@ -79,26 +88,33 @@ export default defineEventHandler(async (h3) => {
             continue;
           }
 
-          await libraryManager.importUnimportedVersionsForGame(
-            game.id,
-            row.libraryId,
-            row.libraryPath,
-            context,
-          );
-
-          const marked = await prisma.discoveredGame.updateMany({
-            where: { id: row.id, decision: "Pending" },
-            data: { decision: "Imported", importedGameId: game.id },
-          });
-
-          if (marked.count === 0) {
-            context.logger.warn(
-              `Could not mark ${row.libraryPath} as imported (already processed?)`,
+          const importedCount =
+            await libraryManager.importUnimportedVersionsForGame(
+              game.id,
+              row.libraryId,
+              row.libraryPath,
+              context,
             );
-          }
 
-          context.addAction(`View Game:/admin/library/${game.id}`);
-          succeeded++;
+          if (importedCount === 0) {
+            context.logger.warn(
+              `No versions could be imported for ${row.libraryPath}; leaving it pending`,
+            );
+          } else {
+            const marked = await prisma.discoveredGame.updateMany({
+              where: { id: row.id, decision: "Pending" },
+              data: { decision: "Imported", importedGameId: game.id },
+            });
+
+            if (marked.count === 0) {
+              context.logger.warn(
+                `Could not mark ${row.libraryPath} as imported (already processed?)`,
+              );
+            }
+
+            context.addAction(`View Game:/admin/library/${game.id}`);
+            succeeded++;
+          }
         } catch (e) {
           context.logger.warn(
             `Failed to import ${row.libraryPath}: ${String(e)}`,
