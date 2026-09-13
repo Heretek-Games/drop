@@ -157,6 +157,35 @@ export class RoomStore {
     return room;
   }
 
+  /**
+   * Authorize a member's mesh node after it joins and record its address.
+   * Called when the client reports its backend member id.
+   */
+  async registerMember(
+    roomId: string,
+    userId: string,
+    memberId: string,
+  ): Promise<Room> {
+    const rooms = await this.loadRooms();
+    const room = rooms[roomId];
+    if (!room || room.expiresAt <= this.now()) {
+      throw new Error("room not found");
+    }
+    const member = room.members.find((entry) => entry.userId === userId);
+    if (!member) {
+      throw new Error("not a room member");
+    }
+
+    if (this.backend.authorizeMember) {
+      const address = await this.backend.authorizeMember(roomId, memberId);
+      if (address) {
+        member.meshAddress = address;
+        await this.saveRooms(rooms);
+      }
+    }
+    return room;
+  }
+
   async heartbeat(roomId: string, userId: string): Promise<Room> {
     const rooms = await this.loadRooms();
     const room = rooms[roomId];

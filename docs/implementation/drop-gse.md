@@ -147,9 +147,9 @@ Owner: TBD · Depends on: M0, M2
 - [~] **B3** Membership-gated credential issuance, cached per member, never in
   the public room view (`room-store.credential`). Rotation and WS push of
   credentials still pending.
-- [~] **B4** `ZeroTierBackend` creates a network via the controller API with a
-  per-room /24 and `enableBroadcast` (tested with a mock fetch). Member
-  authorization, revoke and network teardown are stubs.
+- [x] **B4** `ZeroTierBackend` creates networks (per-room /24, `enableBroadcast`),
+      authorizes a joined member and returns its assigned address, and deletes
+      the network on teardown (mock-fetch tests). Per-user revoke still a stub.
 - [~] **B6** Client requests its credential after host/join and refreshes the
   room, so assigned mesh addresses reach `custom_broadcasts.txt` via the
   A↔B contract. Client-side VPN status validators still pending.

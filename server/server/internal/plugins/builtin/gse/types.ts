@@ -78,6 +78,14 @@ export interface MeshBackend {
   ): Promise<IssuedCredential>;
   /** Revoke a member's access. No-op if already gone. */
   revokeMember(roomId: string, userId: string): Promise<void>;
+  /**
+   * Authorize a member's node after it has joined the mesh. Returns the address
+   * assigned by the backend, when it can report one.
+   */
+  authorizeMember?(
+    roomId: string,
+    memberId: string,
+  ): Promise<string | undefined>;
   /** Remove every node/network for the room. */
   teardown(roomId: string): Promise<void>;
 }

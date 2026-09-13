@@ -66,6 +66,13 @@ export class InMemoryMeshBackend implements MeshBackend {
     this.members.get(roomId)?.delete(userId);
   }
 
+  async authorizeMember(
+    roomId: string,
+    memberId: string,
+  ): Promise<string | undefined> {
+    return roomMemberAddress(roomCidr(roomId), memberId);
+  }
+
   async teardown(roomId: string): Promise<void> {
     this.members.delete(roomId);
   }
@@ -109,6 +116,7 @@ export interface ZeroTierControllerOptions {
 export class ZeroTierBackend implements MeshBackend {
   readonly id = "zerotier" as const;
   private readonly fetchImpl: FetchLike;
+  private readonly networks = new Map<string, string>();
 
   constructor(private readonly options: ZeroTierControllerOptions) {
     this.fetchImpl = options.fetchImpl ?? (fetch as unknown as FetchLike);
@@ -150,6 +158,7 @@ export class ZeroTierBackend implements MeshBackend {
     if (!created?.id) {
       throw new Error("ZeroTier network creation returned no network id");
     }
+    this.networks.set(roomId, created.id);
     return {
       backend: "zerotier",
       cidr,
@@ -171,6 +180,33 @@ export class ZeroTierBackend implements MeshBackend {
     return { secret: `zerotier:${mesh.networkId}:${roomId}:${userId}` };
   }
 
+  async authorizeMember(
+    roomId: string,
+    memberId: string,
+  ): Promise<string | undefined> {
+    const networkId = this.networks.get(roomId);
+    if (!networkId) return undefined;
+    const response = await this.fetchImpl(
+      `${this.options.baseUrl}/network/${networkId}/member/${memberId}`,
+      {
+        method: "POST",
+        headers: this.headers(),
+        body: JSON.stringify({ authorized: true }),
+      },
+    );
+    if (!response.ok) {
+      throw new Error(
+        `ZeroTier member authorization failed (${response.status})`,
+      );
+    }
+    const member = (await response.json()) as {
+      assignedAddresses?: string[];
+    };
+    const address = member.assignedAddresses?.[0];
+    // Controller reports addresses as CIDR (e.g. 10.242.5.20/24).
+    return address ? address.split("/")[0] : undefined;
+  }
+
   async revokeMember(roomId: string, userId: string): Promise<void> {
     // Member ids are derived from credentials; a real deployment tracks the
     // mapping. Kept explicit so the contract is stable.
@@ -179,9 +215,13 @@ export class ZeroTierBackend implements MeshBackend {
   }
 
   async teardown(roomId: string): Promise<void> {
-    void roomId;
-    // Requires the network id; the coordinator passes it to a backend-specific
-    // deletion in a later iteration.
+    const networkId = this.networks.get(roomId);
+    if (!networkId) return;
+    this.networks.delete(roomId);
+    await this.fetchImpl(
+      `${this.options.baseUrl}/controller/network/${networkId}`,
+      { method: "DELETE", headers: this.headers() },
+    );
   }
 }
 

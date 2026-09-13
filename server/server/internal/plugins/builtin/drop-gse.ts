@@ -184,6 +184,39 @@ export class DropGseServerPlugin implements ServerPlugin {
       },
     );
 
+    // Route: POST /rooms/:id/member — report this node's mesh member id so the
+    // backend can authorize it and assign an address.
+    ctx.registerRoute("POST", "/rooms/:id/member", async (event, context) => {
+      if (!context.userId) {
+        throw createError({
+          statusCode: 401,
+          statusMessage: "Authentication required",
+        });
+      }
+      const body = await readBody<{ memberId?: string }>(event);
+      if (!body?.memberId) {
+        throw createError({
+          statusCode: 400,
+          statusMessage: "memberId is required",
+        });
+      }
+      try {
+        const room = await this.store.registerMember(
+          context.params.id,
+          context.userId,
+          body.memberId,
+        );
+        ctx.broadcast("gse:rooms", { type: "room_updated", room });
+        return { room };
+      } catch (err) {
+        const message = String(err);
+        throw createError({
+          statusCode: message.includes("not a room member") ? 403 : 404,
+          statusMessage: message,
+        });
+      }
+    });
+
     // Route: DELETE /rooms/:id
     ctx.registerRoute("DELETE", "/rooms/:id", async (_event, context) => {
       if (!context.userId) {

@@ -219,3 +219,53 @@ test("ZeroTierBackend surfaces controller failures", async () => {
   });
   await assert.rejects(() => backend.provision("room-1", 1), /500/);
 });
+
+test("ZeroTierBackend authorizes members and deletes networks", async () => {
+  const calls: Array<{ url: string; method?: string }> = [];
+  const backend = new ZeroTierBackend({
+    baseUrl: "http://localhost:9993",
+    authToken: "t",
+    controllerNodeId: "n",
+    fetchImpl: async (url, init) => {
+      calls.push({ url, method: init?.method });
+      if (url.includes("/controller/network/") && init?.method === "POST") {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ id: "net-1" }),
+          text: async () => "",
+        };
+      }
+      if (url.includes("/network/net-1/member/")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ assignedAddresses: ["10.242.5.20/24"] }),
+          text: async () => "",
+        };
+      }
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({}),
+        text: async () => "",
+      };
+    },
+  });
+
+  await backend.provision("room-9", 1);
+  const address = await backend.authorizeMember("room-9", "member-abc");
+  assert.equal(address, "10.242.5.20");
+
+  await backend.teardown("room-9");
+  const teardownCall = calls.find((call) => call.method === "DELETE");
+  assert.ok(teardownCall);
+  assert.match(teardownCall.url, /\/controller\/network\/net-1$/);
+});
+
+test("RoomStore records the address authorized for a member node", async () => {
+  const { store } = harness();
+  const room = await store.create(createInput("host"));
+  const updated = await store.registerMember(room.id, "host", "node-1");
+  assert.ok(updated.members.find((m) => m.userId === "host")?.meshAddress);
+});
