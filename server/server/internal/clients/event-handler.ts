@@ -25,40 +25,36 @@ export function defineClientEventHandler<T>(handler: EventHandlerFunction<T>) {
     const [method, ...parts] = header.split(" ");
 
     let clientId: string;
-    switch (method) {
-      case "JWT": {
-        clientId = parts[0];
-        const jwtToken = parts[1];
+    if (method === "JWT") {
+      clientId = parts[0];
+      const jwtToken = parts[1];
 
-        if (!clientId || !jwtToken) throw createError({ statusCode: 403 });
+      if (!clientId || !jwtToken) throw createError({ statusCode: 403 });
 
-        const certificateAuthority = useCertificateAuthority();
-        const certBundle =
-          await certificateAuthority.fetchClientCertificate(clientId);
-        // This does the blacklist check already
-        if (!certBundle)
-          throw createError({
-            statusCode: 403,
-            message: "Invalid client ID",
-          });
-
-        const valid = jwt.verify(jwtToken, certBundle.cert, {
-          clockTolerance: JWT_TIME_WIGGLE,
-          // algorithms: ["ES384"],
-        });
-        if (!valid)
-          throw createError({
-            statusCode: 403,
-            message: "Invalid nonce signature.",
-          });
-        break;
-      }
-      default: {
+      const certificateAuthority = useCertificateAuthority();
+      const certBundle =
+        await certificateAuthority.fetchClientCertificate(clientId);
+      // This does the blacklist check already
+      if (!certBundle)
         throw createError({
           statusCode: 403,
-          message: "No authentication",
+          message: "Invalid client ID",
         });
-      }
+
+      const valid = jwt.verify(jwtToken, certBundle.cert, {
+        clockTolerance: JWT_TIME_WIGGLE,
+        // algorithms: ["ES384"],
+      });
+      if (!valid)
+        throw createError({
+          statusCode: 403,
+          message: "Invalid nonce signature.",
+        });
+    } else {
+      throw createError({
+        statusCode: 403,
+        message: "No authentication",
+      });
     }
 
     if (clientId === undefined)

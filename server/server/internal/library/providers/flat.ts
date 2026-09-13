@@ -20,7 +20,7 @@ export class FlatFilesystemProvider implements LibraryProvider<
   constructor(rawConfig: unknown, id: string) {
     const config = FlatFilesystemProviderConfig(rawConfig);
     if (config instanceof ArkErrors) {
-      throw new Error(
+      throw new TypeError(
         `Failed to create filesystem provider: ${config.summary}`,
       );
     }

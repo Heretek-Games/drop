@@ -43,7 +43,7 @@ export interface PluginMetadata {
 export interface PluginManifest extends PluginMetadata {
   entry?: string;
   /** SHA-256 of the entry file, hex. Verified before the bundle is imported. */
-  checksum?: string | undefined;
+  checksum?: string;
   /**
    * SHA-256 of every file the bundle may import, keyed by path relative to the
    * bundle directory. Required for multi-file bundles so relative imports are
@@ -55,7 +55,7 @@ export interface PluginManifest extends PluginMetadata {
    * HMAC-SHA256 (hex) of `checksum`, keyed by `DROP_PLUGIN_SIGNING_KEY`.
    * Set `DROP_PLUGIN_REQUIRE_SIGNATURE=true` to reject unsigned bundles.
    */
-  signature?: string | undefined;
+  signature?: string;
 }
 
 export interface PluginStateRecord {
@@ -73,7 +73,7 @@ export interface RouteHandlerContext {
 export type RouteHandler = (
   event: H3Event,
   context: RouteHandlerContext,
-) => Promise<unknown> | unknown;
+) => unknown;
 
 export interface PluginStorage {
   get<T>(key: string): Promise<T | null>;
@@ -87,8 +87,8 @@ export interface PluginStorage {
 
 /** Caller identity + reply sink for a plugin WebSocket message. */
 export interface WebSocketContext {
-  userId?: string | undefined;
-  userAcls?: string[] | undefined;
+  userId?: string;
+  userAcls?: string[];
   send: (data: unknown) => void;
 }
 

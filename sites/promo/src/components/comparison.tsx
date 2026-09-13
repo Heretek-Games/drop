@@ -335,15 +335,13 @@ function ProjectTable({
   selectedProject: (typeof projects)[number]
 }>) {
   const sections = projects
-    .map((e) => Object.keys(e.features))
-    .flat()
+    .flatMap((e) => Object.keys(e.features))
     .filter((value, index, array) => onlyUnique(value, index, array))
   const features: { [key: string]: string[] } = {}
   for (const section of sections) {
     const uniqueFeatures = projects
       .filter((e) => e.features[section])
-      .map((e) => Object.keys(e.features[section]))
-      .flat()
+      .flatMap((e) => Object.keys(e.features[section]))
       .filter((value, index, array) => onlyUnique(value, index, array))
     features[section] = uniqueFeatures
   }

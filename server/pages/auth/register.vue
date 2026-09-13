@@ -270,8 +270,8 @@ function register_wrapper() {
       }
       router.push("/auth/signin");
     })
-    .catch((response) => {
-      const message = response.statusMessage || t("errors.unknown");
+    .catch((error_) => {
+      const message = error_.statusMessage || t("errors.unknown");
       error.value = message;
     })
     .finally(() => {

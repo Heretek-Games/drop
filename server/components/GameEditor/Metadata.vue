@@ -705,7 +705,7 @@ watch(releaseDate, async (newDate) => {
 
   if (newDate) {
     const parsed = new Date(newDate);
-    if (!isNaN(parsed.getTime())) {
+    if (!Number.isNaN(parsed.getTime())) {
       body.mReleased = parsed;
     }
   }

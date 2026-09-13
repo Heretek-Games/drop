@@ -34,6 +34,7 @@
             <div class="inline-flex items-center text-zinc-300">
               <img
                 :src="useObject(user.profilePictureObjectId)"
+                :alt="user.displayName"
                 class="w-5 h-5 rounded-sm"
               />
               <span class="ml-2 text-sm font-bold">{{ user.displayName }}</span>

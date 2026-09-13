@@ -37,7 +37,7 @@ const SCENE_GROUP_REGEX = new RegExp(
   "i",
 );
 
-const ARCHIVE_EXTENSIONS = [".7z", ".zip", ".rar", ".tar", ".gz"];
+const ARCHIVE_EXTENSIONS = new Set([".7z", ".zip", ".rar", ".tar", ".gz"]);
 
 interface ClassificationContext {
   gameName: string;
@@ -113,14 +113,14 @@ function resolveReleaseGroup(
   folderName: string,
 ): { releaseGroup: string | undefined; nfoFile: string | undefined } {
   let releaseGroup: string | undefined;
-  const folderMatch = folderName.match(SCENE_GROUP_REGEX);
+  const folderMatch = SCENE_GROUP_REGEX.exec(folderName);
   if (folderMatch) {
     releaseGroup = folderMatch[1].toUpperCase();
   }
 
   const nfoFile = fileList.find((f) => f.toLowerCase().endsWith(".nfo"));
   if (!releaseGroup && nfoFile) {
-    const nfoMatch = nfoFile.match(SCENE_GROUP_REGEX);
+    const nfoMatch = SCENE_GROUP_REGEX.exec(nfoFile);
     if (nfoMatch) {
       releaseGroup = nfoMatch[1].toUpperCase();
     }
@@ -327,7 +327,7 @@ const classifyGog: DistributionClassifier = (ctx) => {
 
 const classifyArchiveBundle: DistributionClassifier = (ctx) => {
   const archives = ctx.fileList.filter((f) =>
-    ARCHIVE_EXTENSIONS.includes(path.extname(f).toLowerCase()),
+    ARCHIVE_EXTENSIONS.has(path.extname(f).toLowerCase()),
   );
   if (archives.length === 0 || ctx.fileList.length > archives.length + 3) {
     return undefined;

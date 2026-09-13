@@ -8,28 +8,28 @@ set -euo pipefail
 
 repo="Heretek-Games/drop"
 
-need() { command -v "$1" >/dev/null 2>&1 || { echo "missing command: $1" >&2; exit 1; }; }
+need() { local cmd="$1"; command -v "$cmd" >/dev/null 2>&1 || { echo "missing command: $cmd" >&2; exit 1; }; }
 need curl; need jq
 
 # Fetch release info for tag 'alpha'
 rel="$(curl -fsSL --proto '=https' --tlsv1.2 ${GITHUB_TOKEN:+-H "Authorization: Bearer $GITHUB_TOKEN"} \
   "https://api.github.com/repos/${repo}/releases/tags/alpha" 2>/dev/null || true)"
 
-if [ -z "$rel" ] || [ "$(jq -r '.id // empty' <<<"$rel")" = "" ]; then
+if [[ -z "$rel" || "$(jq -r '.id // empty' <<<"$rel")" = "" ]]; then
   # Fallback to querying recent releases matching alpha
   releases="$(curl -fsSL --proto '=https' --tlsv1.2 ${GITHUB_TOKEN:+-H "Authorization: Bearer $GITHUB_TOKEN"} \
     "https://api.github.com/repos/${repo}/releases?per_page=20" 2>/dev/null || true)"
   rel="$(jq -c '[.[] | select(.tag_name | test("^alpha"))] | sort_by(.published_at) | last // empty' <<<"${releases:-[]}")"
 fi
 
-if [ -z "$rel" ]; then
+if [[ -z "$rel" ]]; then
   # Initial fallback before first alpha run: resolve latest v0.4.0 with alpha suffix
   releases="$(curl -fsSL --proto '=https' --tlsv1.2 ${GITHUB_TOKEN:+-H "Authorization: Bearer $GITHUB_TOKEN"} \
     "https://api.github.com/repos/${repo}/releases?per_page=5")"
   rel="$(jq -c '[.[] | select(.draft == false)] | sort_by(.published_at) | last // empty' <<<"$releases")"
 fi
 
-[ -n "$rel" ] || { echo "no release found for alpha resolver" >&2; exit 1; }
+[[ -n "$rel" ]] || { echo "no release found for alpha resolver" >&2; exit 1; }
 
 date="$(jq -r '.published_at | split("T")[0]' <<<"$rel")"
 asset="$(jq -c '
@@ -37,14 +37,14 @@ asset="$(jq -c '
     | select(.name | test(".*_amd64\\.deb$"))
   ] | last // empty' <<<"$rel")"
 
-[ -n "$asset" ] || { echo "no amd64.deb asset found in release" >&2; exit 1; }
+[[ -n "$asset" ]] || { echo "no amd64.deb asset found in release" >&2; exit 1; }
 
 url="$(jq -r '.browser_download_url' <<<"$asset")"
 asset_name="$(jq -r '.name' <<<"$asset")"
 
 # Extract version from asset name: Drop.Desktop.Client_<version>_amd64.deb
 version="$(echo "$asset_name" | sed -E 's/.*_([0-9]+\.[0-9]+\.[0-9]+-alpha\.[0-9]+\.[a-z0-9]+)_amd64\.deb/\1/')"
-if [ "$version" = "$asset_name" ]; then
+if [[ "$version" = "$asset_name" ]]; then
   # If the asset had no alpha suffix yet (e.g. initial v0.4.0 pin), use tag or default alpha baseline
   tag="$(jq -r '.tag_name' <<<"$rel")"
   if [[ "$tag" =~ ^alpha- ]]; then
@@ -54,7 +54,7 @@ if [ "$version" = "$asset_name" ]; then
   fi
 fi
 
-if [ -z "$version" ] || [ -z "$url" ]; then
+if [[ -z "$version" || -z "$url" ]]; then
   echo "failed to resolve drop alpha release" >&2
   exit 1
 fi

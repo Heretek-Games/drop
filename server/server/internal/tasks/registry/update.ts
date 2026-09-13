@@ -58,7 +58,7 @@ export default defineDropTask({
       );
 
       throw new Error(
-        `Failed to check for update: ${response.status} ${response.body}`,
+        `Failed to check for update: ${response.status} ${JSON.stringify(response.body)}`,
       );
     }
 

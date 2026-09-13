@@ -142,9 +142,7 @@ const queue = useQueueState();
 const stats = useStatsState();
 const speedHistory = useDownloadHistory();
 const speedHistoryMax = computed(() => windowWidth.value / 4);
-const speedMax = computed(
-  () => speedHistory.value.reduce((a, b) => (a > b ? a : b)) * 1.1,
-);
+const speedMax = computed(() => Math.max(...speedHistory.value) * 1.1);
 const previousGameId = useState<string | undefined>("previous_game");
 
 type ListIterable = { element: (typeof queue.value.queue)[0] };
@@ -159,8 +157,6 @@ function resetHistoryGraph() {
 }
 function checkReset(v: QueueState) {
   const currentGame = v.queue.at(0)?.meta.id;
-  // If we don't have a game
-  if (!currentGame) return;
 
   // If we're finished
   if (!currentGame && previousGameId.value) {
@@ -168,6 +164,9 @@ function checkReset(v: QueueState) {
     resetHistoryGraph();
     return;
   }
+  // If we don't have a game
+  if (!currentGame) return;
+
   // If we started a new download
   if (currentGame && !previousGameId.value) {
     previousGameId.value = currentGame;

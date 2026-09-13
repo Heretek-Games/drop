@@ -448,8 +448,7 @@ const filterQuery = computed(() => {
   const query = Object.entries(optionValues.value)
     .filter(
       ([_, v]) =>
-        v &&
-        (typeof v !== "object" || Object.values(v).filter(Boolean).length > 0),
+        v && (typeof v !== "object" || Object.values(v).some(Boolean)),
     )
     .map(([n, v]) => {
       if (typeof v === "string") return [`${n}=${v}`];

@@ -66,7 +66,7 @@ export class FilePluginStorage implements PluginStorage {
 
   async get<T>(key: string): Promise<T | null> {
     const data = await this.load();
-    if (Object.prototype.hasOwnProperty.call(data, key)) {
+    if (Object.hasOwn(data, key)) {
       return data[key] as T;
     }
     return null;
@@ -80,7 +80,7 @@ export class FilePluginStorage implements PluginStorage {
 
   async delete(key: string): Promise<void> {
     const data = await this.load();
-    if (Object.prototype.hasOwnProperty.call(data, key)) {
+    if (Object.hasOwn(data, key)) {
       Reflect.deleteProperty(data, key);
       await this.persist();
     }

@@ -198,7 +198,7 @@ class ACLManager {
     if (!request)
       throw new Error("Native web requests not available - weird deployment?");
     const session = await sessionHandler.getSession(request);
-    if (!session || !session.authenticated) return undefined;
+    if (!session?.authenticated) return undefined;
     if (session.authenticated.level < session.authenticated.requiredLevel)
       return undefined;
     if (session.authenticated.superleveledExpiry === undefined)
@@ -277,7 +277,7 @@ class ACLManager {
     request: MinimumRequestObject,
   ): Promise<GlobalACL[] | undefined> {
     const userSession = await sessionHandler.getSession(request);
-    if (!userSession || !userSession.authenticated) {
+    if (!userSession?.authenticated) {
       const authorizationToken = this.getAuthorizationToken(request);
       if (!authorizationToken) return undefined;
       const token = await prisma.aPIToken.findUnique({

@@ -466,16 +466,23 @@ def resolve_target_path(base_dir, game_path, version_path):
     return target_path
 
 
+def walk_candidate_files(root):
+    """Lists files under root, pruning subtrees deeper than two levels."""
+    found = []
+    for walk_root, dirs, files in os.walk(root):
+        rel = os.path.relpath(walk_root, root)
+        for f in files:
+            found.append(os.path.join(rel, f) if rel != "." else f)
+        if rel.count(os.sep) >= 2:
+            dirs.clear()
+    return found
+
+
 def collect_candidate_files(target_path, file_list):
     candidate_files = []
     if target_path and os.path.exists(target_path):
         try:
-            for root, dirs, files in os.walk(target_path):
-                rel = os.path.relpath(root, target_path)
-                for f in files:
-                    candidate_files.append(os.path.join(rel, f) if rel != "." else f)
-                if rel.count(os.sep) >= 2:
-                    dirs.clear()
+            candidate_files = walk_candidate_files(target_path)
         except Exception:
             pass
 
@@ -543,9 +550,9 @@ def apply_manifest_recipe(conn, version_id, manifest_obj, recipe):
 
 
 def print_summary(rows, stats, repaired_configs, updated_manifests, applied):
-    print(f"\n=== Summary ===")
+    print("\n=== Summary ===")
     print(f"Total Rows Inspected: {len(rows)}")
-    print(f"Archetype Breakdown:")
+    print("Archetype Breakdown:")
     for k, v in sorted(stats.items()):
         print(f"  {k:16}: {v}")
 
@@ -553,7 +560,72 @@ def print_summary(rows, stats, repaired_configs, updated_manifests, applied):
         print(f"\nSuccessfully repaired {repaired_configs} placeholder configurations!")
         print(f"Successfully attached pipeline recipes to {updated_manifests} GameVersions!")
     else:
-        print(f"\nDry run complete. Use --apply to commit these changes to PostgreSQL.")
+        print("\nDry run complete. Use --apply to commit these changes to PostgreSQL.")
+
+
+def process_row(conn, row, apply_changes, stats):
+    """Classifies one row and optionally repairs its config/manifest.
+
+    Returns (repaired_configs, updated_manifests) for this row.
+    """
+    (
+        _,
+        game_name,
+        game_path,
+        version_id,
+        version_path,
+        base_dir,
+        launch_id,
+        launch_cmd,
+        setup_id,
+        setup_cmd,
+        file_list,
+        manifest_text,
+    ) = row
+
+    target_path = resolve_target_path(base_dir, game_path, version_path)
+    folder_name = (
+        os.path.basename(target_path)
+        if target_path
+        else (version_path or game_path or game_name)
+    )
+    candidate_files = collect_candidate_files(target_path, file_list)
+
+    info = classify_files_and_folder(candidate_files, folder_name, game_name)
+    recipe = build_recipe(info, game_name)
+    stats[info["type"]] = stats.get(info["type"], 0) + 1
+
+    is_placeholder = (
+        launch_cmd in PLACEHOLDER_LAUNCH_COMMANDS
+        or setup_cmd in PLACEHOLDER_SETUP_COMMANDS
+    )
+
+    manifest_obj = parse_manifest(manifest_text)
+    recipe_field = get_recipe_field(manifest_obj)
+    needs_manifest_update = (
+        "recipe" not in manifest_obj
+        or recipe_field.get("distributionType") != info["type"]
+    )
+
+    if is_placeholder or needs_manifest_update:
+        print(
+            f"[{info['type']:14}] {game_name:36} -> Launch: {info['target']} | Setup: {info.get('setup')}"
+        )
+
+    if not apply_changes:
+        return (0, 0)
+
+    repaired = 0
+    updated = 0
+    if is_placeholder:
+        repair_launch_and_setup(conn, launch_id, setup_id, version_id, game_name, info)
+        repaired = 1
+
+    if needs_manifest_update:
+        apply_manifest_recipe(conn, version_id, manifest_obj, recipe)
+        updated = 1
+
+    return (repaired, updated)
 
 
 def main():
@@ -577,40 +649,9 @@ def main():
     updated_manifests = 0
 
     for r in rows:
-        game_id, game_name, game_path, version_id, version_path, base_dir, launch_id, launch_cmd, setup_id, setup_cmd, file_list, manifest_text = r
-
-        target_path = resolve_target_path(base_dir, game_path, version_path)
-        folder_name = os.path.basename(target_path) if target_path else (version_path or game_path or game_name)
-        candidate_files = collect_candidate_files(target_path, file_list)
-
-        info = classify_files_and_folder(candidate_files, folder_name, game_name)
-        recipe = build_recipe(info, game_name)
-        stats[info["type"]] = stats.get(info["type"], 0) + 1
-
-        is_placeholder = (
-            launch_cmd in PLACEHOLDER_LAUNCH_COMMANDS
-            or setup_cmd in PLACEHOLDER_SETUP_COMMANDS
-        )
-
-        manifest_obj = parse_manifest(manifest_text)
-        recipe_field = get_recipe_field(manifest_obj)
-
-        needs_manifest_update = (
-            "recipe" not in manifest_obj
-            or recipe_field.get("distributionType") != info["type"]
-        )
-
-        if is_placeholder or needs_manifest_update:
-            print(f"[{info['type']:14}] {game_name:36} -> Launch: {info['target']} | Setup: {info.get('setup')}")
-
-        if args.apply:
-            if is_placeholder:
-                repair_launch_and_setup(conn, launch_id, setup_id, version_id, game_name, info)
-                repaired_configs += 1
-
-            if needs_manifest_update:
-                apply_manifest_recipe(conn, version_id, manifest_obj, recipe)
-                updated_manifests += 1
+        repaired, updated = process_row(conn, r, args.apply, stats)
+        repaired_configs += repaired
+        updated_manifests += updated
 
     print_summary(rows, stats, repaired_configs, updated_manifests, args.apply)
 

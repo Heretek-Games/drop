@@ -109,8 +109,7 @@ export class MetadataHandler {
     const results = await Promise.allSettled(promises);
     const successfulResults = results
       .filter((result) => result.status === "fulfilled")
-      .map((result) => result.value)
-      .flat()
+      .flatMap((result) => result.value)
       .map((result) => {
         const match = fuzzy(query, result.name);
         return { ...result, fuzzy: match };

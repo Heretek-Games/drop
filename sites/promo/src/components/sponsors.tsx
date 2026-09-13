@@ -219,18 +219,17 @@ export function Sponsors() {
           '[--scroll-padding:max(--spacing(6),calc((100vw-(var(--container-2xl)))/2))] lg:[--scroll-padding:max(--spacing(8),calc((100vw-(var(--container-7xl)))/2))]',
         ])}
       >
-        {sponsors &&
-          sponsors.map(({ image, name, from }, testimonialIndex) => (
-            <SponsorCard
-              key={name}
-              name={name}
-              from={from}
-              img={image}
-              bounds={bounds}
-              scrollX={scrollX}
-              onClick={() => scrollTo(testimonialIndex)}
-            />
-          ))}
+        {sponsors?.map(({ image, name, from }, testimonialIndex) => (
+          <SponsorCard
+            key={name}
+            name={name}
+            from={from}
+            img={image}
+            bounds={bounds}
+            scrollX={scrollX}
+            onClick={() => scrollTo(testimonialIndex)}
+          />
+        ))}
         <div className="w-2xl shrink-0 sm:w-216" />
       </div>
       <Container className="mt-16">

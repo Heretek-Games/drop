@@ -14,6 +14,10 @@ for arg in "$@"; do
       echo "  --purge-data  Remove all persistent Podman named volumes and database storage"
       exit 0
       ;;
+    *)
+      echo "Unknown option: $arg (try --help)" >&2
+      exit 1
+      ;;
   esac
 done
 
@@ -41,7 +45,7 @@ rm -f "${QUADLET_DIR}/drop-network.network" \
 echo "==> 3. Reloading systemd daemon..."
 ${SYSTEMCTL} daemon-reload
 
-if [ "$REMOVE_VOLUMES" = true ]; then
+if [[ "$REMOVE_VOLUMES" = true ]]; then
   echo "==> 4. Purging Podman named volumes..."
   podman volume rm -f systemd-drop-db systemd-drop-data systemd-drop-cache systemd-drop-zerotier systemd-drop-ztnet-db 2>/dev/null || true
   podman volume rm -f drop-db drop-data drop-cache drop-zerotier drop-ztnet-db 2>/dev/null || true
@@ -51,7 +55,7 @@ fi
 echo ""
 echo "==============================================================="
 echo " Drop Quadlet deployment uninstalled."
-if [ "$REMOVE_VOLUMES" = false ]; then
+if [[ "$REMOVE_VOLUMES" = false ]]; then
   echo " Persistent volumes and configuration files were preserved in ${QUADLET_DIR}."
   echo " To delete all data volumes, re-run with: $0 --purge-data"
 else

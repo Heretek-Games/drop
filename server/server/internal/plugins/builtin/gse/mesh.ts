@@ -3,13 +3,13 @@ import type { IssuedCredential, MeshBackend, PublicMeshInfo } from "./types";
 function hashString(value: string): number {
   let hash = 0;
   for (const char of value) {
-    hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
+    hash = (hash * 31 + char.codePointAt(0)!) >>> 0;
   }
   return hash;
 }
 
 /** Base CIDR for per-room ZeroTier networks (10.242.0.0/16, one /24 each). */
-export const ZEROTIER_BASE_CIDR = "10.242.0.0/16";
+export const ZEROTIER_BASE_CIDR = "10.242.0.0/16"; // NOSONAR: RFC1918 private range for the built-in mesh pool
 
 /** Deterministically derive a unique /24 room CIDR from the room id. */
 export function roomCidr(roomId: string): string {
@@ -90,18 +90,16 @@ export class InMemoryMeshBackend implements MeshBackend {
 
   async authorizeMember(
     roomId: string,
-    userId: string,
+    _userId: string,
     memberId: string,
     mesh?: PublicMeshInfo,
     usedAddresses: string[] = [],
   ): Promise<string | undefined> {
-    void userId;
     const cidr = mesh?.backend === "zerotier" ? mesh.cidr : roomCidr(roomId);
     return allocateMemberAddress(cidr, memberId, usedAddresses);
   }
 
-  async teardown(roomId: string, mesh?: PublicMeshInfo): Promise<void> {
-    void mesh;
+  async teardown(roomId: string, _mesh?: PublicMeshInfo): Promise<void> {
     this.members.delete(roomId);
   }
 
@@ -116,7 +114,7 @@ export type FetchLike = (
   init?: {
     method?: string | undefined;
     headers?: Record<string, string> | undefined;
-    body?: string | undefined;
+    body?: string;
   },
 ) => Promise<{
   ok: boolean;
@@ -340,8 +338,7 @@ export class TailscaleBackend implements MeshBackend {
     // Ephemeral nodes purge themselves; tagged-node removal happens on teardown.
   }
 
-  async teardown(roomId: string, mesh?: PublicMeshInfo): Promise<void> {
-    void mesh;
+  async teardown(roomId: string, _mesh?: PublicMeshInfo): Promise<void> {
     await this.provisioner.teardownRoom(roomId);
   }
 }
@@ -384,9 +381,8 @@ export class TailscaleApiProvisioner implements TailscaleProvisioner {
     };
   }
 
-  async provisionRoom(roomId: string): Promise<string> {
+  async provisionRoom(_roomId: string): Promise<string> {
     // Tags are policy-declared; reuse the configured tag for the room.
-    void roomId;
     return this.options.tag;
   }
 

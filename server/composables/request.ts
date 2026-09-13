@@ -70,7 +70,8 @@ export const $dropFetch: DropFetch = async (rawRequest, opts) => {
   const state = useState(id);
   if (state.value) {
     // Deep copy
-    const object = JSON.parse(JSON.stringify(state.value));
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const object = structuredClone<any>(state.value);
     // Never use again on client
     if (import.meta.client) state.value = undefined;
     return object;

@@ -136,16 +136,15 @@ export function Team() {
       </Subheading>
       <hr className="mt-6 border-t border-zinc-800" />
       <ul className="mx-auto mt-16 grid grid-cols-1 gap-8 sm:grid-cols-3 lg:grid-cols-4">
-        {team &&
-          team.map((member) => (
-            <Person
-              key={member.login}
-              name={member.login}
-              description={`${descriptionOverride[member.login] ?? 'Contributor'}`}
-              contributions={member.contributions}
-              img={member.avatar_url}
-            />
-          ))}
+        {team?.map((member) => (
+          <Person
+            key={member.login}
+            name={member.login}
+            description={`${descriptionOverride[member.login] ?? 'Contributor'}`}
+            contributions={member.contributions}
+            img={member.avatar_url}
+          />
+        ))}
       </ul>
     </Container>
   )

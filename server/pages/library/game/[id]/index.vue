@@ -7,6 +7,7 @@
     <div class="absolute inset-0 z-0 rounded-xl overflow-hidden">
       <img
         :src="useObject(game.mBannerObjectId)"
+        alt=""
         class="w-full h-[24rem] object-cover blur-sm scale-105"
       />
       <div
@@ -80,6 +81,7 @@
                     <img
                       class="w-fit h-48 lg:h-96 rounded"
                       :src="useObject(image)"
+                      :alt="`${game.mName} screenshot`"
                     />
                   </VueSlide>
                   <VueSlide v-if="game.mImageCarouselObjectIds.length == 0">

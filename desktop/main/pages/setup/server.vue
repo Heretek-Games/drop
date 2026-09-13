@@ -90,10 +90,9 @@ const router = useRouter();
 const showHttps = computed(() => {
   const prefixes = ["http://", "https://"];
 
-  const doesntHavePrefix =
-    prefixes.findIndex((e) =>
-      url.value.startsWith(e.slice(0, url.value.length)),
-    ) == -1;
+  const doesntHavePrefix = !prefixes.some((e) =>
+    url.value.startsWith(e.slice(0, url.value.length)),
+  );
 
   return doesntHavePrefix;
 });
@@ -103,7 +102,7 @@ async function connect() {
     ? url.value
     : `https://${url.value}`;
 
-  const result = await invoke("use_remote", { url: newUrl });
+  await invoke("use_remote", { url: newUrl });
   router.push("/auth");
 }
 

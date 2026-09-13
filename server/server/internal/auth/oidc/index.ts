@@ -209,7 +209,7 @@ export class OIDCManager {
     const response = await $fetch<unknown>(wellKnownUrl.toString());
     const wellKnown = OIDCWellKnownV1(response);
     if (wellKnown instanceof type.errors) {
-      throw new Error(
+      throw new TypeError(
         `Failed to parse OIDC well-known configuration: ${wellKnown.summary}`,
       );
     }
@@ -434,8 +434,7 @@ export class OIDCManager {
       userinfo.groups.includes(this.adminGroup);
 
     const isUser = this.userGroup
-      ? userinfo.groups !== undefined &&
-        userinfo.groups.includes(this.userGroup)
+      ? (userinfo.groups?.includes(this.userGroup) ?? false)
       : true;
 
     if (!(isAdmin || isUser))

@@ -89,8 +89,8 @@ export default defineEventHandler(async (h3) => {
   /**
    * Company filtering
    */
-  const companyActions = options.companyActions.split(",");
-  const developedFilter = companyActions.includes("developed")
+  const companyActions = new Set(options.companyActions.split(","));
+  const developedFilter = companyActions.has("developed")
     ? {
         developers: {
           some: {
@@ -99,7 +99,7 @@ export default defineEventHandler(async (h3) => {
         },
       }
     : undefined;
-  const publishedFilter = companyActions.includes("published")
+  const publishedFilter = companyActions.has("published")
     ? {
         publishers: {
           some: {

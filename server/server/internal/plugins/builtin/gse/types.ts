@@ -25,7 +25,7 @@ export interface Room {
   gameId: string;
   versionId: string;
   /** Pinned Steam AppID written to `steam_appid.txt`, when known. */
-  appId?: number | undefined;
+  appId?: number;
   emulator: EmulatorBinding;
   hostUserId: string;
   /** Last host heartbeat (ms). Used for lease expiry/migration. */
@@ -41,7 +41,7 @@ export interface DiscoverableRoom {
   id: string;
   gameId: string;
   versionId: string;
-  appId?: number | undefined;
+  appId?: number;
   emulator: EmulatorBinding;
   mesh: PublicMeshInfo;
   memberCount: number;
@@ -56,7 +56,7 @@ export interface MeshCredential {
   /** Backend-specific secret (e.g. a one-off auth key or network membership). */
   secret: string;
   /** Mesh address assigned to the member, when the backend provides one. */
-  address?: string | undefined;
+  address?: string;
   issuedAt: number;
   expiresAt: number;
 }
@@ -64,7 +64,7 @@ export interface MeshCredential {
 /** Value returned by `MeshBackend.issueCredential`. */
 export interface IssuedCredential {
   secret: string;
-  address?: string | undefined;
+  address?: string;
   /** Backend-imposed credential lifetime (ms epoch), when shorter than the room. */
   expiresAt?: number;
 }

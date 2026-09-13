@@ -10,10 +10,10 @@
  *
  * Env: ZTNET_EMAIL / ZTNET_PASSWORD override the dev defaults.
  */
-const baseUrl = (process.env.GSE_ZTNET_URL ?? "http://localhost:3099").replace(
-  /\/+$/,
-  "",
-);
+let baseUrl = process.env.GSE_ZTNET_URL ?? "http://localhost:3099";
+while (baseUrl.endsWith("/")) {
+  baseUrl = baseUrl.slice(0, -1);
+}
 const email = process.env.ZTNET_EMAIL ?? "admin@drop.local";
 const password = process.env.ZTNET_PASSWORD ?? "Password123!";
 const origin = baseUrl;

@@ -2,8 +2,8 @@ import jwt from "jsonwebtoken";
 import type { MinimumRequestObject } from "~/server/h3";
 
 export type PluginAuthContext = {
-  userId?: string | undefined;
-  userAcls?: string[] | undefined;
+  userId?: string;
+  userAcls?: string[];
 };
 
 const JWT_TIME_WIGGLE = 30_000;

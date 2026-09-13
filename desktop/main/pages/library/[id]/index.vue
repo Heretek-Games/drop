@@ -136,32 +136,26 @@
                   <div
                     class="relative aspect-video rounded-lg overflow-hidden cursor-pointer group"
                   >
-                    <div
-                      class="absolute inset-0"
-                      role="button"
-                      tabindex="0"
+                    <TransitionGroup name="slide" tag="div" class="h-full">
+                      <img
+                        v-for="(url, index) in game.mImageCarouselObjectIds"
+                        :key="index"
+                        :src="useObject(url)"
+                        class="absolute inset-0 w-full h-full object-cover"
+                        v-show="index === currentImageIndex"
+                        :alt="`${game.mName} screenshot ${index + 1}`"
+                      />
+                    </TransitionGroup>
+                    <button
+                      type="button"
+                      class="absolute inset-0 w-full h-full"
+                      :aria-label="`Open image ${currentImageIndex + 1} fullscreen`"
                       @click="
                         fullscreenImage =
                           game.mImageCarouselObjectIds[currentImageIndex] ??
                           null
                       "
-                      @keydown.enter="
-                        fullscreenImage =
-                          game.mImageCarouselObjectIds[currentImageIndex] ??
-                          null
-                      "
-                    >
-                      <TransitionGroup name="slide" tag="div" class="h-full">
-                        <img
-                          v-for="(url, index) in game.mImageCarouselObjectIds"
-                          :key="index"
-                          :src="useObject(url)"
-                          class="absolute inset-0 w-full h-full object-cover"
-                          v-show="index === currentImageIndex"
-                          :alt="`${game.mName} screenshot ${index + 1}`"
-                        />
-                      </TransitionGroup>
-                    </div>
+                    ></button>
 
                     <div
                       class="absolute inset-0 flex items-center justify-between px-4 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none"

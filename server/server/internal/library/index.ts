@@ -455,7 +455,7 @@ class LibraryManager {
       where: { id: gameId },
       select: { libraryPath: true, libraryId: true, mName: true },
     });
-    if (!game || !game.libraryId) return undefined;
+    if (!game?.libraryId) return undefined;
 
     const library = this.libraries.get(game.libraryId);
     if (!library) return undefined;
@@ -521,7 +521,7 @@ class LibraryManager {
     const recipe = generatePipelineRecipe(classification, game.mName);
     this.unshiftDetectedTargetOption(options, classification, recipe);
 
-    return options.sort((a, b) => b.match - a.match);
+    return options.toSorted((a, b) => b.match - a.match);
   }
 
   private async fetchEmulatorSuggestions() {
@@ -557,6 +557,57 @@ class LibraryManager {
     });
   }
 
+  private collectPlatformOptions(
+    filename: string,
+    ext: string,
+    basename: string,
+    gameName: string,
+    fileExts: { [key in Platform]: string[] },
+  ): VersionGuess[] {
+    const options: VersionGuess[] = [];
+    for (const [platform, checkExts] of Object.entries(fileExts)) {
+      for (const checkExt of checkExts) {
+        if (checkExt != ext) continue;
+        options.push({
+          type: "platform",
+          filename: this.shescape.escape(filename),
+          platform: platform as Platform,
+          match: fuzzy(basename, gameName),
+        });
+      }
+    }
+    return options;
+  }
+
+  private collectEmulatorOptions(
+    filename: string,
+    ext: string,
+    basename: string,
+    gameName: string,
+    emulators: Awaited<ReturnType<LibraryManager["fetchEmulatorSuggestions"]>>,
+  ): VersionGuess[] {
+    const options: VersionGuess[] = [];
+    for (const emulator of emulators) {
+      for (const suggestion of emulator.emulatorSuggestions) {
+        if (suggestion != ext) continue;
+        options.push({
+          type: "emulator",
+          filename: this.shescape.escape(filename),
+          match: fuzzy(basename, gameName),
+          emulatorId: emulator.launchId,
+
+          icon: emulator.gameVersion.game.mIconObjectId,
+          gameName: emulator.gameVersion.game.mName,
+          versionName: (emulator.gameVersion.displayName ??
+            emulator.gameVersion.versionPath)!,
+          launchName: emulator.name,
+          platform: emulator.platform,
+        });
+      }
+    }
+    return options;
+  }
+
   /**
    * Builds the version's launch options from its files and any emulator
    * suggestions; excluded binaries are never offered.
@@ -580,36 +631,22 @@ class LibraryManager {
       const ext =
         dotLocation == -1 ? "" : filename.slice(dotLocation).toLowerCase();
 
-      for (const [platform, checkExts] of Object.entries(fileExts)) {
-        for (const checkExt of checkExts) {
-          if (checkExt != ext) continue;
-          options.push({
-            type: "platform",
-            filename: this.shescape.escape(filename),
-            platform: platform as Platform,
-            match: fuzzy(basename, gameName),
-          });
-        }
-      }
-
-      for (const emulator of emulators) {
-        for (const suggestion of emulator.emulatorSuggestions) {
-          if (suggestion != ext) continue;
-          options.push({
-            type: "emulator",
-            filename: this.shescape.escape(filename),
-            match: fuzzy(basename, gameName),
-            emulatorId: emulator.launchId,
-
-            icon: emulator.gameVersion.game.mIconObjectId,
-            gameName: emulator.gameVersion.game.mName,
-            versionName: (emulator.gameVersion.displayName ??
-              emulator.gameVersion.versionPath)!,
-            launchName: emulator.name,
-            platform: emulator.platform,
-          });
-        }
-      }
+      options.push(
+        ...this.collectPlatformOptions(
+          filename,
+          ext,
+          basename,
+          gameName,
+          fileExts,
+        ),
+        ...this.collectEmulatorOptions(
+          filename,
+          ext,
+          basename,
+          gameName,
+          emulators,
+        ),
+      );
     }
 
     return options;
@@ -712,7 +749,7 @@ class LibraryManager {
       where: { id: gameId },
       select: { mName: true, libraryId: true, libraryPath: true, type: true },
     });
-    if (!game || !game.libraryId) return undefined;
+    if (!game?.libraryId) return undefined;
 
     if (game.type === GameType.Dependency && !metadata.onlySetup)
       throw createError({
@@ -879,7 +916,7 @@ class LibraryManager {
           logger.info("Successfully created version!");
 
           notificationSystem.systemPush({
-            nonce: `version-create-${gameId}-${version}`,
+            nonce: `version-create-${gameId}-${version.identifier}`,
             title: `'${game.mName}' ('${version.name}') finished importing.`,
             description: `Drop finished importing version ${version.name} for ${game.mName}.`,
             actions: [`View|/admin/library/${gameId}`],

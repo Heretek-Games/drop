@@ -26,7 +26,6 @@ export default defineWebSocketHandler({
     if (text.startsWith("connect/")) {
       const id = text.substring("connect/".length);
       taskHandler.connect(peer.id, id, peer, headers);
-      return;
     }
   },
   close(peer, _details) {

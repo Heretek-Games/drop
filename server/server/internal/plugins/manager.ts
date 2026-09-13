@@ -34,8 +34,8 @@ import type {
 
 /** Resolved caller identity passed to route handlers. */
 export interface PluginAuthContext {
-  userId?: string | undefined;
-  userAcls?: string[] | undefined;
+  userId?: string;
+  userAcls?: string[];
 }
 
 /**
@@ -97,6 +97,34 @@ function constantTimeEqual(left: string, right: string): boolean {
   const b = Buffer.from(right, "utf8");
   if (a.length !== b.length) return false;
   return timingSafeEqual(a, b);
+}
+
+/** Strips trailing slashes without a backtracking-prone regular expression. */
+function trimTrailingSlashes(value: string): string {
+  let end = value.length;
+  while (end > 0 && value[end - 1] === "/") {
+    end--;
+  }
+  return value.slice(0, end);
+}
+
+/** Resolves a dynamically imported bundle's default or named plugin export. */
+function resolvePluginExport(mod: {
+  default?: unknown;
+  plugin?: unknown;
+}): ServerPlugin | null {
+  const defaultExport = mod.default as Partial<ServerPlugin> | undefined;
+  if (defaultExport && typeof defaultExport.init === "function") {
+    return defaultExport as ServerPlugin;
+  }
+  const namedExport = mod.plugin as Partial<ServerPlugin> | undefined;
+  if (namedExport && typeof namedExport.init === "function") {
+    return namedExport as ServerPlugin;
+  }
+  if (typeof mod.default === "function") {
+    return new (mod.default as new () => ServerPlugin)();
+  }
+  return null;
 }
 
 interface LoadedPlugin {
@@ -168,9 +196,8 @@ export class PluginManager {
     const paramNames: string[] = [];
     const normalized = pattern.startsWith("/") ? pattern : `/${pattern}`;
 
-    const regexStr = normalized
-      .replace(/\/+$/, "")
-      .replace(/:([a-zA-Z0-9_]+)/g, (_, name) => {
+    const regexStr = trimTrailingSlashes(normalized)
+      .replace(/:(\w+)/g, (_, name) => {
         paramNames.push(name);
         return "([^/]+)";
       })
@@ -551,14 +578,7 @@ export class PluginManager {
     const mod = await import(
       `${pathToFileURL(entryPath).href}?v=${aggregateDigest}`
     );
-    const pluginInstance: ServerPlugin =
-      mod.default && typeof mod.default.init === "function"
-        ? mod.default
-        : mod.plugin && typeof mod.plugin.init === "function"
-          ? mod.plugin
-          : typeof mod.default === "function"
-            ? new mod.default()
-            : null;
+    const pluginInstance = resolvePluginExport(mod);
 
     if (!pluginInstance) {
       throw new Error(
@@ -928,7 +948,7 @@ export class PluginManager {
     const entry = this.webSockets.get(channel);
     if (!entry) return false;
     const loaded = this.plugins.get(entry.pluginId);
-    if (!loaded || loaded.status !== "active") return false;
+    if (loaded?.status !== "active") return false;
     await entry.handler(message, context);
     return true;
   }

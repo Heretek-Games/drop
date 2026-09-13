@@ -1,6 +1,6 @@
 import type { TSESLint } from "@typescript-eslint/utils";
 
-const blacklistedFunctions = ["delete", "update"];
+const blacklistedFunctions = new Set(["delete", "update"]);
 
 export default {
   meta: {
@@ -19,12 +19,12 @@ export default {
       CallExpression: function (node) {
         // @ts-expect-error It ain't typing properly
         const funcId = node.callee.property;
-        if (!funcId || !blacklistedFunctions.includes(funcId.name)) return;
+        if (!funcId || !blacklistedFunctions.has(funcId.name)) return;
         // @ts-expect-error It ain't typing properly
         const tableExpr = node.callee.object;
         if (!tableExpr) return;
         const prismaExpr = tableExpr.object;
-        if (!prismaExpr || prismaExpr.name !== "prisma") return;
+        if (prismaExpr?.name !== "prisma") return;
         context.report({
           node,
           messageId: "noPrismaDelete",

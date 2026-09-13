@@ -298,7 +298,7 @@ function buildToggleProxy(param: "developed" | "published") {
     set(_target, prop, value) {
       if (typeof value !== "boolean") return false;
       const id = prop.toString();
-      const exists = company.value[param].findIndex((e) => e === id);
+      const exists = company.value[param].indexOf(id);
       if (value && exists == -1) {
         company.value[param].push(id);
       }
@@ -329,12 +329,12 @@ async function removeGame(gameId: string) {
   if (gameIndex == -1) return;
   games.value.splice(gameIndex, 1);
 
-  const publishedIndex = company.value.published.findIndex((e) => e === gameId);
+  const publishedIndex = company.value.published.indexOf(gameId);
   if (publishedIndex != -1) {
     company.value.published.splice(publishedIndex, 1);
   }
 
-  const developedIndex = company.value.developed.findIndex((e) => e === gameId);
+  const developedIndex = company.value.developed.indexOf(gameId);
   if (developedIndex != -1) {
     company.value.developed.splice(developedIndex, 1);
   }

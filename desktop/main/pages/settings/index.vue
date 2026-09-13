@@ -42,9 +42,7 @@ defineProps<{}>();
 const autostartEnabled = ref<boolean>(false);
 
 // Load initial state
-invoke("get_autostart_enabled").then((enabled) => {
-  autostartEnabled.value = enabled as boolean;
-});
+autostartEnabled.value = (await invoke("get_autostart_enabled")) as boolean;
 
 // Watch for changes and update autostart
 watch(autostartEnabled, async (newValue: boolean) => {

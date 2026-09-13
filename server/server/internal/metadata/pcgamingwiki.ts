@@ -45,17 +45,19 @@ interface PCGamingWikiSearchStub extends PCGamingWikiPage {
   Released__precision: string | null;
 }
 
+type WikiStringList = string | string[] | null;
+
 interface PCGamingWikiGame extends PCGamingWikiSearchStub {
-  Developers: string | string[] | null;
-  Publishers: string | string[] | null;
+  Developers: WikiStringList;
+  Publishers: WikiStringList;
 
   // TODO: save this somewhere, maybe a tag?
   Series: string | null;
 
   // tags
-  Perspectives: string | string[] | null; // ie: First-person
-  Genres: string | string[] | null; // ie: Action, FPS
-  "Art styles": string | string[] | null; // ie: Stylized
+  Perspectives: WikiStringList; // ie: First-person
+  Genres: WikiStringList; // ie: Action, FPS
+  "Art styles": WikiStringList; // ie: Stylized
   Themes: string | string[] | null; // ie: Post-apocalyptic, Sci-fi, Space
   Modes: string | string[] | null; // ie: Singleplayer, Multiplayer
   Pacing: string | string[] | null; // ie: Real-time
@@ -246,9 +248,11 @@ export class PCGamingWikiProvider implements MetadataProvider {
 
         return undefined;
       };
-      receptionResults.push(getRating(MetadataSource.Metacritic));
-      receptionResults.push(getRating(MetadataSource.IGDB));
-      receptionResults.push(getRating(MetadataSource.OpenCritic));
+      receptionResults.push(
+        getRating(MetadataSource.Metacritic),
+        getRating(MetadataSource.IGDB),
+        getRating(MetadataSource.OpenCritic),
+      );
     }
 
     return {

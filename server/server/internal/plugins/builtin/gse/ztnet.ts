@@ -11,6 +11,15 @@ export interface ZtnetBackendOptions {
   fetchImpl?: FetchLike;
 }
 
+/** Strips trailing slashes without a backtracking-prone regular expression. */
+function trimTrailingSlashes(value: string): string {
+  let end = value.length;
+  while (end > 0 && value[end - 1] === "/") {
+    end--;
+  }
+  return value.slice(0, end);
+}
+
 interface ZtnetNetworkResponse {
   nwid?: string;
   id?: string;
@@ -42,7 +51,7 @@ export class ZtnetBackend implements MeshBackend {
 
   constructor(private readonly options: ZtnetBackendOptions) {
     this.fetchImpl = options.fetchImpl ?? (fetch as unknown as FetchLike);
-    this.baseUrl = options.baseUrl.replace(/\/+$/, "");
+    this.baseUrl = trimTrailingSlashes(options.baseUrl);
     this.baseOrigin = new URL(this.baseUrl).origin;
   }
 

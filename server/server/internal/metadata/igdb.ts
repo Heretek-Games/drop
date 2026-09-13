@@ -567,36 +567,55 @@ export class IGDBProvider implements MetadataProvider {
         `where id = ${involvedCompany}; fields *;`,
       );
       for (const foundInvolved of involved_company_response) {
-        // now we need to get the actual company so we can get the name
-        const findCompanyResponse = await this.request<
-          { name: string } & IGDBItem
-        >("companies", `where id = ${foundInvolved.company}; fields name;`);
+        const resolved = await this._resolveCompanyEntry(
+          foundInvolved,
+          company,
+          context,
+        );
+        publishers.push(...resolved.publishers);
+        developers.push(...resolved.developers);
+      }
+    }
 
-        for (const companyData of findCompanyResponse) {
-          context?.logger.info(
-            `Found involved company "${companyData.name}" as: ${foundInvolved.developer ? "developer, " : ""}${foundInvolved.publisher ? "publisher" : ""}`,
-          );
+    return { publishers, developers };
+  }
 
-          const res = await company(companyData.name);
-          if (res === undefined) {
-            context?.logger.warn(
-              `Failed to import company "${companyData.name}"`,
-            );
-            continue;
-          }
+  /** Resolves a single involved-company row into metadata entries. */
+  private async _resolveCompanyEntry(
+    foundInvolved: IGDBInvolvedCompany,
+    company: _FetchGameMetadataParams["company"],
+    context?: TaskRunContext,
+  ): Promise<{ publishers: CompanyModel[]; developers: CompanyModel[] }> {
+    const publishers: CompanyModel[] = [];
+    const developers: CompanyModel[] = [];
 
-          // if company was a dev or publisher
-          // CANNOT use else since a company can be both
-          if (foundInvolved.developer) {
-            context?.logger.info(`Imported developer "${companyData.name}"`);
-            developers.push(res);
-          }
+    // now we need to get the actual company so we can get the name
+    const findCompanyResponse = await this.request<{ name: string } & IGDBItem>(
+      "companies",
+      `where id = ${foundInvolved.company}; fields name;`,
+    );
 
-          if (foundInvolved.publisher) {
-            context?.logger.info(`Imported publisher "${companyData.name}"`);
-            publishers.push(res);
-          }
-        }
+    for (const companyData of findCompanyResponse) {
+      context?.logger.info(
+        `Found involved company "${companyData.name}" as: ${foundInvolved.developer ? "developer, " : ""}${foundInvolved.publisher ? "publisher" : ""}`,
+      );
+
+      const res = await company(companyData.name);
+      if (res === undefined) {
+        context?.logger.warn(`Failed to import company "${companyData.name}"`);
+        continue;
+      }
+
+      // if company was a dev or publisher
+      // CANNOT use else since a company can be both
+      if (foundInvolved.developer) {
+        context?.logger.info(`Imported developer "${companyData.name}"`);
+        developers.push(res);
+      }
+
+      if (foundInvolved.publisher) {
+        context?.logger.info(`Imported publisher "${companyData.name}"`);
+        publishers.push(res);
       }
     }
 

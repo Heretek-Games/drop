@@ -449,7 +449,7 @@ const email = computed({
     _email.value = v;
   },
 });
-const mailRegex = /^\S+@\S+\.\S+$/;
+const mailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const validEmail = computed(() =>
   _email.value === undefined ? true : mailRegex.test(email.value as string),
 );
@@ -510,8 +510,8 @@ function invite_wrapper() {
     .then((invitation) => {
       invitations.value.push(invitation);
     })
-    .catch((response) => {
-      const message = response.statusMessage || t("errors.unknown");
+    .catch((error_) => {
+      const message = error_.statusMessage || t("errors.unknown");
       error.value = message;
     })
     .finally(() => {

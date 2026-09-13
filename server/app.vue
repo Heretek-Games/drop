@@ -38,7 +38,7 @@ function checkExternalUrl() {
   const chosenOrigin = apiDetails.external.trim();
   const ignore = window.localStorage.getItem("ignoreExternalUrl");
   if (ignore && ignore == "true") return;
-  showExternalUrlWarning.value = !(realOrigin == chosenOrigin);
+  showExternalUrlWarning.value = realOrigin != chosenOrigin;
 }
 
 function hideExternalURL() {

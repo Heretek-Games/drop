@@ -126,8 +126,8 @@ onMounted(async () => {
   if (browserSupportsWebAuthn()) {
     try {
       await passkeyAutofill();
-    } catch (response) {
-      const message = (response as FetchError).message || t("errors.unknown");
+    } catch (error_) {
+      const message = (error_ as FetchError).message || t("errors.unknown");
       error.value = message;
     } finally {
       loading.value = false;

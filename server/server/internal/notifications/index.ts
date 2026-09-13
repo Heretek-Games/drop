@@ -65,10 +65,9 @@ class NotificationSystem {
     notification: NotificationModel,
   ) {
     for (const [_, listener] of this.listeners.get(userId) ?? []) {
-      const hasSome =
-        notification.acls.findIndex((e) =>
-          listener.acls.some((v) => v === e),
-        ) != -1;
+      const hasSome = notification.acls.some((e) =>
+        (listener.acls as string[]).includes(e),
+      );
       if (hasSome) listener.callback(notification);
     }
   }

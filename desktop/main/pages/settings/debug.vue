@@ -83,7 +83,7 @@
 
 <script setup lang="ts">
 import { invoke } from "@tauri-apps/api/core";
-import { platform, type } from "@tauri-apps/plugin-os";
+import { platform } from "@tauri-apps/plugin-os";
 import {
   FingerPrintIcon,
   ComputerDesktopIcon,

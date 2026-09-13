@@ -109,7 +109,7 @@ export class SessionHandler {
     if (!token)
       throw createError({ statusCode: 403, message: "User not signed in" });
     const session = await this.sessionProvider.getSession(token);
-    if (!session || !session.authenticated)
+    if (!session?.authenticated)
       throw createError({ statusCode: 403, message: "User not signed in" });
 
     session.authenticated.level += amount;

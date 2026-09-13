@@ -195,7 +195,7 @@ const actions = ref<
   },
 ]);
 
-const actionsComplete = ref(Array(actions.value.length).fill(false));
+const actionsComplete = ref(new Array(actions.value.length).fill(false));
 
 const finished = computed(
   () => actionsComplete.value.filter((e) => !e).length == 0,

@@ -4,7 +4,7 @@ class SystemConfig {
   private readonly libraryFolder = process.env.LIBRARY ?? "./.data/library";
   private readonly dataFolder = process.env.DATA ?? "./.data/data";
 
-  private readonly metadataTimeout = parseInt(
+  private readonly metadataTimeout = Number.parseInt(
     process.env.METADATA_TIMEOUT ?? "5000",
   );
 
@@ -29,8 +29,7 @@ class SystemConfig {
 
     // default to true if not set
     this.oidcRequireHttps = !(
-      oidcRequireHttps !== undefined &&
-      oidcRequireHttps.toLocaleLowerCase() === "false"
+      oidcRequireHttps?.toLocaleLowerCase() === "false"
     );
   }
 

@@ -13,7 +13,7 @@ export const useCurrentNavigationIndex = (
       .map((e, i) => ({ ...e, index: i }))
       .filter((e) => to.fullPath.startsWith(e.prefix));
     const bestOption = validOptions
-      .sort((a, b) => b.route.length - a.route.length)
+      .toSorted((a, b) => b.route.length - a.route.length)
       .at(0);
 
     return bestOption?.index ?? -1;

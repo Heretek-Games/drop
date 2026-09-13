@@ -29,17 +29,15 @@ export class WebSocketHandler {
 
     this.ws.onmessage = (e) => {
       const message = e.data;
-      switch (message) {
-        case "unauthenticated": {
-          const error = createError({
-            statusCode: 403,
-            statusMessage: "Unable to connect to websocket - unauthenticated",
-          });
-          if (this.errorHandler) {
-            return this.errorHandler(error);
-          } else {
-            throw error;
-          }
+      if (message === "unauthenticated") {
+        const error = createError({
+          statusCode: 403,
+          statusMessage: "Unable to connect to websocket - unauthenticated",
+        });
+        if (this.errorHandler) {
+          return this.errorHandler(error);
+        } else {
+          throw error;
         }
       }
       if (this.listeners.length == 0) {

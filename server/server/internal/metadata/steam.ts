@@ -653,13 +653,8 @@ export class SteamProvider implements MetadataProvider {
   }
 
   private _extractBanner(html: string): string | undefined {
-    const bannerRegex =
-      /background-image:\s*url\(['"]([^'"]*(?:\/clan\/\d+|\/app\/\d+|background|header)[^'"]*)\??[^'"]*['"][^}]*\)/i;
-    const backgroundImageRegex =
-      /style\s*=\s*["'][^"']*background-image:\s*url\(([^)]+)\)[^"']*/i;
-
-    let bannerMatch = bannerRegex.exec(html);
-    bannerMatch ??= backgroundImageRegex.exec(html);
+    const bannerMatch =
+      this._findBannerUrl(html) ?? this._backgroundImageUrlRegex.exec(html);
 
     if (!bannerMatch) return undefined;
     if (!bannerMatch[1]) return undefined;
@@ -670,6 +665,32 @@ export class SteamProvider implements MetadataProvider {
       bannerUrl = bannerUrl.split("?")[0]!;
     }
     return bannerUrl;
+  }
+
+  private readonly _backgroundImageUrlRegex =
+    /style\s*=\s*["'][^"']*background-image:\s*url\(([^)]+)\)[^"']*/i;
+
+  /**
+   * Finds the first `background-image: url(...)` whose URL points at a Steam
+   * banner/header asset. Kept separate from the matcher so the regexes stay
+   * free of ambiguous nested quantifiers.
+   */
+  private _findBannerUrl(html: string): RegExpExecArray | undefined {
+    const urlRegex = /background-image:\s*url\(['"]([^'"()]+)['"][^}]*\)/gi;
+    for (const match of html.matchAll(urlRegex)) {
+      if (this._looksLikeBannerUrl(match[1])) return match;
+    }
+    return undefined;
+  }
+
+  private _looksLikeBannerUrl(url: string | undefined): boolean {
+    if (!url) return false;
+    return (
+      /\/clan\/\d+/.test(url) ||
+      /\/app\/\d+/.test(url) ||
+      url.includes("background") ||
+      url.includes("header")
+    );
   }
 
   private _decodeHtmlEntities(text: string): string {
@@ -692,10 +713,10 @@ export class SteamProvider implements MetadataProvider {
           case "&#39;":
             return "'";
           default: {
-            const hex = entity.match(/&#x([0-9A-Fa-f]+);/);
-            if (hex) return String.fromCharCode(parseInt(hex[1]!, 16));
-            const dec = entity.match(/&#(\d+);/);
-            if (dec) return String.fromCharCode(parseInt(dec[1]!, 10));
+            const hex = /&#x([0-9A-Fa-f]+);/.exec(entity);
+            if (hex) return String.fromCodePoint(Number.parseInt(hex[1]!, 16));
+            const dec = /&#(\d+);/.exec(entity);
+            if (dec) return String.fromCodePoint(Number.parseInt(dec[1]!, 10));
             return entity;
           }
         }
@@ -712,7 +733,7 @@ export class SteamProvider implements MetadataProvider {
     const searchParams = new URLSearchParams({
       input_json: JSON.stringify({
         ids: gameIds.map((id) => ({
-          appid: parseInt(id),
+          appid: Number.parseInt(id),
         })),
         context: {
           language,
@@ -940,10 +961,10 @@ export class SteamProvider implements MetadataProvider {
     markdown = markdown.replace(/<!--[\s\S]*?(?:-->|$)/g, "");
 
     // Convert the bullet points and tabs to markdown list format
-    markdown = markdown.replace(/•\s*\t+/g, "\n- ");
+    markdown = markdown.replace(/• *\t+/g, "\n- ");
 
     // Handle numbered enumeration (1.\t, 2.\t, etc.)
-    markdown = markdown.replace(/(\d+)\.\s*\t+/g, "\n$1. ");
+    markdown = markdown.replace(/(\d+)\. *\t+/g, "\n$1. ");
 
     // Convert bold text
     markdown = markdown.replace(
@@ -955,7 +976,7 @@ export class SteamProvider implements MetadataProvider {
     markdown = markdown.replace(
       /<h([1-6])(?:\s+class="bb_tag")?[^>]*>(.*?)<\/h[1-6]>/gi,
       (_, level, content) => {
-        const headerLevel = "#".repeat(parseInt(level));
+        const headerLevel = "#".repeat(Number.parseInt(level));
         const cleanContent = this._stripHtmlTags(content).trim();
         return cleanContent ? `\n\n${headerLevel} ${cleanContent}\n\n` : "";
       },
@@ -1035,10 +1056,10 @@ export class SteamProvider implements MetadataProvider {
 
   private _cleanupBasicFormatting(markdown: string): string {
     // Clean up spaces before newlines
-    markdown = markdown.replace(/ +\n/g, "\n");
+    markdown = markdown.replace(/[^\S\r\n]+\n/g, "\n");
 
     // Clean up excessive spacing around punctuation
-    markdown = markdown.replace(/\s+([.,!?;:])/g, "$1");
+    markdown = markdown.replace(/[^\S]+([.,!?;:])/g, "$1");
 
     return markdown;
   }
@@ -1093,8 +1114,7 @@ export class SteamProvider implements MetadataProvider {
       // Add text before the placeholder (if any)
       const beforeText = currentLine.substring(lastIndex, placeholderIndex);
       if (beforeText.trim()) {
-        results.push(beforeText.trim());
-        results.push(""); // Empty line before image
+        results.push(beforeText.trim(), ""); // Empty line before image
       }
 
       results.push(`![](/api/v1/object/${imageId})`);
@@ -1105,8 +1125,7 @@ export class SteamProvider implements MetadataProvider {
     // Add any remaining text after the last placeholder
     const afterText = currentLine.substring(lastIndex);
     if (afterText.trim()) {
-      results.push(""); // Empty line after image
-      results.push(afterText.trim());
+      results.push("", afterText.trim()); // Empty line after image
     }
 
     // If we only have images and no text, return just the images
@@ -1146,7 +1165,7 @@ export class SteamProvider implements MetadataProvider {
     // crafted input like "&amp;lt;" from recombining into new entities.
     // Numeric references encoding 0x3C/0x3E (&#60;, &#x3C;) are dropped too.
     return html.replace(
-      /&(?:nbsp|amp|quot|#39|#x[0-9A-Fa-f]+|#\d+);/gi,
+      /&(?:nbsp|amp|quot|#39|#x[0-9a-f]+|#\d+);/gi,
       (entity) => {
         switch (entity.toLowerCase()) {
           case "&nbsp;":
@@ -1158,17 +1177,17 @@ export class SteamProvider implements MetadataProvider {
           case "&#39;":
             return "'";
           default: {
-            const hex = entity.match(/&#x([0-9A-Fa-f]+);/i);
+            const hex = /&#x([0-9a-f]+);/i.exec(entity);
             if (hex) {
-              const code = parseInt(hex[1]!, 16);
+              const code = Number.parseInt(hex[1]!, 16);
               if (code === 0x3c || code === 0x3e) return "";
-              return String.fromCharCode(code);
+              return String.fromCodePoint(code);
             }
-            const dec = entity.match(/&#(\d+);/);
+            const dec = /&#(\d+);/.exec(entity);
             if (dec) {
-              const code = parseInt(dec[1]!, 10);
+              const code = Number.parseInt(dec[1]!, 10);
               if (code === 0x3c || code === 0x3e) return "";
-              return String.fromCharCode(code);
+              return String.fromCodePoint(code);
             }
             return entity;
           }

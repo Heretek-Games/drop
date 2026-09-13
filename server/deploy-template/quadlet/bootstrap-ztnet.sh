@@ -17,13 +17,13 @@ CREDENTIALS_FILE="${QUADLET_DIR}/ztnet-credentials.env"
 echo "==> 1. Waiting for ZTNET to become responsive on ${ZTNET_URL}..."
 MAX_TRIES=30
 COUNT=0
-until curl -sI "${ZTNET_URL}/" >/dev/null 2>&1 || [ $COUNT -eq $MAX_TRIES ]; do
+until curl -sI "${ZTNET_URL}/" >/dev/null 2>&1 || [[ $COUNT -eq $MAX_TRIES ]]; do
   sleep 2
   COUNT=$((COUNT + 1))
   echo "    Waiting for ZTNET... ($COUNT/$MAX_TRIES)"
 done
 
-if [ $COUNT -eq $MAX_TRIES ]; then
+if [[ $COUNT -eq $MAX_TRIES ]]; then
   echo "Error: ZTNET failed to respond within 60 seconds on ${ZTNET_URL}." >&2
   echo "Check logs with: ${SYSTEMCTL} status drop-ztnet.service" >&2
   exit 1
@@ -36,7 +36,7 @@ echo "${OUTPUT}"
 ORG_ID=$(echo "${OUTPUT}" | grep "GSE_ZTNET_ORG=" | cut -d'=' -f2)
 API_TOKEN=$(echo "${OUTPUT}" | grep "GSE_ZTNET_TOKEN=" | cut -d'=' -f2)
 
-if [ -z "${ORG_ID}" ] || [ -z "${API_TOKEN}" ]; then
+if [[ -z "${ORG_ID}" || -z "${API_TOKEN}" ]]; then
   echo "Error: Failed to parse organization ID or API token from bootstrap output." >&2
   exit 1
 fi

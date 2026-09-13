@@ -203,9 +203,9 @@ export default function News() {
   if (
     paramsPage &&
     typeof paramsPage === 'string' &&
-    parseInt(paramsPage) > 1
+    Number.parseInt(paramsPage) > 1
   ) {
-    page = parseInt(paramsPage)
+    page = Number.parseInt(paramsPage)
   } else if (paramsPage) {
     notFound()
   }

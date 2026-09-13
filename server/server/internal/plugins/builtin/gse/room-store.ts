@@ -26,7 +26,7 @@ export const MAX_ROOMS = 200;
 export interface CreateRoomInput {
   gameId: string;
   versionId: string;
-  appId?: number | undefined;
+  appId?: number;
   emulator: EmulatorBinding;
   hostUserId: string;
 }

@@ -16,10 +16,18 @@ export default defineEventHandler(async (h3) => {
   // expose them to administrators.
   const isAdmin = auth.userAcls?.includes("system:settings:update") ?? false;
 
-  const plugins = pluginManager.listPlugins().map((plugin) => ({
-    ...plugin,
-    error: isAdmin ? plugin.error : plugin.error ? REDACTED_ERROR : undefined,
-  }));
+  const plugins = pluginManager.listPlugins().map((plugin) => {
+    let error: string | undefined;
+    if (isAdmin) {
+      error = plugin.error;
+    } else if (plugin.error) {
+      error = REDACTED_ERROR;
+    }
+    return {
+      ...plugin,
+      error,
+    };
+  });
 
   return { plugins };
 });

@@ -10,7 +10,7 @@ import {
  * escaped by closing the quote, emitting an escaped quote, and reopening it.
  */
 export function shellQuote(value: string): string {
-  return `'${value.replaceAll("'", "'\\''")}'`;
+  return `'${value.replaceAll("'", String.raw`'\''`)}'`;
 }
 
 /**
@@ -58,10 +58,10 @@ export function attachRecipeToManifest(
 
 export function generatePipelineRecipe(
   classification: ClassificationResult,
-  gameName: string,
+  _gameName: string,
 ): PipelineRecipe {
-  // Retained for call-site compatibility; the recipe must not invent a name.
-  void gameName;
+  // The recipe must not invent a name; `_gameName` is retained for call-site
+  // compatibility only.
   const steps: PipelineStep[] = [];
   // Never fabricate a launch target: an invented "<game>.exe" would produce a
   // Play button for a file that does not exist. An empty target means the
@@ -99,56 +99,59 @@ export function generatePipelineRecipe(
           description: `Extract Scene ISO disc image (${primaryArchive})`,
         });
       } else {
-        steps.push({
-          id: "extract_rar",
-          action: "extract_rar",
-          params: {
-            input: primaryArchive,
-            outputDir: ".drop_iso_tmp",
+        steps.push(
+          {
+            id: "extract_rar",
+            action: "extract_rar",
+            params: {
+              input: primaryArchive,
+              outputDir: ".drop_iso_tmp",
+            },
+            description: `Extract multi-part Scene archive (${primaryArchive})`,
           },
-          description: `Extract multi-part Scene archive (${primaryArchive})`,
-        });
-
-        steps.push({
-          id: "extract_iso",
-          action: "extract_iso",
-          params: {
-            sourceGlob: ".drop_iso_tmp/*.iso",
-            outputDir: ".",
+          {
+            id: "extract_iso",
+            action: "extract_iso",
+            params: {
+              sourceGlob: ".drop_iso_tmp/*.iso",
+              outputDir: ".",
+            },
+            description:
+              "Extract unpacked ISO disc image into root game folder",
           },
-          description: "Extract unpacked ISO disc image into root game folder",
-        });
+        );
       }
 
-      steps.push({
-        id: "apply_crack",
-        action: "apply_crack",
-        params: {
-          crackDir: crackGroup,
-          targetDir: ".",
+      steps.push(
+        {
+          id: "apply_crack",
+          action: "apply_crack",
+          params: {
+            crackDir: crackGroup,
+            targetDir: ".",
+          },
+          description: `Apply ${crackGroup} crack overlay`,
+          optional: true,
         },
-        description: `Apply ${crackGroup} crack overlay`,
-        optional: true,
-      });
-
-      steps.push({
-        id: "cleanup",
-        action: "cleanup",
-        params: {
-          targets: isDirectIso
-            ? [primaryArchive]
-            : [".drop_iso_tmp", "*.r0*", "*.r1*", "*.r2*", "*.r3*", "*.rar"],
+        {
+          id: "cleanup",
+          action: "cleanup",
+          params: {
+            targets: isDirectIso
+              ? [primaryArchive]
+              : [".drop_iso_tmp", "*.r0*", "*.r1*", "*.r2*", "*.r3*", "*.rar"],
+          },
+          description: isDirectIso
+            ? "Remove the source ISO image"
+            : "Remove intermediate ISO and multi-part RAR slices",
+          optional: true,
         },
-        description: isDirectIso
-          ? "Remove the source ISO image"
-          : "Remove intermediate ISO and multi-part RAR slices",
-        optional: true,
-      });
+      );
 
-      const crackOverlayWindows = `for %%G in (RUNE TENOKE CODEX FLT PLAZA SKIDROW DEViANCE RELOADED HOODLUM FAIRLIGHT EMPRESS PROPHET TiNYiSO ALiAS BAT Razor1911 Crack) do (
+      const crackOverlayWindows = String.raw`for %%G in (RUNE TENOKE CODEX FLT PLAZA SKIDROW DEViANCE RELOADED HOODLUM FAIRLIGHT EMPRESS PROPHET TiNYiSO ALiAS BAT Razor1911 Crack) do (
   if exist "%%G" (
     echo [Drop Pipeline] Applying crack from %%G...
-    xcopy /s /e /y "%%G\\*" "."
+    xcopy /s /e /y "%%G\*" "."
   )
 )`;
 
@@ -160,11 +163,11 @@ export function generatePipelineRecipe(
 done`;
 
       if (isDirectIso) {
-        setupScriptWindows = `@echo off
+        setupScriptWindows = String.raw`@echo off
 echo ${batchEcho(isoLabel)}
 set SEVENZIP="7z"
-if exist "%ProgramFiles%\\7-Zip\\7z.exe" set SEVENZIP="%ProgramFiles%\\7-Zip\\7z.exe"
-if exist "%ProgramFiles(x86)%\\7-Zip\\7z.exe" set SEVENZIP="%ProgramFiles(x86)%\\7-Zip\\7z.exe"
+if exist "%ProgramFiles%\7-Zip\7z.exe" set SEVENZIP="%ProgramFiles%\7-Zip\7z.exe"
+if exist "%ProgramFiles(x86)%\7-Zip\7z.exe" set SEVENZIP="%ProgramFiles(x86)%\7-Zip\7z.exe"
 
 %SEVENZIP% x -y ${batchQuote(primaryArchive)} -o.
 if %ERRORLEVEL% NEQ 0 (
@@ -186,11 +189,11 @@ ${crackOverlayLinux}
 echo "[Drop Pipeline] Scene release setup completed successfully!"
 `;
       } else {
-        setupScriptWindows = `@echo off
+        setupScriptWindows = String.raw`@echo off
 echo ${batchEcho(archiveLabel)}
 set SEVENZIP="7z"
-if exist "%ProgramFiles%\\7-Zip\\7z.exe" set SEVENZIP="%ProgramFiles%\\7-Zip\\7z.exe"
-if exist "%ProgramFiles(x86)%\\7-Zip\\7z.exe" set SEVENZIP="%ProgramFiles(x86)%\\7-Zip\\7z.exe"
+if exist "%ProgramFiles%\7-Zip\7z.exe" set SEVENZIP="%ProgramFiles%\7-Zip\7z.exe"
+if exist "%ProgramFiles(x86)%\7-Zip\7z.exe" set SEVENZIP="%ProgramFiles(x86)%\7-Zip\7z.exe"
 
 echo [Drop Pipeline] Extracting archives to temporary directory...
 %SEVENZIP% x -y ${batchQuote(primaryArchive)} -o.drop_iso_tmp
@@ -199,7 +202,7 @@ if %ERRORLEVEL% NEQ 0 (
   exit /b %ERRORLEVEL%
 )
 
-for %%F in (.drop_iso_tmp\\*.iso) do (
+for %%F in (.drop_iso_tmp\*.iso) do (
   echo [Drop Pipeline] Extracting ISO %%F...
   %SEVENZIP% x -y "%%F" -o.
 )
@@ -207,9 +210,9 @@ for %%F in (.drop_iso_tmp\\*.iso) do (
 ${crackOverlayWindows}
 if exist ".drop_iso_tmp" (
   for %%G in (RUNE TENOKE CODEX FLT PLAZA SKIDROW DEViANCE RELOADED HOODLUM FAIRLIGHT EMPRESS PROPHET TiNYiSO ALiAS BAT Razor1911 Crack) do (
-    if exist ".drop_iso_tmp\\%%G" (
-      echo [Drop Pipeline] Applying crack from .drop_iso_tmp\\%%G...
-      xcopy /s /e /y ".drop_iso_tmp\\%%G\\*" "."
+    if exist ".drop_iso_tmp\%%G" (
+      echo [Drop Pipeline] Applying crack from .drop_iso_tmp\%%G...
+      xcopy /s /e /y ".drop_iso_tmp\%%G\*" "."
     )
   )
 )
@@ -251,25 +254,26 @@ echo "[Drop Pipeline] Scene release setup completed successfully!"
       setupCommand = "drop-pipeline-setup.bat";
       const setupExe = classification.installerExe || "setup.exe";
 
-      steps.push({
-        id: "innoextract",
-        action: "innoextract",
-        params: {
-          installerExe: setupExe,
-          outputDir: "app",
+      steps.push(
+        {
+          id: "innoextract",
+          action: "innoextract",
+          params: {
+            installerExe: setupExe,
+            outputDir: "app",
+          },
+          description: `Extract GOG Inno Setup installer (${setupExe})`,
         },
-        description: `Extract GOG Inno Setup installer (${setupExe})`,
-      });
-
-      steps.push({
-        id: "cleanup",
-        action: "cleanup",
-        params: {
-          targets: ["*.bin", setupExe],
+        {
+          id: "cleanup",
+          action: "cleanup",
+          params: {
+            targets: ["*.bin", setupExe],
+          },
+          description: "Remove GOG setup and data .bin files",
+          optional: true,
         },
-        description: "Remove GOG setup and data .bin files",
-        optional: true,
-      });
+      );
 
       // If extracted to app/, adjust targetExecutable if not already prefixed
       if (
@@ -280,7 +284,7 @@ echo "[Drop Pipeline] Scene release setup completed successfully!"
         targetExecutable = `app/${targetExecutable}`;
       }
 
-      setupScriptWindows = `@echo off
+      setupScriptWindows = String.raw`@echo off
 echo ${batchEcho(`[Drop Pipeline] Installing GOG release (${setupExe})...`)}
 where innoextract >nul 2>nul
 if %ERRORLEVEL% EQU 0 (
@@ -290,7 +294,7 @@ if %ERRORLEVEL% EQU 0 (
 )
 
 echo [Drop Pipeline] Launching GOG silent installer...
-start /wait "" ${batchQuote(setupExe)} /VERYSILENT /SUPPRESSMSGBOXES /DIR="%CD%\\app"
+start /wait "" ${batchQuote(setupExe)} /VERYSILENT /SUPPRESSMSGBOXES /DIR="%CD%\app"
 if %ERRORLEVEL% EQU 0 exit /b 0
 
 echo [Drop Pipeline] Falling back to interactive setup...
@@ -345,31 +349,32 @@ wine ${shellQuote(installerExe)}
       setupCommand = "drop-pipeline-setup.bat";
       const archive = classification.primaryArchive || "*.7z";
 
-      steps.push({
-        id: "extract_archive",
-        action: "extract_archive",
-        params: {
-          archiveFile: archive,
-          outputDir: ".",
+      steps.push(
+        {
+          id: "extract_archive",
+          action: "extract_archive",
+          params: {
+            archiveFile: archive,
+            outputDir: ".",
+          },
+          description: `Extract compressed archive (${archive})`,
         },
-        description: `Extract compressed archive (${archive})`,
-      });
-
-      steps.push({
-        id: "cleanup",
-        action: "cleanup",
-        params: {
-          targets: [archive],
+        {
+          id: "cleanup",
+          action: "cleanup",
+          params: {
+            targets: [archive],
+          },
+          description: "Remove source archive",
+          optional: true,
         },
-        description: "Remove source archive",
-        optional: true,
-      });
+      );
 
-      setupScriptWindows = `@echo off
+      setupScriptWindows = String.raw`@echo off
 echo ${batchEcho(`[Drop Pipeline] Extracting Archive (${archive})...`)}
 set SEVENZIP="7z"
-if exist "%ProgramFiles%\\7-Zip\\7z.exe" set SEVENZIP="%ProgramFiles%\\7-Zip\\7z.exe"
-if exist "%ProgramFiles(x86)%\\7-Zip\\7z.exe" set SEVENZIP="%ProgramFiles(x86)%\\7-Zip\\7z.exe"
+if exist "%ProgramFiles%\7-Zip\7z.exe" set SEVENZIP="%ProgramFiles%\7-Zip\7z.exe"
+if exist "%ProgramFiles(x86)%\7-Zip\7z.exe" set SEVENZIP="%ProgramFiles(x86)%\7-Zip\7z.exe"
 
 %SEVENZIP% x -y ${batchQuote(archive)} -o.
 exit /b %ERRORLEVEL%

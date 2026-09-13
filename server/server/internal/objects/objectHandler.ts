@@ -125,9 +125,9 @@ export class ObjectHandler {
     });
   }
 
-  // We only need one permission, so find instead of filter is faster
+  // We only need one permission, so use some instead of filter for speed
   private hasAnyPermissions(permissions: string[], userId?: string) {
-    return !!permissions.find((e) => {
+    return permissions.some((e) => {
       if (userId !== undefined && e.startsWith(userId)) return true;
       if (userId !== undefined && e.startsWith("internal")) return true;
       if (e.startsWith("anonymous")) return true;
@@ -147,7 +147,11 @@ export class ObjectHandler {
         // Strip IDs from permissions
         .map((e) => e.split(":").at(1))
         // Map to priority according to array
-        .map((e) => ObjectPermissionPriority.findIndex((c) => c === e))
+        .map((e) =>
+          e === undefined
+            ? -1
+            : (ObjectPermissionPriority as string[]).indexOf(e),
+        )
     );
   }
 

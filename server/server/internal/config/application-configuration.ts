@@ -9,10 +9,12 @@ class ApplicationConfiguration {
 
   private async save() {
     await this.init();
+    if (!this.currentApplicationSettings)
+      throw new Error("Somehow, failed to initialise application settings");
 
     const deepAppConfigCopy: Omit<ApplicationSettingsModel, "timestamp"> & {
       timestamp?: Date;
-    } = JSON.parse(JSON.stringify(this.currentApplicationSettings));
+    } = structuredClone(this.currentApplicationSettings);
 
     delete deepAppConfigCopy["timestamp"];
 

@@ -348,8 +348,7 @@ class TaskHandler {
     const allClientIds = this.taskPool
       .values()
       .toArray()
-      .map((e) => e.clients.keys().toArray())
-      .flat();
+      .flatMap((e) => e.clients.keys().toArray());
 
     if (!allClientIds.includes(id)) {
       this.clientRegistry.delete(id);
@@ -370,9 +369,7 @@ class TaskHandler {
   }
 
   hasTaskKey(key: string) {
-    return (
-      this.taskPool.values().find((v) => v.key && v.key == key) != undefined
-    );
+    return this.taskPool.values().some((v) => !!v.key && v.key === key);
   }
 
   dailyTasks() {
