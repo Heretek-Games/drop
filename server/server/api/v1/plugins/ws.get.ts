@@ -15,7 +15,9 @@ const MAX_SUBSCRIPTIONS_PER_PEER = 32;
 /** Minimal structural view of the crossws peer used by the helpers below. */
 type WebSocketPeer = {
   id: string;
-  request: Request;
+  request: {
+    headers: Headers;
+  };
   send: (payload: string) => void;
   close: () => void;
 };
