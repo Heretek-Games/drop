@@ -594,7 +594,7 @@ async fn execute_extract_rar(
         .filter(|v| !v.is_empty());
 
     let archive_path = match archive_name {
-        Some(name) if !name.contains(['*', '?']) => install_dir.join(name),
+        Some(name) if !name.contains(['*', '?']) => resolve_install_path(install_dir, name)?,
         _ => find_primary_rar(install_dir)
             .ok_or_else(|| "No primary RAR archive found in game directory".to_string())?,
     };
@@ -612,7 +612,7 @@ async fn execute_extract_rar(
         .and_then(|v| v.as_str())
         .unwrap_or(".drop_iso_tmp");
 
-    let output_dir = install_dir.join(output_sub);
+    let output_dir = resolve_install_path(install_dir, output_sub)?;
     fs::create_dir_all(&output_dir).map_err(|e| {
         format!(
             "Failed to create output directory {}: {}",
@@ -663,7 +663,7 @@ async fn execute_extract_iso(
     let output_dir = if output_sub == "." {
         install_dir.to_path_buf()
     } else {
-        install_dir.join(output_sub)
+        resolve_install_path(install_dir, output_sub)?
     };
     fs::create_dir_all(&output_dir).map_err(|e| {
         format!(
@@ -687,7 +687,7 @@ async fn execute_extract_iso(
             dirs.push(if rel == "." || rel.is_empty() {
                 install_dir.to_path_buf()
             } else {
-                install_dir.join(rel)
+                resolve_install_path(install_dir, rel)?
             });
         }
         let iso_dir_sub = step
@@ -695,7 +695,7 @@ async fn execute_extract_iso(
             .get("isoDir")
             .and_then(|v| v.as_str())
             .unwrap_or(".drop_iso_tmp");
-        dirs.push(install_dir.join(iso_dir_sub));
+        dirs.push(resolve_install_path(install_dir, iso_dir_sub)?);
         dirs.push(install_dir.to_path_buf());
         dirs
     };
@@ -778,10 +778,10 @@ async fn execute_extract_archive(
     let output_dir = if output_sub == "." {
         install_dir.to_path_buf()
     } else {
-        install_dir.join(output_sub)
+        resolve_install_path(install_dir, output_sub)?
     };
 
-    let archive_path = install_dir.join(archive_name);
+    let archive_path = resolve_install_path(install_dir, archive_name)?;
     let mut cmd = tokio::process::Command::new(tool);
     cmd.arg("x")
         .arg("-y")
@@ -827,8 +827,9 @@ async fn execute_innoextract(
         .get("outputDir")
         .and_then(|v| v.as_str())
         .unwrap_or("app");
+    let _ = resolve_install_path(install_dir, output_sub)?;
 
-    let setup_path = install_dir.join(setup_exe);
+    let setup_path = resolve_install_path(install_dir, setup_exe)?;
     let mut cmd = tokio::process::Command::new(tool);
     cmd.arg("-e")
         .arg("-d")
@@ -946,11 +947,30 @@ pub fn overlay_directory(src_dir: &Path, dest_dir: &Path) -> Result<(), String> 
             .map_err(|e| format!("Strip prefix error: {e}"))?;
         let target_path = dest_dir.join(rel_path);
 
+        // Never write through an existing symlink: an untrusted release could
+        // ship one that redirects the overlay outside the install directory.
+        if let Ok(meta) = fs::symlink_metadata(&target_path)
+            && meta.file_type().is_symlink()
+        {
+            return Err(format!(
+                "refusing to write through symlink {}",
+                target_path.display()
+            ));
+        }
+
         if entry.file_type().is_dir() {
             fs::create_dir_all(&target_path)
                 .map_err(|e| format!("Failed to create dir {}: {}", target_path.display(), e))?;
         } else if entry.file_type().is_file() {
             if let Some(parent) = target_path.parent() {
+                if let Ok(meta) = fs::symlink_metadata(parent)
+                    && meta.file_type().is_symlink()
+                {
+                    return Err(format!(
+                        "refusing to create files under symlink {}",
+                        parent.display()
+                    ));
+                }
                 fs::create_dir_all(parent).map_err(|e| {
                     format!("Failed to create parent dir {}: {}", parent.display(), e)
                 })?;
@@ -974,7 +994,13 @@ async fn execute_cleanup_step(step: &PipelineStep, install_dir: &Path) -> Result
             if let Some(pattern) = t.as_str() {
                 // Targets without a wildcard may be directories (e.g. .drop_iso_tmp).
                 if !pattern.contains(['*', '?', '[']) {
-                    let dir = install_dir.join(pattern);
+                    let dir = match resolve_install_path(install_dir, pattern) {
+                        Ok(dir) => dir,
+                        Err(e) => {
+                            warn!("Refusing cleanup target: {e}");
+                            continue;
+                        }
+                    };
                     if dir.is_dir() {
                         if let Err(e) = fs::remove_dir_all(&dir) {
                             warn!(
@@ -1018,7 +1044,14 @@ async fn execute_run_command(step: &PipelineStep, install_dir: &Path) -> Result<
         return Ok(());
     }
 
-    let mut cmd = tokio::process::Command::new(&parts[0]);
+    // A recipe command may name a binary on PATH, but any path-like or
+    // absolute target must stay inside the install directory.
+    let program = &parts[0];
+    if Path::new(program).is_absolute() || program.contains(['/', '\\']) || program.contains("..") {
+        resolve_install_path(install_dir, program)?;
+    }
+
+    let mut cmd = tokio::process::Command::new(program);
     cmd.args(&parts[1..]).current_dir(install_dir);
 
     let output = cmd
@@ -1261,14 +1294,49 @@ fn glob_to_regex(glob: &str) -> String {
         match c {
             '*' => s.push_str(".*"),
             '?' => s.push('.'),
-            '.' => s.push_str("\\."),
-            '[' => s.push('['),
-            ']' => s.push(']'),
-            other => s.push(other),
+            // Everything else is a literal: release filenames commonly contain
+            // brackets and parentheses that would otherwise change the pattern.
+            other => s.push_str(&regex::escape(&other.to_string())),
         }
     }
     s.push('$');
     s
+}
+
+/// Lexically normalizes a path (resolves `.`/`..` without touching disk).
+fn normalize_lexically(path: &Path) -> PathBuf {
+    use std::path::Component;
+    let mut out = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::ParentDir => {
+                out.pop();
+            }
+            Component::CurDir => {}
+            other => out.push(other.as_os_str()),
+        }
+    }
+    out
+}
+
+/// Resolves a recipe-supplied path inside `install_dir`, rejecting absolute
+/// paths and `..` escapes so a crafted recipe cannot read/write/delete
+/// outside the game's install directory.
+fn resolve_install_path(install_dir: &Path, candidate: &str) -> Result<PathBuf, String> {
+    let path = Path::new(candidate);
+    if path.is_absolute() {
+        return Err(format!(
+            "pipeline path '{candidate}' must be relative to the install directory"
+        ));
+    }
+    let joined = install_dir.join(path);
+    let normalized = normalize_lexically(&joined);
+    if !normalized.starts_with(normalize_lexically(install_dir)) {
+        return Err(format!(
+            "pipeline path '{candidate}' escapes the install directory"
+        ));
+    }
+    Ok(joined)
 }
 
 fn find_primary_rar(dir: &Path) -> Option<PathBuf> {
@@ -1367,6 +1435,32 @@ mod tests {
     }
 
     #[test]
+    fn test_glob_to_regex_escapes_literals() {
+        let re = Regex::new(&glob_to_regex("10 Dead Doves v1.2 [Build 17332128].7z")).unwrap();
+        assert!(re.is_match("10 Dead Doves v1.2 [Build 17332128].7z"));
+        assert!(!re.is_match("10 Dead Doves v1.2 B.7z"));
+
+        let re = Regex::new(&glob_to_regex("Setup (64bit).exe")).unwrap();
+        assert!(re.is_match("Setup (64bit).exe"));
+        assert!(!re.is_match("Setup 64bit.exe"));
+
+        let re = Regex::new(&glob_to_regex("*.r0*")).unwrap();
+        assert!(re.is_match("Game.r00"));
+    }
+
+    #[test]
+    fn test_resolve_install_path_rejects_escapes() {
+        let temp = tempfile::tempdir().unwrap();
+        let base = temp.path();
+
+        assert!(resolve_install_path(base, "sub/file.dll").is_ok());
+        assert!(resolve_install_path(base, ".").is_ok());
+        assert!(resolve_install_path(base, "../outside").is_err());
+        assert!(resolve_install_path(base, "sub/../../outside").is_err());
+        assert!(resolve_install_path(base, "/etc/passwd").is_err());
+    }
+
+    #[test]
     fn test_materialize_setup_script() {
         let temp = tempfile::tempdir().unwrap();
         let manifest = serde_json::json!({
@@ -1380,11 +1474,9 @@ mod tests {
             }
         });
 
-        let written =
-            materialize_setup_script(&manifest, temp.path(), &Platform::Windows).unwrap();
+        let written = materialize_setup_script(&manifest, temp.path(), &Platform::Windows).unwrap();
         assert_eq!(written.as_deref(), Some("drop-pipeline-setup.bat"));
-        let script =
-            fs::read_to_string(temp.path().join("drop-pipeline-setup.bat")).unwrap();
+        let script = fs::read_to_string(temp.path().join("drop-pipeline-setup.bat")).unwrap();
         assert!(script.contains("echo hello"));
 
         assert!(
@@ -1402,8 +1494,6 @@ mod tests {
                 "setupScriptWindows": "@echo off\n"
             }
         });
-        assert!(
-            materialize_setup_script(&unsafe_name, temp.path(), &Platform::Windows).is_err()
-        );
+        assert!(materialize_setup_script(&unsafe_name, temp.path(), &Platform::Windows).is_err());
     }
 }
