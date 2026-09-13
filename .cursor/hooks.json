@@ -1,0 +1,29 @@
+{
+  "hooks": {
+    "beforeReadFile": [
+      {
+        "command": "'.cursor/hooks/sonar-secrets/build-scripts/before-read-file-secrets.sh'",
+        "failClosed": false,
+        "matcher": "Read|TabRead",
+        "timeout": 60
+      }
+    ],
+    "beforeSubmitPrompt": [
+      {
+        "command": "'.cursor/hooks/sonar-secrets/build-scripts/prompt-secrets.sh'",
+        "failClosed": false,
+        "matcher": "UserPromptSubmit",
+        "timeout": 60
+      }
+    ],
+    "preToolUse": [
+      {
+        "command": "'.cursor/hooks/sonar-secrets/build-scripts/pre-tool-use-secrets.sh'",
+        "failClosed": false,
+        "matcher": "Read",
+        "timeout": 60
+      }
+    ]
+  },
+  "version": 1
+}

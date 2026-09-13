@@ -52,7 +52,7 @@ the Interface, and queued up for the Manager to process.
 
 These have been mapped in the DownloadManagerSignal docs.
 
-The other way to interact with the DownloadManager is via the donwload_queue,
+The other way to interact with the DownloadManager is via the download_queue,
 which is just a collection of ids which may be rearranged to suit
 whichever download queue order is required.
 

@@ -68,7 +68,7 @@ export class SessionHandler {
     const data = options?.data ?? {};
     const oidcData = options?.oidc;
 
-    const expiresAt = this.createExipreAt(rememberMe);
+    const expiresAt = this.createExpireAt(rememberMe);
 
     const token =
       this.getSessionToken(h3) ?? this.createSessionCookie(h3, expiresAt);
@@ -150,7 +150,7 @@ export class SessionHandler {
   }
 
   async setSessionDataKey<T>(request: H3Event, key: string, value: T) {
-    const expiresAt = this.createExipreAt(true);
+    const expiresAt = this.createExpireAt(true);
 
     const token =
       this.getSessionToken(request) ??
@@ -251,7 +251,7 @@ export class SessionHandler {
     return cookie;
   }
 
-  private createExipreAt(rememberMe: boolean) {
+  private createExpireAt(rememberMe: boolean) {
     return DateTime.now()
       .plus(rememberMe ? extendedSessionLength : normalSessionLength)
       .toJSDate();

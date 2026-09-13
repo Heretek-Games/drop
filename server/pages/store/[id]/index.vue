@@ -85,7 +85,7 @@
                   <span
                     v-if="platforms.length == 0"
                     class="font-semibold text-blue-600"
-                    >{{ $t("store.commingSoon") }}</span
+                    >{{ $t("store.comingSoon") }}</span
                   >
                 </td>
               </tr>
@@ -123,7 +123,7 @@
                   class="whitespace-nowrap inline-flex gap-x-4 px-3 py-4 text-sm text-zinc-400"
                 >
                   <span class="font-semibold text-blue-600">{{
-                    $t("store.commingSoon")
+                    $t("store.comingSoon")
                   }}</span>
                 </td>
               </tr>

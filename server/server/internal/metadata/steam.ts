@@ -865,7 +865,7 @@ export class SteamProvider implements MetadataProvider {
 
   private async _getWebAppDetails(
     appid: string,
-    dataRequest: string, // Seperated by commas
+    dataRequest: string, // Separated by commas
     language = "english",
   ): Promise<SteamWebAppDetailsLarge | SteamWebAppDetailsSmall | undefined> {
     const searchParams = new URLSearchParams({

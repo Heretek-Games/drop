@@ -9,12 +9,19 @@ export type ModalCallbackType<T extends ModalType> = (
   ...args: unknown[]
 ) => Promise<void> | void;
 
-export interface ModalStackElement<T extends ModalType> {
+/** Erased callback shape stored in the heterogeneous modal stack. */
+export type ModalCallback = (
+  event: string,
+  close: () => void,
+  ...args: unknown[]
+) => Promise<void> | void;
+
+export interface ModalStackElement {
   component: Component;
-  type: T;
-  callback: ModalCallbackType<T>;
+  type: ModalType;
+  callback: ModalCallback;
   loading: Ref<boolean>;
-  data: ModalDataMap[T];
+  data: ModalDataMap[ModalType];
 }
 
 export enum ModalType {
@@ -64,11 +71,12 @@ export function createModal<T extends ModalType>(
   modalStack.value.push({
     type,
     component: modalComponents[type],
+    // The owning component invokes the callback with its own event union.
+    callback: callback as ModalCallback,
     data,
-    callback,
     loading: ref(false),
   });
 }
 
 export const useModalStack = () =>
-  useState<Array<ModalStackElement<ModalType>>>("modal-stack", () => []);
+  useState<Array<ModalStackElement>>("modal-stack", () => []);

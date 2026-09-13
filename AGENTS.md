@@ -235,6 +235,9 @@ Sources: `server/server/internal/plugins/builtin/drop-gse.ts`, `builtin/gse/`.
 > `desktop/src-tauri/Cargo.toml` sets `[profile.dev.package.tokio] opt-level = 1`
 > to avoid an upstream nightly ICE while compiling Tokio in debug.
 
+> Local development: `mise install` provisions the pinned runtimes above plus
+> the lint/security tools (see `.mise.toml`).
+
 ---
 
 ## 4. Quality gates
@@ -385,3 +388,56 @@ Native binaries not installable via pnpm:
 - **Secrets**: never commit tokens/keys. Use `.gitleaksignore` fingerprints only
   for historical mock fixtures.
 - **Blame hygiene**: record formatting-only passes in `.git-blame-ignore-revs`.
+
+## 8. Keeping the board green
+
+**Toolchain** — `mise install` (`.mise.toml`) pins node/pnpm/python/go/rust plus
+`shellcheck`, `shfmt`, `hadolint`, `actionlint`, `ruff`, `gitleaks` and `typos`.
+Git hooks resolve tools through `scripts/run-tool.sh`, which fails with an
+actionable install hint instead of silently skipping a check.
+
+**Git hooks** (`lefthook.yml`, installed by `pnpm install`):
+
+- pre-commit: prettier, server eslint, ast-grep, shellcheck, hadolint,
+  actionlint, ruff (check + format), typos and gitleaks.
+- commit-msg: commitlint (Conventional Commits).
+- pre-push: server typecheck + lint, per-workspace frontend lint, cargo fmt +
+  clippy on changed crates, golangci-lint, report-only knip and an optional
+  local `sonar analyze --base origin/develop` (skipped without
+  `~/.config/sonar/env`).
+
+**Lint rules** — `eslint.config.shared.mjs` holds the curated local equivalents
+of the SonarCloud rules (sonarjs, regexp, unicorn, vuejs-accessibility) for
+every workspace; `server/ruff.toml` covers Python under `server/dev-tools`.
+
+**SonarCloud** — project `Heretek-Games_drop`, automatic analysis on push; the
+gate enforces the last 30 days of new code. `server/prisma/migrations/**` and
+vendored `libraries/{libarchive,native_model}/**/Cargo.toml` are excluded.
+Triage policy: fix the root cause, else a justified `NOSONAR` on the exact line,
+else accept with a rationale comment via the API. `knip` stays report-only until
+its unused/duplicate exports are triaged.
+
+**Agents** — opencode formats edited files via `.opencode/plugin/quality.js`
+and documents the workflows in `.opencode/skills/`; Claude Code uses the
+PostToolUse hook in `.claude/settings.json`; Cursor and Codex get Sonar secrets
+scanning plus the SonarQube MCP server (`.mcp.json`, `.cursor/mcp.json`,
+`.codex/config.toml`). The shared per-file formatter is
+`scripts/agent-quality.sh`. Restart opencode after config changes.
+
+<!-- sonar:begin:codex-secrets-on-read -->
+
+# SonarQube secrets scanning for files protocol
+
+Before reading any file in this workspace, scan it for secrets with the deterministic scanner:
+
+```bash
+sonar analyze secrets <path/to/file>
+```
+
+If the command reports that the file contains a secret, **do not read the file**. Instead:
+
+1. Inform the user that the file appears to contain a secret or credential and that reading it would expose the value in chat history, logs, and any downstream telemetry.
+2. Advise them to rotate the leaked credential at its source of truth and remove it from the file.
+3. Do not proceed with the original request until the secret has been removed.
+
+<!-- sonar:end:codex-secrets-on-read -->

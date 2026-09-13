@@ -63,7 +63,7 @@ if (import.meta.client) {
           {{ $t("errors.occurred") }}
         </p>
         <div class="mt-10">
-          <!-- clearError is inconsistent so reload app to clear erro -->
+          <!-- clearError is inconsistent so reload app to clear error -->
           <a
             v-if="!showSignIn"
             href="/"

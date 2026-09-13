@@ -150,7 +150,7 @@ export class ClientHandler {
       .find((e) => e.authToken === token);
   }
 
-  async finialiseClient(id: string) {
+  async finaliseClient(id: string) {
     const metadata = this.temporaryClientTable.get(id);
     if (!metadata) throw new Error("Invalid client ID");
     if (!metadata.userId) throw new Error("Un-authorized client ID");

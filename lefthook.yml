@@ -53,9 +53,11 @@ pre-commit:
       run: scripts/run-tool.sh ruff check --fix {staged_files} && scripts/run-tool.sh ruff format {staged_files}
       stage_fixed: true
 
-    # Dependency versions are pinned in .mise.toml, not installed per commit.
+    # Spell check (exclusions for locales/migrations live in _typos.toml).
+    # Runs repo-wide because typos only applies its exclusion config when
+    # walking directories, not when given explicit file arguments.
     typos:
-      run: scripts/run-tool.sh typos {staged_files}
+      run: scripts/run-tool.sh typos
 
     # Secret scan on the diff about to be committed. CI enforces too (security.yml).
     gitleaks:

@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "sonarqube": {
+      "args": ["run", "mcp", "--project", "Heretek-Games_drop"],
+      "command": "sonar"
+    }
+  }
+}
