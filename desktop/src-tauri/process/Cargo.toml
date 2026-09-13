@@ -21,7 +21,7 @@ shared_child = "1.1.1"
 shell-words = "1.1.1"
 tauri = "*"
 tauri-plugin-opener = "*"
-tokio = { version = "1", features = ["rt", "process", "io-util", "sync"] }
+tokio = { version = "1", features = ["rt", "process", "io-util", "sync", "time"] }
 utils = { path = "../utils", version = "0.1.0" }
 walkdir = "2.5"
 

@@ -506,7 +506,18 @@ async fn execute_pipeline(
                     Ok(())
                 }
             }
-            PipelineStepAction::RunCommand => execute_run_command(step, install_dir).await,
+            PipelineStepAction::RunCommand => {
+                execute_run_command(
+                    app_handle,
+                    game_id,
+                    step_index,
+                    total_steps,
+                    step,
+                    install_dir,
+                    cancel_flag.clone(),
+                )
+                .await
+            }
             PipelineStepAction::Unknown => {
                 warn!("Skipping unknown step action: {:?}", step.action);
                 Ok(())
@@ -1031,7 +1042,16 @@ fn tool_missing_error(tool: &str) -> String {
     }
 }
 
-async fn execute_run_command(step: &PipelineStep, install_dir: &Path) -> Result<(), String> {
+#[allow(clippy::too_many_arguments)]
+async fn execute_run_command(
+    app_handle: &AppHandle,
+    game_id: &str,
+    step_index: usize,
+    total_steps: usize,
+    step: &PipelineStep,
+    install_dir: &Path,
+    cancel_flag: Arc<AtomicBool>,
+) -> Result<(), String> {
     let cmd_str = step
         .params
         .get("command")
@@ -1052,21 +1072,22 @@ async fn execute_run_command(step: &PipelineStep, install_dir: &Path) -> Result<
     }
 
     let mut cmd = tokio::process::Command::new(program);
-    cmd.args(&parts[1..]).current_dir(install_dir);
+    cmd.args(&parts[1..])
+        .current_dir(install_dir)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
 
-    let output = cmd
-        .output()
-        .await
-        .map_err(|e| format!("Failed to execute command '{}': {}", cmd_str, e))?;
-
-    if !output.status.success() {
-        return Err(format!(
-            "Command exited with code {:?}: {}",
-            output.status.code(),
-            String::from_utf8_lossy(&output.stderr)
-        ));
-    }
-    Ok(())
+    run_process_with_progress(
+        cmd,
+        app_handle,
+        game_id,
+        step_index,
+        total_steps,
+        step,
+        cancel_flag,
+        |_| None,
+    )
+    .await
 }
 
 async fn run_process_with_progress<F>(
@@ -1107,31 +1128,47 @@ where
     let mut reader = BufReader::new(stdout).lines();
     let mut last_percentage = 0u8;
 
-    while let Some(line) = reader.next_line().await.map_err(|e| e.to_string())? {
-        if cancel_flag.load(Ordering::SeqCst) {
-            let _ = kill_process_tree(&mut child).await;
-            stderr_task.abort();
-            return Err("Operation cancelled by user".to_string());
-        }
+    // Poll the cancel flag on a timer as well as per stdout line so a child
+    // that emits no output (a stuck 7z or GUI installer) can still be stopped.
+    let mut cancel_tick = tokio::time::interval(std::time::Duration::from_millis(200));
+    cancel_tick.tick().await;
 
-        if let Some(pct) = progress_parser(&line) {
-            if pct != last_percentage {
-                last_percentage = pct;
-                emit_progress(
-                    app_handle,
-                    game_id,
-                    step_index,
-                    total_steps,
-                    &step.id,
-                    &step.action,
-                    &step.description,
-                    pct,
-                    None,
-                    Some(line.clone()),
-                );
+    loop {
+        tokio::select! {
+            line = reader.next_line() => {
+                let line = match line {
+                    Ok(Some(line)) => line,
+                    Ok(None) => break,
+                    Err(e) => return Err(e.to_string()),
+                };
+
+                if let Some(pct) = progress_parser(&line) {
+                    if pct != last_percentage {
+                        last_percentage = pct;
+                        emit_progress(
+                            app_handle,
+                            game_id,
+                            step_index,
+                            total_steps,
+                            &step.id,
+                            &step.action,
+                            &step.description,
+                            pct,
+                            None,
+                            Some(line.clone()),
+                        );
+                    }
+                } else {
+                    debug!("[{}] {}", step.id, line);
+                }
             }
-        } else {
-            debug!("[{}] {}", step.id, line);
+            _ = cancel_tick.tick() => {
+                if cancel_flag.load(Ordering::SeqCst) {
+                    let _ = kill_process_tree(&mut child).await;
+                    stderr_task.abort();
+                    return Err("Operation cancelled by user".to_string());
+                }
+            }
         }
     }
 
@@ -1139,7 +1176,13 @@ where
         .wait()
         .await
         .map_err(|e| format!("Process wait failed: {e}"))?;
-    let stderr_lines = stderr_task.await.unwrap_or_default();
+    // A grandchild can keep stderr open after the parent exits; do not hang on
+    // it forever after the process itself has finished.
+    let stderr_lines =
+        match tokio::time::timeout(std::time::Duration::from_secs(5), stderr_task).await {
+            Ok(Ok(lines)) => lines,
+            _ => Vec::new(),
+        };
     if !status.success() {
         let detail = if stderr_lines.is_empty() {
             String::new()
