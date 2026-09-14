@@ -287,6 +287,19 @@ export class ObjectHandler {
   }
 
   /**
+   * Replace an object's permission list.
+   *
+   * This performs no authorization of its own: callers must verify ownership
+   * first. Used by the screenshot gallery to publish (`anonymous:read`) or
+   * withdraw an object.
+   */
+  async setPermissions(id: string, permissions: string[]): Promise<boolean> {
+    const metadata = await this.backend.fetchMetadata(id);
+    if (!metadata) return false;
+    return this.backend.writeMetadata(id, { ...metadata, permissions });
+  }
+
+  /**
    * List all objects
    */
   async listAll() {

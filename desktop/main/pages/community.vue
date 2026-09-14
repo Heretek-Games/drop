@@ -50,6 +50,25 @@
     </ul>
 
     <section class="mt-12">
+      <h2 class="text-xl font-semibold">Screenshots</h2>
+      <div
+        v-if="screenshots.length > 0"
+        class="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3"
+      >
+        <img
+          v-for="shot in screenshots"
+          :key="shot.id"
+          :src="useObject(shot.objectId)"
+          alt="Game screenshot"
+          class="h-32 w-full rounded-lg object-cover ring-1 ring-white/10"
+        />
+      </div>
+      <p v-else-if="!loading" class="mt-2 text-sm text-zinc-500">
+        No screenshots yet.
+      </p>
+    </section>
+
+    <section class="mt-12">
       <h2 class="text-xl font-semibold">Discussion</h2>
       <ul class="mt-4 space-y-2">
         <li v-for="thread in threads" :key="thread.id">
@@ -103,6 +122,7 @@
 <script setup lang="ts">
 import { ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
+import { useObject } from "~/composables/use-object";
 
 interface ReviewView {
   id: string;
@@ -135,9 +155,17 @@ interface ForumThreadDetail {
   posts: ForumPostView[];
 }
 
+interface ScreenshotView {
+  id: string;
+  userId: string;
+  objectId: string;
+  createdAt?: string;
+}
+
 const gameId = ref("");
 const reviews = ref<ReviewView[]>([]);
 const threads = ref<ForumThreadView[]>([]);
+const screenshots = ref<ScreenshotView[]>([]);
 const threadDetail = ref<ForumThreadDetail>();
 const loading = ref(false);
 const error = ref<string>();
@@ -152,17 +180,20 @@ async function load() {
   error.value = undefined;
   threadDetail.value = undefined;
   try {
-    const [reviewList, threadList] = await Promise.all([
+    const [reviewList, threadList, shotList] = await Promise.all([
       invoke<ReviewView[]>("fetch_game_reviews", { gameId: trimmed }),
       invoke<ForumThreadView[]>("fetch_forum_threads", { gameId: trimmed }),
+      invoke<ScreenshotView[]>("fetch_game_screenshots", { gameId: trimmed }),
     ]);
     reviews.value = reviewList;
     threads.value = threadList;
+    screenshots.value = shotList;
   } catch (e) {
     console.warn("Failed to load community data:", e);
     error.value = "Could not load community data.";
     reviews.value = [];
     threads.value = [];
+    screenshots.value = [];
   } finally {
     loading.value = false;
   }

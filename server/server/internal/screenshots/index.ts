@@ -3,6 +3,9 @@ import type { IncomingMessage } from "node:http";
 import objectHandler from "../objects";
 import stream from "node:stream/promises";
 import prisma from "../db/database";
+import { screenshotObjectPermissions } from "./permissions";
+
+export { screenshotObjectPermissions } from "./permissions";
 
 class ScreenshotManager {
   /**
@@ -46,6 +49,41 @@ class ScreenshotManager {
       },
     });
     return results;
+  }
+
+  /**
+   * Public (non-private) screenshots for a game — the community gallery.
+   * @param gameId
+   */
+  async getPublicAllByGame(gameId: string) {
+    return await prisma.screenshot.findMany({
+      where: {
+        gameId,
+        private: false,
+      },
+    });
+  }
+
+  /**
+   * Publish or withdraw a screenshot. The caller must verify ownership first;
+   * this synchronizes the object permissions with the new visibility.
+   * @param screenshotId
+   * @param isPrivate
+   */
+  async setVisibility(screenshotId: string, isPrivate: boolean) {
+    const screenshot = await prisma.screenshot.findUnique({
+      where: { id: screenshotId },
+    });
+    if (!screenshot) return false;
+    await objectHandler.setPermissions(
+      screenshot.objectId,
+      screenshotObjectPermissions(screenshot.userId, isPrivate),
+    );
+    const { count } = await prisma.screenshot.updateMany({
+      where: { id: screenshotId },
+      data: { private: isPrivate },
+    });
+    return count > 0;
   }
 
   /**

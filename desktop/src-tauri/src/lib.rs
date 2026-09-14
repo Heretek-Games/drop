@@ -297,6 +297,7 @@ pub fn run() {
             fetch_game_reviews,
             fetch_forum_threads,
             fetch_forum_thread,
+            fetch_game_screenshots,
             // Achievements
             unlock_achievements,
             // Shader caches

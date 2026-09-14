@@ -184,3 +184,45 @@ pub async fn fetch_forum_thread(thread_id: String) -> Result<ForumThreadDetailVi
         posts: response.posts.into_iter().map(Into::into).collect(),
     })
 }
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScreenshotView {
+    pub id: String,
+    pub user_id: String,
+    pub object_id: String,
+    pub created_at: Option<String>,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ScreenshotRow {
+    id: String,
+    user_id: String,
+    object_id: String,
+    #[serde(default)]
+    created_at: Option<String>,
+}
+
+#[derive(serde::Deserialize)]
+struct ScreenshotsResponse {
+    screenshots: Vec<ScreenshotRow>,
+}
+
+/// Fetches the public screenshot gallery for a game.
+#[tauri::command]
+pub async fn fetch_game_screenshots(game_id: String) -> Result<Vec<ScreenshotView>, String> {
+    let url = generate_url(&["/api/v1/community", &game_id, "screenshots"], &[])
+        .map_err(|e| e.to_string())?;
+    let response: ScreenshotsResponse = fetch_forum_json(url, "screenshots").await?;
+    Ok(response
+        .screenshots
+        .into_iter()
+        .map(|row| ScreenshotView {
+            id: row.id,
+            user_id: row.user_id,
+            object_id: row.object_id,
+            created_at: row.created_at,
+        })
+        .collect())
+}
