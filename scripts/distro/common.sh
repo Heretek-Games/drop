@@ -76,7 +76,8 @@ distro_extract_binary() {
   local deb="$1" output="$2"
 
   if command -v dpkg-deb >/dev/null 2>&1; then
-    dpkg-deb --fsys-tarfile "$deb" | tar -xO ./usr/bin/drop-app >"$output" ||
+    dpkg-deb --fsys-tarfile "$deb" |
+      tar -xO --wildcards '*usr/bin/drop-app' >"$output" ||
       die "failed to extract usr/bin/drop-app from $deb"
   else
     require_cmd ar
@@ -85,7 +86,7 @@ distro_extract_binary() {
     (cd "$tmp" && ar x "$deb")
     member="$(find "$tmp" -maxdepth 1 -name 'data.tar.*' -print -quit)"
     [[ -n "$member" ]] || die "no data.tar member found in $deb"
-    tar -xOf "$member" ./usr/bin/drop-app >"$output" ||
+    tar -xOf "$member" --wildcards '*usr/bin/drop-app' >"$output" ||
       die "failed to extract usr/bin/drop-app from $deb"
     rm -rf "$tmp"
   fi
