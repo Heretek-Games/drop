@@ -63,6 +63,7 @@ mod client;
 mod cloud_saves;
 mod collections;
 mod community;
+mod handheld;
 mod download_manager;
 mod downloads;
 mod games;
@@ -81,6 +82,7 @@ use achievements::*;
 use client::*;
 use cloud_saves::*;
 use community::*;
+use handheld::*;
 use download_manager::*;
 use downloads::*;
 use games::*;
@@ -309,6 +311,8 @@ pub fn run() {
             clear_presence,
             // WebRTC
             fetch_ice_config,
+            // Handheld power
+            download_power_decision,
             // Workshop
             fetch_workshop_subscriptions,
             fetch_workshop_mod,

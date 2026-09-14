@@ -1387,6 +1387,7 @@ dependencies = [
  "native_model",
  "page_size",
  "parking_lot 0.12.5",
+ "power",
  "process",
  "rand 0.10.2",
  "rayon",
@@ -4103,6 +4104,10 @@ checksum = "d83eb9bc6d8e5cf568e7a1101d60ee05e81ed50ea106026f3d18deeb046d7661"
 dependencies = [
  "zerovec",
 ]
+
+[[package]]
+name = "power"
+version = "0.1.0"
 
 [[package]]
 name = "powerfmt"
