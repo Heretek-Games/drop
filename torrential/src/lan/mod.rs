@@ -116,9 +116,53 @@ pub fn fetch_from_best_peer<F: ChunkFetcher>(
     Some(fetcher.fetch(&peer, content_id, chunk_index))
 }
 
+/// The client-to-client HTTP URL for a chunk on a LAN peer.
+#[must_use]
+pub fn chunk_url(peer: &LanPeer, content_id: &str, chunk_index: u64) -> String {
+    format!(
+        "http://{}/depot/{}/chunks/{}",
+        peer.address, content_id, chunk_index
+    )
+}
+
+/// HTTP client-to-client chunk fetcher. QUIC can be added as another
+/// `ChunkFetcher` without changing the registry or selection logic.
+#[derive(Debug, Default, Clone)]
+pub struct HttpChunkFetcher;
+
+impl ChunkFetcher for HttpChunkFetcher {
+    fn fetch(&self, peer: &LanPeer, content_id: &str, chunk_index: u64) -> Result<Vec<u8>, String> {
+        let response = reqwest::blocking::Client::new()
+            .get(chunk_url(peer, content_id, chunk_index))
+            .send()
+            .map_err(|error| error.to_string())?;
+        if !response.status().is_success() {
+            return Err(format!("peer returned {}", response.status()));
+        }
+        response
+            .bytes()
+            .map(|bytes| bytes.to_vec())
+            .map_err(|error| error.to_string())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn builds_a_client_to_client_chunk_url() {
+        let peer = LanPeer {
+            peer_id: "p".to_string(),
+            address: SocketAddr::from(([192, 168, 1, 5], 8080)),
+            rtt_ms: 1,
+            throughput_kibps: 1,
+        };
+        assert_eq!(
+            chunk_url(&peer, "depot-abc", 7),
+            "http://192.168.1.5:8080/depot/depot-abc/chunks/7"
+        );
+    }
 
     #[test]
     fn fetches_a_chunk_from_the_best_peer() {
