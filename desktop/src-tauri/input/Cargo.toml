@@ -6,4 +6,7 @@ license = "AGPL-3.0-only"
 
 [dependencies]
 
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = "0.2"
+
 [dev-dependencies]

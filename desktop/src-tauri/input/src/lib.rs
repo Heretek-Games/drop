@@ -2,9 +2,11 @@
 //!
 //! This crate owns the pure mapping logic (deadzones, gyro-to-mouse, button
 //! remaps) so it stays testable without touching `/dev/uinput` or a driver.
-//! No native virtual-device backend exists yet: [`InputBackend`] is implemented
-//! only by [`MockBackend`] (tests/dry-runs) and [`NullBackend`] (explicit
-//! unavailability), and [`supported_backends`] therefore reports only `Null`.
+//! On Linux a real [`uinput`] backend creates a virtual gamepad; on other
+//! platforms [`NullBackend`] reports unavailability explicitly.
+
+#[cfg(target_os = "linux")]
+pub mod uinput;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum GamepadButton {
@@ -159,14 +161,11 @@ impl InputBackend for MockBackend {
 
 /// Virtual gamepad backends Drop can target.
 ///
-/// `Uinput` and `ViGEm` are reserved API surface: no `InputBackend`
-/// implementation exists for them yet, so advertising them would make callers
-/// believe a device can be created. They stay in the enum so native backends
-/// can be added later without breaking the public API.
+/// `Uinput` is implemented on Linux ([`uinput::UinputBackend`]); `ViGEm`
+/// remains reserved API surface until a Windows backend exists.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BackendKind {
     /// Linux `uinput`/`evdev` virtual device (requires `/dev/uinput` access).
-    /// Not implemented yet.
     Uinput,
     /// Windows ViGEm bus driver. Not implemented yet.
     ViGEm,
@@ -174,10 +173,15 @@ pub enum BackendKind {
     Null,
 }
 
-/// Backends available on the current platform. Only [`BackendKind::Null`] is
-/// reported because no native `InputBackend` exists yet; the fallback surfaces
-/// a precise `BackendUnavailable` error instead of pretending a virtual device
-/// is available.
+/// Backends available on the current platform.
+#[cfg(target_os = "linux")]
+#[must_use]
+pub fn supported_backends() -> &'static [BackendKind] {
+    &[BackendKind::Uinput, BackendKind::Null]
+}
+
+/// Backends available on the current platform.
+#[cfg(not(target_os = "linux"))]
 #[must_use]
 pub fn supported_backends() -> &'static [BackendKind] {
     &[BackendKind::Null]
@@ -288,6 +292,11 @@ mod tests {
 
     #[test]
     fn supported_backends_reports_only_implemented_backends() {
-        assert_eq!(supported_backends(), &[BackendKind::Null]);
+        let backends = supported_backends();
+        assert!(backends.contains(&BackendKind::Null));
+        #[cfg(target_os = "linux")]
+        assert!(backends.contains(&BackendKind::Uinput));
+        #[cfg(not(target_os = "linux"))]
+        assert!(!backends.contains(&BackendKind::Uinput));
     }
 }
