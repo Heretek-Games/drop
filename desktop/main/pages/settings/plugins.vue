@@ -224,6 +224,64 @@
     <h4 class="text-sm font-semibold text-zinc-100">Extension Settings</h4>
     <PluginSlot name="settings:tabs" />
   </div>
+
+  <!-- Capability Review / Permission Consent Modal -->
+  <div
+    v-if="showConsentModal && pendingInstall"
+    class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm"
+  >
+    <div
+      class="w-full max-w-lg rounded-xl border border-zinc-700 bg-zinc-900 p-6 shadow-2xl space-y-4"
+    >
+      <div class="flex items-center gap-x-2 text-purple-400">
+        <ShieldCheckIcon class="size-6" />
+        <h3 class="text-base font-semibold text-zinc-100">
+          Review Plugin Permissions
+        </h3>
+      </div>
+      <p class="text-xs text-zinc-400">
+        <strong class="text-zinc-200">{{
+          pendingInstall.manifest.name
+        }}</strong>
+        (<code>{{ pendingInstall.manifest.id }}</code> v{{
+          pendingInstall.manifest.version
+        }}) requests the following capabilities:
+      </p>
+      <div
+        class="max-h-60 overflow-y-auto space-y-2 rounded-lg bg-zinc-950 p-3 border border-zinc-800"
+      >
+        <div
+          v-for="cap in pendingInstall.manifest.capabilities || []"
+          :key="cap"
+          class="flex flex-col text-xs"
+        >
+          <span class="font-mono font-semibold text-purple-300">{{ cap }}</span>
+          <span class="text-zinc-400 text-[11px]">{{
+            CAPABILITY_DESCRIPTIONS[cap] || "Standard plugin capability"
+          }}</span>
+        </div>
+      </div>
+      <div class="flex justify-end gap-x-2 pt-2">
+        <button
+          type="button"
+          class="rounded-md bg-zinc-800 px-3 py-2 text-xs font-semibold text-zinc-300 hover:bg-zinc-700 transition"
+          @click="
+            showConsentModal = false;
+            pendingInstall = null;
+          "
+        >
+          Cancel
+        </button>
+        <button
+          type="button"
+          class="rounded-md bg-purple-600 px-3 py-2 text-xs font-semibold text-white hover:bg-purple-500 transition"
+          @click="confirmInstall(pendingInstall)"
+        >
+          Authorize &amp; Install
+        </button>
+      </div>
+    </div>
+  </div>
 </template>
 
 <script setup lang="ts">
@@ -341,6 +399,30 @@ async function handleRemovePlugin(id: string) {
 
 const installJson = ref("");
 const installReady = computed(() => installJson.value.trim().length > 0);
+const showConsentModal = ref(false);
+const pendingInstall = ref<any | null>(null);
+
+const CAPABILITY_DESCRIPTIONS: Record<string, string> = {
+  "game:fs":
+    "Confined filesystem access within active game installation directories.",
+  "game:launch-hook":
+    "Execute pre-launch validation and post-exit launch pipeline hooks.",
+  "game:scan": "Scan executables and perform anti-cheat compatibility checks.",
+  "ui:play-action":
+    "Inject custom startup actions and play modes into game launch menus.",
+  "ui:slot": "Contribute UI panels, sidebar tabs, and status badges.",
+  "ui:context-menu": "Add custom action items to game context menus.",
+  "ui:sidebar": "Add items and progress indicators to the client sidebar.",
+  "ui:topbar": "Add status indicators to the top application bar.",
+  "client:storage": "Store client-side settings and metadata.",
+  "client:ws": "Communicate with backend WebSocket channels.",
+  routes: "Register custom HTTP routes on the server.",
+  storage: "Access persistent server storage.",
+  events: "Broadcast and listen to server event bus messages.",
+  network: "Make outbound network requests from the server.",
+  websocket: "Expose real-time WebSocket communication channels.",
+  "system:sidecar": "Execute background system sidecar processes.",
+};
 
 function handleFileUpload(event: Event) {
   const input = event.target as HTMLInputElement;
@@ -353,12 +435,16 @@ function handleFileUpload(event: Event) {
   reader.readAsText(file);
 }
 
-async function handleInstallBundle() {
-  isLoading.value = true;
+function handleInstallBundle() {
   error.value = null;
   try {
     const parsed = JSON.parse(installJson.value) as {
-      manifest?: unknown;
+      manifest?: {
+        id?: string;
+        name?: string;
+        version?: string;
+        capabilities?: string[];
+      };
       entry?: string;
       files?: Record<string, string>;
       format?: string;
@@ -368,13 +454,32 @@ async function handleInstallBundle() {
         'Bundle must contain a "manifest" and either an "entry" or "files" map',
       );
     }
+
+    const caps = parsed.manifest.capabilities || [];
+    if (caps.length > 0) {
+      pendingInstall.value = parsed;
+      showConsentModal.value = true;
+    } else {
+      confirmInstall(parsed);
+    }
+  } catch (e) {
+    error.value = (e as string).toString();
+  }
+}
+
+async function confirmInstall(payload: any) {
+  isLoading.value = true;
+  error.value = null;
+  showConsentModal.value = false;
+  try {
     await invoke("plugin_request", {
       pluginId: "install",
       method: "POST",
       path: "",
-      body: parsed,
+      body: payload,
     });
     installJson.value = "";
+    pendingInstall.value = null;
     await fetchPlugins();
   } catch (e) {
     error.value = (e as string).toString();
