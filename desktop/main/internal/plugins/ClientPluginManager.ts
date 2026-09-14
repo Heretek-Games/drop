@@ -49,7 +49,7 @@ class BrowserLocalStorage implements ClientPluginStorage {
     const keys: string[] = [];
     for (let i = 0; i < localStorage.length; i++) {
       const k = localStorage.key(i);
-      if (k && k.startsWith(prefix)) {
+      if (k?.startsWith(prefix)) {
         keys.push(k.slice(prefix.length));
       }
     }
@@ -340,11 +340,11 @@ export class ClientPluginManager {
     }
 
     const mod = await import(/* @vite-ignore */ bundleUrl);
-    const pluginExport: ClientPlugin | undefined = mod.default?.init
-      ? mod.default
-      : mod.plugin?.init
-        ? mod.plugin
-        : undefined;
+    const candidates: Array<ClientPlugin | undefined> = [
+      mod.default,
+      mod.plugin,
+    ];
+    const pluginExport = candidates.find((candidate) => candidate?.init);
 
     if (!pluginExport) {
       throw new Error(

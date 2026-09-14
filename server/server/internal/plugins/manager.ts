@@ -1036,7 +1036,7 @@ export class PluginManager {
     for (const plugin of this.listPlugins()) {
       if (plugin.builtin) continue;
       const entry = registry.getEntry(plugin.id);
-      if (!entry || !entry.version) continue;
+      if (!entry?.version) continue;
 
       const hasUpdate = entry.version !== plugin.version;
       results.push({

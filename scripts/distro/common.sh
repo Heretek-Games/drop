@@ -10,31 +10,38 @@ die() {
 }
 
 require_cmd() {
-  command -v "$1" >/dev/null 2>&1 || die "missing required command: $1"
+  local cmd="$1"
+  command -v "$cmd" >/dev/null 2>&1 || die "missing required command: $cmd"
+  return 0
 }
 
 # Absolute path to the repository root.
 distro_repo_root() {
   cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd
+  return 0
 }
 
 # Reverse-DNS application identifier matching the Tauri identifier
 # (org.droposs.client) for each channel.
 distro_app_id() {
-  case "$1" in
+  local channel="$1"
+  case "$channel" in
   stable) printf 'org.droposs.client' ;;
   alpha) printf 'org.droposs.client.Alpha' ;;
-  *) die "unknown channel: $1" ;;
+  *) die "unknown channel: $channel" ;;
   esac
+  return 0
 }
 
 # Package/binary base name for each channel.
 distro_source_name() {
-  case "$1" in
+  local channel="$1"
+  case "$channel" in
   stable) printf 'drop-desktop-client' ;;
   alpha) printf 'drop-desktop-client-alpha' ;;
-  *) die "unknown channel: $1" ;;
+  *) die "unknown channel: $channel" ;;
   esac
+  return 0
 }
 
 # Convert the Tauri/semver bundle version into a Debian/RPM upstream version.
@@ -57,14 +64,17 @@ distro_upstream_version() {
     die "unknown channel: $channel"
     ;;
   esac
+  return 0
 }
 
 distro_app_summary() {
-  case "$1" in
+  local channel="$1"
+  case "$channel" in
   stable) printf 'Self-hosted game distribution and multiplayer platform client' ;;
   alpha) printf 'Self-hosted game distribution platform client (Alpha Preview)' ;;
-  *) die "unknown channel: $1" ;;
+  *) die "unknown channel: $channel" ;;
   esac
+  return 0
 }
 
 # Extract the prebuilt Tauri binary from a .deb into $2.
@@ -92,4 +102,5 @@ distro_extract_binary() {
   fi
 
   chmod +x "$output"
+  return 0
 }

@@ -441,15 +441,11 @@ const CAPABILITY_DESCRIPTIONS: Record<string, string> = {
     "Run allowlisted native commands (e.g. zerotier-cli) on this device.",
 };
 
-function handleFileUpload(event: Event) {
+async function handleFileUpload(event: Event) {
   const input = event.target as HTMLInputElement;
   const file = input.files?.[0];
   if (!file) return;
-  const reader = new FileReader();
-  reader.onload = () => {
-    installJson.value = reader.result as string;
-  };
-  reader.readAsText(file);
+  installJson.value = await file.text();
 }
 
 function handleInstallBundle() {
