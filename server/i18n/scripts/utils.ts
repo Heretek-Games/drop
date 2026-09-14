@@ -72,15 +72,37 @@ function flattenLocalisationRecursive(
   }
 }
 
+const UNSAFE_LOCALISATION_KEYS = new Set([
+  "__proto__",
+  "constructor",
+  "prototype",
+]);
+
+/** Rejects key segments that could traverse the prototype chain. */
+function assertSafeKeyPart(part: string): void {
+  if (UNSAFE_LOCALISATION_KEYS.has(part)) {
+    throw new Error(`Unsafe localisation key segment: ${part}`);
+  }
+}
+
+/** Own-property check that never consults the prototype chain. */
+function hasOwn(target: object, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(target, key);
+}
+
 export function deleteLocalisation(localisation: Localisation, key: string) {
   const parts = key.split(".");
   let current: Localisation | string = localisation;
   for (const part of parts.slice(0, -1)) {
-    if (typeof current === "string")
+    assertSafeKeyPart(part);
+    if (typeof current === "string" || !hasOwn(current, part))
       throw new Error(`${key} not found in localisation`);
     current = current[part];
   }
   if (typeof current === "string")
+    throw new Error(`${key} not found in localisation`);
+  assertSafeKeyPart(parts.at(-1)!);
+  if (!hasOwn(current, parts.at(-1)!))
     throw new Error(`${key} not found in localisation`);
 
   // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
@@ -94,12 +116,14 @@ export function fetchLocalisation(
   const parts = key.split(".");
   let current: Localisation | string = localisation;
   for (const part of parts.slice(0, -1)) {
-    if (typeof current === "string")
+    assertSafeKeyPart(part);
+    if (typeof current === "string" || !hasOwn(current, part))
       throw new Error(`${key} not found in localisation`);
     current = current[part];
   }
   if (typeof current === "string")
     throw new Error(`${key} not found in localisation`);
+  assertSafeKeyPart(parts.at(-1)!);
 
   return current[parts.at(-1)!] as string;
 }

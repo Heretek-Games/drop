@@ -112,6 +112,45 @@ function trimTrailingSlashes(value: string): string {
   return value.slice(0, end);
 }
 
+/** Upper bound on a plugin route pattern, limiting regex construction cost. */
+const MAX_ROUTE_PATTERN_LENGTH = 512;
+
+/** Escapes RegExp metacharacters so literal route text cannot form a pattern. */
+function escapeRegExp(value: string): string {
+  const specials = ".*+?^${}()|[]\\";
+  let escaped = "";
+  for (const char of value) {
+    escaped += specials.includes(char) ? `\\${char}` : char;
+  }
+  return escaped;
+}
+
+/**
+ * Translates one token of a plugin route pattern into regex source. Recognises
+ * `:name`, `*`, and `**`; every other character is escaped so it stays literal.
+ */
+function routeTokenToRegexSource(
+  normalized: string,
+  index: number,
+  paramNames: string[],
+): { source: string; consumed: number } {
+  const char = normalized[index];
+  if (char === ":" && /[A-Za-z0-9_]/.test(normalized[index + 1] ?? "")) {
+    let end = index + 1;
+    while (end < normalized.length && /\w/.test(normalized[end])) {
+      end++;
+    }
+    paramNames.push(normalized.slice(index + 1, end));
+    return { source: "([^/]+)", consumed: end - index };
+  }
+  if (char === "*") {
+    return normalized[index + 1] === "*"
+      ? { source: "(.*)", consumed: 2 }
+      : { source: "([^/]+)", consumed: 1 };
+  }
+  return { source: escapeRegExp(char), consumed: 1 };
+}
+
 /** Resolves a dynamically imported bundle's default or named plugin export. */
 function resolvePluginExport(mod: {
   default?: unknown;
@@ -219,19 +258,28 @@ export class PluginManager {
     regex: RegExp;
     paramNames: string[];
   } {
+    if (pattern.length > MAX_ROUTE_PATTERN_LENGTH) {
+      throw new Error(
+        `Plugin route pattern exceeds ${MAX_ROUTE_PATTERN_LENGTH} characters`,
+      );
+    }
     const paramNames: string[] = [];
-    const normalized = pattern.startsWith("/") ? pattern : `/${pattern}`;
+    const normalized = trimTrailingSlashes(
+      pattern.startsWith("/") ? pattern : `/${pattern}`,
+    );
 
-    const regexStr = trimTrailingSlashes(normalized)
-      .replace(/:(\w+)/g, (_, name) => {
-        paramNames.push(name);
-        return "([^/]+)";
-      })
-      .replace(/\*\*/g, "(.*)")
-      .replace(/\*/g, "([^/]+)");
+    // Build the pattern token-by-token and escape every literal character, so
+    // a plugin cannot inject regex metacharacters (and thus a ReDoS payload)
+    // through a route pattern.
+    let source = "";
+    for (let index = 0; index < normalized.length;) {
+      const token = routeTokenToRegexSource(normalized, index, paramNames);
+      source += token.source;
+      index += token.consumed;
+    }
 
     return {
-      regex: new RegExp(`^${regexStr || "/"}(?:/)?$`),
+      regex: new RegExp(`^${source || "/"}(?:/)?$`),
       paramNames,
     };
   }
