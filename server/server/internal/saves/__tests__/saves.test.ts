@@ -70,11 +70,6 @@ const objectHandler: SaveManagerDeps["objectHandler"] = {
     sink.on("finish", () => objects.set(id, Buffer.concat(chunks)));
     return sink;
   },
-  deleteWithPermission: async (id) => {
-    deleted.push(id);
-    objects.delete(id);
-    return true;
-  },
   deleteAsSystem: async (id) => {
     deleted.push(id);
     objects.delete(id);

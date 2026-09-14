@@ -7,6 +7,14 @@ export interface SaveSlotRecord {
   historyChecksums: string[];
 }
 
+/** Raised by the measuring stream when a save exceeds `saveSlotSizeLimit`. */
+class SaveSizeLimitError extends Error {
+  constructor() {
+    super("save exceeds saveSlotSizeLimit");
+    this.name = "SaveSizeLimitError";
+  }
+}
+
 /**
  * Dependencies the save pipeline needs. Declared structurally so the manager
  * can be unit-tested with fakes without importing the Prisma client, the
@@ -38,7 +46,6 @@ export interface SaveManagerDeps {
       metadata: { [key: string]: string },
       permissions: string[],
     ): Promise<NodeJS.WritableStream>;
-    deleteWithPermission(id: string, userId?: string): Promise<boolean>;
     deleteAsSystem(id: string): Promise<boolean>;
   };
   settings: {
@@ -58,10 +65,15 @@ export class SaveManager {
     userId: string,
     index: number,
     objectId: string,
-  ) {
+  ): Promise<boolean> {
     void gameId;
+    void userId;
     void index;
-    await this.deps.objectHandler.deleteWithPermission(objectId, userId);
+    // Save objects are system-tracked (`${userId}:read`) and the id is taken
+    // from the caller's own slot history, so reclaim them as the system.
+    // `deleteWithPermission` would require a `delete` grant the object is
+    // deliberately never given, silently leaking every pruned snapshot.
+    return await this.deps.objectHandler.deleteAsSystem(objectId);
   }
 
   async pushSave(
@@ -97,22 +109,37 @@ export class SaveManager {
         statusMessage: "Failed to create writing stream to storage backend.",
       });
 
+    const sizeLimitMb = await this.deps.settings.get("saveSlotSizeLimit");
+    const sizeLimitBytes = sizeLimitMb * 1024 * 1024;
+
     const hashStream = createHash("sha256");
     let totalBytes = 0;
-    stream.on("data", (chunk: Buffer) => {
-      hashStream.update(chunk);
-      totalBytes += chunk.length;
+
+    // Measure while streaming so an oversized payload is rejected before the
+    // whole archive reaches disk, rather than after an unbounded write.
+    const measuringStream = new Stream.Transform({
+      transform(chunk: Buffer, _encoding, callback) {
+        totalBytes += chunk.length;
+        if (totalBytes > sizeLimitBytes) {
+          callback(new SaveSizeLimitError());
+          return;
+        }
+        hashStream.update(chunk);
+        callback(null, chunk);
+      },
     });
 
-    await Stream.promises.pipeline(stream, newSaveStream);
-
-    const sizeLimitMb = await this.deps.settings.get("saveSlotSizeLimit");
-    if (totalBytes > sizeLimitMb * 1024 * 1024) {
+    try {
+      await Stream.promises.pipeline(stream, measuringStream, newSaveStream);
+    } catch (error) {
       await this.deps.objectHandler.deleteAsSystem(newSaveObjectId);
-      throw createError({
-        statusCode: 413,
-        statusMessage: "Save exceeds saveSlotSizeLimit",
-      });
+      if (error instanceof SaveSizeLimitError) {
+        throw createError({
+          statusCode: 413,
+          statusMessage: "Save exceeds saveSlotSizeLimit",
+        });
+      }
+      throw error;
     }
 
     const hash = hashStream.digest("hex");
