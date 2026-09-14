@@ -29,7 +29,7 @@ const broken: StoreScanner = {
 test("collectStoreGames aggregates scanners and records failures", async () => {
   const result = await collectStoreGames([steam, broken]);
   assert.equal(result.games.length, 1);
-  assert.equal(result.games[0].title, "Team Fortress 2");
+  assert.equal(result.games[0]?.title, "Team Fortress 2");
   assert.deepEqual(result.failures, [
     { store: "epic", error: "launcher not found" },
   ]);
