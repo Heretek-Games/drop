@@ -138,8 +138,10 @@ jobs:
       - name: Typecheck desktop/main
         run: pnpm -C desktop/main run typecheck
       - name: Knip report (desktop/main)
+        if: always()
         run: pnpm exec knip --directory desktop/main --reporter json --no-exit-code > desktop-knip-report.json
       - name: Upload knip report
+        if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # actions/upload-artifact@v7
         with:
           name: desktop-knip-report
