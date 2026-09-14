@@ -21,14 +21,6 @@ pub struct ScannedExecutable {
     pub size: u64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AntiCheatReport {
-    pub detected: bool,
-    pub provider: Option<String>,
-    pub files: Vec<String>,
-}
-
 /// Per-plugin allowlist of bare executable names a client plugin may run via
 /// `ctx.system.run`. Populated from `manifest.client.commands` by the host when
 /// a plugin is registered; the Tauri command layer is the enforcement point so
@@ -364,51 +356,45 @@ pub async fn plugin_game_scan_executables(
     Ok(executables)
 }
 
+/// Find files inside an installed game whose relative path contains any of the
+/// supplied patterns (case-insensitive substring). The host is deliberately
+/// agnostic about what the patterns mean, so domain knowledge (e.g. which paths
+/// indicate a particular anti-cheat or compatibility tool) lives in the calling
+/// plugin, not in core. Symlinks are never followed.
 #[tauri::command]
-pub async fn plugin_game_check_anticheat(game_id: String) -> Result<AntiCheatReport, String> {
+pub async fn plugin_game_find_files(
+    game_id: String,
+    patterns: Vec<String>,
+) -> Result<Vec<String>, String> {
     let install_dir = get_game_install_dir(&game_id)?;
-    let mut detected_files = Vec::new();
-    let mut detected_provider: Option<String> = None;
 
+    let normalized: Vec<String> = patterns
+        .into_iter()
+        .map(|pattern| pattern.trim().to_ascii_lowercase())
+        .filter(|pattern| !pattern.is_empty() && pattern.len() <= 128)
+        .collect();
+    if normalized.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let mut matches = Vec::new();
     for entry in WalkDir::new(&install_dir)
         .into_iter()
         .filter_map(|e| e.ok())
     {
         let path = entry.path();
-        let path_str = path.to_string_lossy().to_lowercase();
+        if !path.is_file() || path_guard::is_symlink(path) {
+            continue;
+        }
 
-        let provider = if path_str.contains("easyanticheat")
-            || path_str.contains("eac_server")
-            || path_str.contains("easyanticheat_x64.dll")
-        {
-            Some("easyanticheat")
-        } else if path_str.contains("battleye")
-            || path_str.contains("beservice")
-            || path_str.contains("beclient")
-        {
-            Some("battleye")
-        } else if path_str.contains("vgk.sys") || path_str.contains("vgc.exe") {
-            Some("vanguard")
-        } else if path_str.contains("denuvo") || path_str.contains("dbdata.dll") {
-            Some("denuvo")
-        } else {
-            None
+        let Ok(rel) = path.strip_prefix(&install_dir) else {
+            continue;
         };
-
-        if let Some(p) = provider
-            && let Ok(rel) = path.strip_prefix(&install_dir)
-        {
-            detected_files.push(rel.to_string_lossy().to_string());
-            if detected_provider.is_none() {
-                detected_provider = Some(p.to_string());
-            }
+        let rel_str = rel.to_string_lossy().to_ascii_lowercase();
+        if normalized.iter().any(|pattern| rel_str.contains(pattern)) {
+            matches.push(rel.to_string_lossy().to_string());
         }
     }
 
-    let detected = !detected_files.is_empty();
-    Ok(AntiCheatReport {
-        detected,
-        provider: detected_provider,
-        files: detected_files,
-    })
+    Ok(matches)
 }

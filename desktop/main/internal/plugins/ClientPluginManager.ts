@@ -2,7 +2,6 @@ import { reactive, ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type {
-  AntiCheatReport,
   ClientPlugin,
   ClientPluginContext,
   ClientPluginStorage,
@@ -153,13 +152,13 @@ class TauriScopedGameScanner implements ScopedGameScanner {
     );
   }
 
-  async checkAntiCheat(gameId: string): Promise<AntiCheatReport> {
+  async findFiles(gameId: string, patterns: string[]): Promise<string[]> {
     return (
-      (await safeInvoke<AntiCheatReport>(
-        "plugin_game_check_anticheat",
-        { gameId },
-        { detected: false, files: [] },
-      )) || { detected: false, files: [] }
+      (await safeInvoke<string[]>(
+        "plugin_game_find_files",
+        { gameId, patterns },
+        [],
+      )) || []
     );
   }
 }

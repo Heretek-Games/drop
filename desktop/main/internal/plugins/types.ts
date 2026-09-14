@@ -107,19 +107,16 @@ export interface ScopedGameFs {
   deleteFile(gameId: string, relativePath: string): Promise<void>;
 }
 
-export interface AntiCheatReport {
-  detected: boolean;
-  reason?: string;
-  provider?: string;
-  binaries?: string[];
-  files?: string[];
-}
-
 export interface ScopedGameScanner {
   scanExecutables(
     gameId: string,
   ): Promise<Array<{ relativePath: string; sha256: string; size: number }>>;
-  checkAntiCheat(gameId: string): Promise<AntiCheatReport>;
+  /**
+   * Returns the relative paths of installed files whose path contains any of
+   * the supplied patterns (case-insensitive). The host is agnostic about the
+   * patterns, so plugins own domain knowledge such as anti-cheat detection.
+   */
+  findFiles(gameId: string, patterns: string[]): Promise<string[]>;
 }
 
 export interface ClientPluginStorage {
