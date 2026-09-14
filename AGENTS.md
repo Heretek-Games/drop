@@ -239,15 +239,15 @@ Flatpak manifest. Packaging templates live in `distribution/debian/` and
 
 ## 4. Quality gates
 
-| Layer               | When       | What                                                                                                                                 |
-| :------------------ | :--------- | :----------------------------------------------------------------------------------------------------------------------------------- |
-| Editor hooks        | every edit | format-on-edit (advisory)                                                                                                            |
-| lefthook pre-commit | commit     | prettier + eslint --fix (staged), ast-grep scan, gitleaks                                                                            |
-| lefthook pre-push   | push       | server typecheck, `clippy-changed.sh` (Rust), golangci-lint, knip report                                                             |
-| GitHub Actions      | PR/push    | typecheck/lint/clippy, gitleaks history, cargo-audit ×7 crates, cargo-deny, golangci-lint                                            |
-| GitHub Actions      | PR/push    | `server-ci` test job; `ztnet-e2e` (GSE mesh, path-filtered, needs Docker)                                                            |
-| GitHub Actions      | PR/push    | `analysis` (report-only): actionlint, zizmor, shellcheck, hadolint, pnpm audit, govulncheck, cargo-machete, desktop typecheck + knip |
-| GitHub Actions      | weekly     | semgrep deep scan → Code Scanning                                                                                                    |
+| Layer               | When       | What                                                                                                                              |
+| :------------------ | :--------- | :-------------------------------------------------------------------------------------------------------------------------------- |
+| Editor hooks        | every edit | format-on-edit (advisory)                                                                                                         |
+| lefthook pre-commit | commit     | prettier + eslint --fix (staged), ast-grep scan, gitleaks                                                                         |
+| lefthook pre-push   | push       | server typecheck, `clippy-changed.sh` (Rust), golangci-lint, knip report                                                          |
+| GitHub Actions      | PR/push    | typecheck/lint/clippy, gitleaks history, cargo-audit ×7 crates, cargo-deny, golangci-lint                                         |
+| GitHub Actions      | PR/push    | `server-ci` test job; `ztnet-e2e` (GSE mesh, path-filtered, needs Docker)                                                         |
+| GitHub Actions      | PR/push    | `analysis` (blocking): actionlint, zizmor, shellcheck, hadolint, pnpm audit, govulncheck, cargo-machete, desktop typecheck + knip |
+| GitHub Actions      | weekly     | semgrep deep scan → Code Scanning                                                                                                 |
 
 Hooks are early feedback; **CI is the authority**. If a hook fails, read the
 output and fix the root cause. The documented escape hatches exist but must not
@@ -261,14 +261,14 @@ LEFTHOOK=0 git commit    # same via env var
 
 ### Rollout status (flip these when clean)
 
-- **knip**: report-only (CI `continue-on-error`, hook `|| true`). Root is now
+- **knip**: report-only (hook `|| true`, CI `--no-exit-code`). Root is now
   clean of unused files/dependencies/unlisted deps; remaining items are runtime
   false positives (unused devDeps, the `./torrential` spawn, `desktop/main`
   contract types) plus unused/duplicate exports. `desktop/main` (separate
   workspace) is analyzed with `desktop/main/knip.json` via
   `pnpm exec knip --directory desktop/main`.
-- **analysis**: report-only (every job `continue-on-error`). Promote each job to
-  blocking individually once its baseline is triaged.
+- **analysis**: blocking (promoted in `2d34bc0b` once the pinned-tool baseline
+  was clean).
 - **golangci-lint**: `--new-from-rev=origin/develop` (new issues only). Baseline:
   2 legacy issues in `core/database.go`.
 - **ast-grep**: rules at `severity: warning`; promote per-rule after cleanup.
@@ -277,9 +277,9 @@ LEFTHOOK=0 git commit    # same via env var
   and included through `src/proto/mod.rs`, which applies
   `#[allow(clippy::all, clippy::pedantic)]`, so generated code never trips the
   crate lints. `torrential-ci.yml` runs fmt + clippy + build + test.
-- **Desktop frontend typecheck**: `desktop/main` is not a root workspace member
-  and is not gated; `pnpm -C desktop/main run typecheck` currently reports
-  pre-existing errors. Don't introduce new ones.
+- **Desktop frontend typecheck**: `desktop/main` is a separate pnpm workspace,
+  but its `typecheck` is a blocking step in the analysis `desktop` job; keep
+  `pnpm -C desktop/main run typecheck` clean.
 
 ---
 

@@ -9,7 +9,7 @@ test("enqueueToast adds an unlock and deduplicates by key", () => {
     100,
   );
   assert.equal(first.length, 1);
-  assert.equal(first[0].title, "First");
+  assert.equal(first[0]?.title, "First");
 
   const duplicate = enqueueToast(first, { key: "ra:1", title: "First" }, 200);
   assert.equal(duplicate.length, 1);
@@ -17,7 +17,9 @@ test("enqueueToast adds an unlock and deduplicates by key", () => {
 
 test("dismissToast removes a toast by id", () => {
   const queue = enqueueToast([], { key: "a", title: "A" }, 0);
-  const { id } = queue[0];
+  const toast = queue[0];
+  assert.ok(toast);
+  const { id } = toast;
   assert.equal(dismissToast(queue, id).length, 0);
   assert.equal(dismissToast(queue, "missing").length, 1);
 });

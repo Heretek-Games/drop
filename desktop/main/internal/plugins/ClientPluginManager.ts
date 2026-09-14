@@ -219,6 +219,8 @@ export class ClientPluginManager {
     Array<{ pluginId: string; resolver: CloudSavePathResolver }>
   >([]);
 
+  public readonly serverWs: ClientPluginWebSocket = new TauriPluginWebSocket();
+
   public readonly isInitialized = ref(false);
 
   /**
@@ -377,7 +379,7 @@ export class ClientPluginManager {
       },
       gameFs: new TauriScopedGameFs(),
       gameScanner: new TauriScopedGameScanner(),
-      serverWs: new TauriPluginWebSocket(),
+      serverWs: this.serverWs,
       system: {
         run: (
           bin: string,
@@ -458,7 +460,8 @@ export class ClientPluginManager {
     pluginId: string,
   ): void {
     for (let i = entries.length - 1; i >= 0; i--) {
-      if (entries[i].pluginId === pluginId) {
+      const entry = entries[i];
+      if (entry?.pluginId === pluginId) {
         entries.splice(i, 1);
       }
     }
