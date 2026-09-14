@@ -159,6 +159,74 @@ impl InputBackend for MockBackend {
     }
 }
 
+/// Virtual gamepad backends Drop can target.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BackendKind {
+    /// Linux `uinput`/`evdev` virtual device (requires `/dev/uinput` access).
+    Uinput,
+    /// Windows ViGEm bus driver.
+    ViGEm,
+    /// Always-present fallback that reports unavailability.
+    Null,
+}
+
+/// Backends available on the current platform, best first. `Null` is always
+/// last so callers can surface a precise "no virtual gamepad available" error.
+#[cfg(target_os = "linux")]
+#[must_use]
+pub fn supported_backends() -> &'static [BackendKind] {
+    &[BackendKind::Uinput, BackendKind::Null]
+}
+
+#[cfg(target_os = "windows")]
+#[must_use]
+pub fn supported_backends() -> &'static [BackendKind] {
+    &[BackendKind::ViGEm, BackendKind::Null]
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "windows")))]
+#[must_use]
+pub fn supported_backends() -> &'static [BackendKind] {
+    &[BackendKind::Null]
+}
+
+/// Error returned when no native virtual-gamepad backend is available.
+#[derive(Debug)]
+pub struct BackendUnavailable;
+
+impl std::fmt::Display for BackendUnavailable {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "no virtual gamepad backend is available on this system \
+             (Linux needs /dev/uinput access; Windows needs the ViGEm bus driver)"
+        )
+    }
+}
+
+impl std::error::Error for BackendUnavailable {}
+
+/// Backend that always refuses to create a device, used when the native driver
+/// is missing so the failure is explicit rather than silent.
+#[derive(Debug, Default)]
+pub struct NullBackend;
+
+impl InputBackend for NullBackend {
+    type Error = BackendUnavailable;
+
+    fn create(&mut self) -> Result<(), Self::Error> {
+        Err(BackendUnavailable)
+    }
+
+    fn push_state(&mut self, _state: &GamepadState) -> Result<(), Self::Error> {
+        Err(BackendUnavailable)
+    }
+
+    fn destroy(&mut self) -> Result<(), Self::Error> {
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -215,5 +283,21 @@ mod tests {
         assert_eq!(backend.states.len(), 1);
         assert!(backend.destroy().is_ok());
         assert!(!backend.created);
+    }
+
+    #[test]
+    fn null_backend_reports_unavailability() {
+        let mut backend = NullBackend;
+        let error = backend.create();
+        assert!(error.is_err());
+        assert!(backend.destroy().is_ok());
+    }
+
+    #[test]
+    fn supported_backends_always_includes_the_null_fallback() {
+        let backends = supported_backends();
+        assert!(backends.contains(&BackendKind::Null));
+        #[cfg(target_os = "linux")]
+        assert!(backends.contains(&BackendKind::Uinput));
     }
 }
