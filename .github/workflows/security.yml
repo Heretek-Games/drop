@@ -64,6 +64,17 @@ jobs:
   cargo-deny:
     name: Rust dependency policy
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        crate:
+          - cli
+          - torrential
+          - desktop/src-tauri
+          - libraries/droplet
+          - libraries/droplet_types
+          - libraries/libarchive
+          - libraries/native_model
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # actions/checkout@v4
         with:
@@ -72,13 +83,14 @@ jobs:
       - uses: taiki-e/install-action@4b8992af23a2be34fd58f8d9b50d3f4939ad1891 # taiki-e/install-action@cargo-audit
         with:
           tool: cargo-deny
-      - name: Check advisories, licenses, bans and sources
-        # Uses the repository-level deny.toml. Extend the working directory (or
-        # matrix) once other crates have been triaged.
+      - name: Check advisories, licenses, bans and sources (${{ matrix.crate }})
+        # cargo-deny discovers the repository-level deny.toml by walking up from
+        # the crate directory. Vendored crates gitignore their Cargo.lock;
+        # generate one on the fly so the dependency graph can be resolved.
         run: |
           if [ ! -f Cargo.lock ]; then cargo generate-lockfile; fi
           cargo deny check
-        working-directory: torrential
+        working-directory: ${{ matrix.crate }}
 
   golangci:
     name: Go lint (backend)

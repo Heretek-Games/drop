@@ -4,6 +4,7 @@ version = "0.4.0"
 description = "The client application for the open-source, self-hosted game distribution platform Drop"
 authors = ["Drop OSS"]
 edition = "2024"
+license = "AGPL-3.0-only"
 
 [workspace]
 resolver = "3"
