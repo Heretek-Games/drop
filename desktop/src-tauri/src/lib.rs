@@ -70,6 +70,7 @@ mod process;
 mod remote;
 mod scheduler;
 mod settings;
+mod shaders;
 mod updates;
 
 use client::*;
@@ -82,6 +83,7 @@ use plugins::*;
 use process::*;
 use remote::*;
 use settings::*;
+use shaders::*;
 
 use crate::scheduler::scheduler_task;
 
@@ -291,6 +293,9 @@ pub fn run() {
             provision_ludusavi,
             // Community
             fetch_game_reviews,
+            // Shader caches
+            list_shader_caches,
+            export_shader_caches,
             // Processes
             launch_game,
             kill_game,
