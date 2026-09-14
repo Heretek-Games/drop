@@ -52,10 +52,19 @@ tests and a pushed commit; `🟡` usable contract/reference implementation;
 - **External provider credentials** — SteamGridDB/LaunchBox/ScreenScraper/
   MobyGames API keys and Stripe/BTCPay secrets are operator-supplied.
 
+## Known follow-ups
+
+- **Genericize anti-cheat detection in the desktop host.** `plugin_game_check_anticheat`
+  (`desktop/src-tauri/src/plugins.rs`) hardcodes EAC/BattlEye/Vanguard/Denuvo
+  names, and `ScopedGameScanner.checkAntiCheat` is part of the SPI. Moving this
+  knowledge into `drop-gse` (a generic "find files by name" host primitive)
+  requires a coordinated `drop-plugin-sdk` + `drop-gse` contract change, so it
+  is deferred rather than changed piecemeal.
+
 ## Verification (all green)
 
 ```sh
-pnpm --filter drop run test             # 12/12 files
+pnpm --filter drop run test             # 13/13 files
 pnpm --filter drop run typecheck        # 0
 pnpm -C desktop/main run lint           # 0 errors
 cargo +nightly test -p cloud_saves -p database -p input -p shader_cache
