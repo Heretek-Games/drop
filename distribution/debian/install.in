@@ -1,0 +1,4 @@
+drop-app usr/bin/@BIN_NAME@
+@DESKTOP_FILE@ usr/share/applications/
+@METAINFO_FILE@ usr/share/metainfo/
+@ICON_FILE@ usr/share/icons/hicolor/512x512/apps/

@@ -25,6 +25,24 @@ You can also choose to install it via `dnf`:
 sudo dnf install ./<downloaded .rpm package>
 ```
 
+## Installing from COPR
+
+Drop publishes a stable COPR project and a rolling alpha project for Fedora.
+
+Stable channel:
+
+```bash
+sudo dnf copr enable heretek-games/drop
+sudo dnf install drop-desktop-client
+```
+
+Alpha channel (bleeding-edge builds from every commit):
+
+```bash
+sudo dnf copr enable heretek-games/drop-alpha
+sudo dnf install drop-desktop-client-alpha
+```
+
 ## Uninstalling drop-app
 
 You can uninstall `libayatana-appindicator-gtk3` if no other applications depend on it,

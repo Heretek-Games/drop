@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <component type="desktop-application">
-  <id>org.heretek_games.Drop.Alpha</id>
+  <id>org.droposs.client.Alpha</id>
   <metadata_license>CC0-1.0</metadata_license>
-  <project_license>GPL-3.0-only</project_license>
+  <project_license>AGPL-3.0-only</project_license>
   <name>Drop Alpha</name>
   <summary>Self-hosted game distribution platform client (Alpha Preview)</summary>
   <description>
@@ -11,7 +11,7 @@
       Test cutting-edge features, new launch integrations, and community updates ahead of general release.
     </p>
   </description>
-  <launchable type="desktop-id">org.heretek_games.Drop.Alpha.desktop</launchable>
+  <launchable type="desktop-id">org.droposs.client.Alpha.desktop</launchable>
   <url type="homepage">https://github.com/Heretek-Games/drop</url>
   <url type="bugtracker">https://github.com/Heretek-Games/drop/issues</url>
   <developer id="org.heretek_games">

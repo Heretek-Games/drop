@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <component type="desktop-application">
-  <id>org.heretek_games.Drop</id>
+  <id>org.droposs.client</id>
   <metadata_license>CC0-1.0</metadata_license>
-  <project_license>GPL-3.0-only</project_license>
+  <project_license>AGPL-3.0-only</project_license>
   <name>Drop</name>
   <summary>Self-hosted game distribution and multiplayer platform client</summary>
   <description>
@@ -12,7 +12,7 @@
       manage, update, and launch your games with native Proton/Wine and emulator support.
     </p>
   </description>
-  <launchable type="desktop-id">org.heretek_games.Drop.desktop</launchable>
+  <launchable type="desktop-id">org.droposs.client.desktop</launchable>
   <url type="homepage">https://github.com/Heretek-Games/drop</url>
   <url type="bugtracker">https://github.com/Heretek-Games/drop/issues</url>
   <developer id="org.heretek_games">

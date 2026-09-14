@@ -197,6 +197,24 @@ Core `drop` exposes generic hook points:
 - `ModalTemplate`/`LoadingButton` live in `libraries/base/` and are auto-imported.
 - Plugin settings UI: `desktop/main/pages/settings/plugins.vue`.
 
+### 2.10 Desktop distribution channels
+
+The Tauri identifier `org.droposs.client` (alpha: `org.droposs.client.Alpha`) is
+the single reverse-DNS ID used by every packaged `.desktop`, AppStream and
+Flatpak manifest. Packaging templates live in `distribution/debian/` and
+`distribution/rpm/`, with helpers in `scripts/distro/`.
+
+- **Stable** is published manually on a `v*` tag/release by
+  `client-release.yml` (`ppa-stable`, `copr-stable`); **alpha** publishes on
+  every qualifying `develop` push via `client-alpha.yml` (`ppa-alpha`,
+  `copr-alpha`). amd64, Ubuntu jammy/noble, Fedora 41/42/rawhide.
+- Alpha versions map from semver `X.Y.Z-alpha.N.sha` (Tauri requires semver) to
+  the tilde form `X.Y.Z~alpha.N+sha` so alphas sort below stable in apt/dnf.
+- `build-deb-source.sh` wraps the prebuilt binary in a signed Debian source
+  package for Launchpad; `build-rpm-srpm.sh` builds an SRPM in a Fedora
+  container for COPR. See `distribution/README.md` for one-time setup, the
+  required repository secrets/variables and channel names.
+
 ---
 
 ## 3. Toolchain

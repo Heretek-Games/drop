@@ -1,10 +1,10 @@
-id: org.heretek_games.Drop
+id: org.droposs.client
 name: Drop
 summary: Self-hosted game distribution and multiplayer platform client
 website: https://github.com/Heretek-Games/drop
 source_url: https://github.com/Heretek-Games/drop
 build:
-  manifest: org.heretek_games.Drop.yml
+  manifest: org.droposs.client.yml
   branch: stable
   mode: extra-data
 catalog:

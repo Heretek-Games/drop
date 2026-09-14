@@ -1,5 +1,9 @@
-# Spec file for Drop Desktop Client (Fedora Copr)
-# Supports both stable and alpha channels via `--with alpha`
+# Spec file for the Drop Desktop Client (Fedora COPR)
+# Supports both stable and alpha channels via `--with alpha`.
+#
+# The Tauri client is compiled in CI and shipped prebuilt in the source
+# tarball produced by scripts/distro/build-rpm-srpm.sh, so this spec only
+# installs files.
 
 %bcond_with alpha
 
@@ -10,16 +14,16 @@
 %if %{with alpha}
 %global pkg_name drop-desktop-client-alpha
 %global bin_name drop-desktop-client-alpha
-%global desktop_file org.heretek_games.Drop.Alpha.desktop
-%global metainfo_file org.heretek_games.Drop.Alpha.metainfo.xml
-%global icon_file org.heretek_games.Drop.Alpha.png
+%global desktop_file org.droposs.client.Alpha.desktop
+%global metainfo_file org.droposs.client.Alpha.metainfo.xml
+%global icon_file org.droposs.client.Alpha.png
 %global app_title Drop Desktop Client (Alpha Preview)
 %else
 %global pkg_name drop-desktop-client
 %global bin_name drop-desktop-client
-%global desktop_file org.heretek_games.Drop.desktop
-%global metainfo_file org.heretek_games.Drop.metainfo.xml
-%global icon_file org.heretek_games.Drop.png
+%global desktop_file org.droposs.client.desktop
+%global metainfo_file org.droposs.client.metainfo.xml
+%global icon_file org.droposs.client.png
 %global app_title Drop Desktop Client
 %endif
 
@@ -28,11 +32,11 @@ Version:        %{_pkg_version}
 Release:        %{_pkg_release}%{?dist}
 Summary:        %{app_title}
 
-License:        GPL-3.0-only
+License:        AGPL-3.0-only
 URL:            https://github.com/Heretek-Games/drop
 Source0:        %{pkg_name}-%{version}.tar.gz
 
-ExclusiveArch:  x86_64 aarch64
+ExclusiveArch:  x86_64
 
 # Tauri v2 / WebKitGTK runtime dependencies on Fedora
 Requires:       webkit2gtk4.1%{?_isa}

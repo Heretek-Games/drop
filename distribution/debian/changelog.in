@@ -1,0 +1,5 @@
+@PACKAGE_NAME@ (@VERSION@) @DISTRO@; urgency=medium
+
+  * Automated @CHANNEL@ build from @COMMIT@.
+
+ -- Heretek Games <contact@heretek.games>  @DATE@

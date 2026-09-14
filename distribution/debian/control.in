@@ -8,7 +8,7 @@ Homepage: https://github.com/Heretek-Games/drop
 Rules-Requires-Root: no
 
 Package: @PACKAGE_NAME@
-Architecture: amd64 arm64
+Architecture: amd64
 Depends: ${shlibs:Depends}, ${misc:Depends}, libwebkit2gtk-4.1-0, libayatana-appindicator3-1, xdg-utils
 Description: @APP_SUMMARY@
  Drop is an open-source, self-hosted game library and distribution platform.
