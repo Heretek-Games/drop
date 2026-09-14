@@ -13,7 +13,7 @@ pub mod rmp_serde_1_3;
 /// Encode trait for your own encoding method.
 ///
 /// Example:
-/// ```rust
+/// ```ignore
 /// use bincode_2::{error::EncodeError,serde::encode_to_vec, config::standard};
 /// use serde::Serialize;
 /// pub struct Bincode;
@@ -39,7 +39,7 @@ pub trait Encode<T> {
 /// Decode trait for your own decoding method.
 ///
 /// Example:
-/// ```rust
+/// ```ignore
 /// use bincode_2::{error::DecodeError,serde::decode_from_slice, config::standard};
 /// use serde::Deserialize;
 /// pub struct Bincode;

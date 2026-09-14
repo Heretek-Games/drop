@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use cloud_saves::error::BackupError;
-use cloud_saves::transport::{parse_latest_snapshot, CloudSaveTransport, RemoteSaveSnapshot};
+use cloud_saves::transport::{CloudSaveTransport, RemoteSaveSnapshot, parse_latest_snapshot};
 use remote::auth::generate_authorization_header;
 use remote::requests::generate_url;
 use remote::utils::DROP_CLIENT_SYNC;

@@ -1,4 +1,4 @@
-use power::{decide, PowerDecision, PowerPolicy, PowerState};
+use power::{PowerDecision, PowerPolicy, PowerState, decide};
 
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]

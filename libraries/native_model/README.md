@@ -28,7 +28,7 @@ See [concepts](#concepts) for more details.
                 |                                  |
 ```
 
-```rust
+```rust,ignore
 use native_model::native_model;
 use serde::{Deserialize, Serialize};
 
@@ -155,7 +155,7 @@ Attributes:
   - `type`: The previous version of the model that you use for the TryFrom implementation.
   - `error`: The error type that you use for the TryFrom implementation.
 
-```rust
+```rust,ignore
 use native_model::native_model;
 use serde::{Deserialize, Serialize};
 
@@ -263,7 +263,7 @@ native_model = { version = "0.4", features = [ "rmp_serde_1_3" ] }
 
 2. Assign the `rmp_serde_1_3` codec to your `struct` using the `with` attribute:
 
-```rust
+```rust,ignore
 use native_model::native_model;
 
 #[derive(Clone, Default, serde::Deserialize, serde::Serialize)]

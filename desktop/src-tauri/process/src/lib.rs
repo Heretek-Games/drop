@@ -14,9 +14,9 @@ use crate::process_manager::ProcessManager;
 
 pub static PROCESS_MANAGER: ProcessManagerWrapper = ProcessManagerWrapper::new();
 
+pub mod cloud_save_transport;
 #[cfg(target_os = "linux")]
 pub mod compat;
-pub mod cloud_save_transport;
 pub mod error;
 pub mod format;
 pub mod interceptor;
@@ -37,10 +37,15 @@ impl ProcessManagerWrapper {
             .set(Mutex::new(ProcessManager::new(app_handle)))
             .unwrap_or_else(|_| panic!("Failed to initialise Process Manager")); // Using panic! here because we can't implement Debug
     }
-    pub fn register_interceptor(&self, interceptor: Arc<dyn crate::interceptor::LaunchInterceptor>) {
+    pub fn register_interceptor(
+        &self,
+        interceptor: Arc<dyn crate::interceptor::LaunchInterceptor>,
+    ) {
         self.lock().register_interceptor(interceptor);
     }
-    pub fn register_global_interceptor(interceptor: Arc<dyn crate::interceptor::LaunchInterceptor>) {
+    pub fn register_global_interceptor(
+        interceptor: Arc<dyn crate::interceptor::LaunchInterceptor>,
+    ) {
         PROCESS_MANAGER.register_interceptor(interceptor);
     }
     pub fn unregister_interceptor(&self, id: &str) {

@@ -173,7 +173,10 @@ impl ProcessManager<'_> {
             cloud_saves::CloudSaveSyncContext::new(game_id, title).with_install_dir(install_dir);
 
         #[cfg(target_os = "linux")]
-        if matches!(meta.map(|meta| meta.target_platform), Some(Platform::Windows)) {
+        if matches!(
+            meta.map(|meta| meta.target_platform),
+            Some(Platform::Windows)
+        ) {
             context = context.with_wine_prefix(
                 cloud_saves::CloudSaveSyncContext::default_wine_prefix(game_id),
             );
@@ -751,8 +754,7 @@ impl ProcessManager<'_> {
 
         // Cloud saves pre-launch hook: pull and restore the newest snapshot when
         // remote sync is available, otherwise restore the local cache.
-        let cloud_context =
-            Self::cloud_save_context(&db_lock, &meta.id, &launch_parameters.1);
+        let cloud_context = Self::cloud_save_context(&db_lock, &meta.id, &launch_parameters.1);
         let pre_launch_result = if db_lock.auth.is_some() {
             cloud_saves::sync_pre_launch_with(
                 &crate::cloud_save_transport::DropServerTransport,
