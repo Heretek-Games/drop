@@ -647,6 +647,36 @@ export class PluginManager {
     if (manifest.trust !== undefined && manifest.trust !== "trusted") {
       throw new PluginTrustError(manifest.id, manifest.trust);
     }
+    this.assertClientCommands(manifest);
+  }
+
+  /**
+   * Fail closed on the native-command capability: a plugin that declares
+   * `system:command` must ship a non-empty, bare-name `client.commands`
+   * allowlist. The desktop host enforces the same allowlist at run time; this
+   * rejects a malformed manifest before its module is imported.
+   */
+  private assertClientCommands(manifest: PluginManifest): void {
+    const capabilities = manifest.client?.capabilities ?? [];
+    if (!capabilities.includes("system:command")) return;
+    const commands = manifest.client?.commands;
+    if (!Array.isArray(commands) || commands.length === 0) {
+      throw new Error(
+        `plugin '${manifest.id}' declares 'system:command' but has no client.commands allowlist`,
+      );
+    }
+    for (const command of commands) {
+      if (typeof command !== "string" || command.trim().length === 0) {
+        throw new Error(
+          `plugin '${manifest.id}' has an invalid client.commands entry`,
+        );
+      }
+      if (command.includes("/") || command.includes("\\")) {
+        throw new Error(
+          `plugin '${manifest.id}' client.commands must be bare executable names`,
+        );
+      }
+    }
   }
 
   private assertPluginCompatible(plugin: ServerPlugin): void {

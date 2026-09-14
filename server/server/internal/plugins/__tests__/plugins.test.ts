@@ -409,6 +409,46 @@ test("PluginManager rejects unsupported trust tiers", async () => {
   });
 });
 
+test("PluginManager fails closed on system:command without a commands allowlist", async () => {
+  const entryBase64 = Buffer.from("export default {}").toString("base64");
+
+  await assert.rejects(
+    () =>
+      createTestManager().installBundle(
+        {
+          id: "native-demo",
+          name: "Native",
+          version: "1.0.0",
+          apiVersion: PLUGIN_API_VERSION,
+          targets: ["client"],
+          client: { entry: "client.js", capabilities: ["system:command"] },
+        },
+        entryBase64,
+      ),
+    /client\.commands/,
+  );
+
+  await assert.rejects(
+    () =>
+      createTestManager().installBundle(
+        {
+          id: "native-demo-2",
+          name: "Native",
+          version: "1.0.0",
+          apiVersion: PLUGIN_API_VERSION,
+          targets: ["client"],
+          client: {
+            entry: "client.js",
+            capabilities: ["system:command"],
+            commands: ["/usr/bin/zerotier-cli"],
+          },
+        },
+        entryBase64,
+      ),
+    /bare executable names/,
+  );
+});
+
 test("PluginManager runs storage migrations to the declared version", async () => {
   const storage = new MemoryStorage();
   const manager = createTestManager(storage);
