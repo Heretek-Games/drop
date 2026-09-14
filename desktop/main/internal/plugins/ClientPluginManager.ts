@@ -11,10 +11,12 @@ import type {
   HttpMethod,
   LaunchContext,
   LaunchHook,
+  MetadataProvider,
   PlayAction,
   ScopedGameFs,
   ScopedGameScanner,
   SidebarItem,
+  StoreScanner,
   TopBarItem,
   UISlotName,
   UISlotRegistration,
@@ -195,6 +197,8 @@ export class ClientPluginManager {
     "settings:tabs": [],
     "topbar:status": [],
     "sidebar:nav": [],
+    "overlay:panel": [],
+    "overlay:quick-access": [],
   });
 
   public readonly playActionProviders: Array<
@@ -204,6 +208,12 @@ export class ClientPluginManager {
   public readonly sidebarItems = reactive<SidebarItem[]>([]);
   public readonly topBarItems = reactive<TopBarItem[]>([]);
   public readonly launchHooks: LaunchHook[] = [];
+  public readonly storeScanners = reactive<
+    Array<{ pluginId: string; scanner: StoreScanner }>
+  >([]);
+  public readonly metadataProviders = reactive<
+    Array<{ pluginId: string; provider: MetadataProvider }>
+  >([]);
 
   public readonly isInitialized = ref(false);
 
@@ -214,6 +224,7 @@ export class ClientPluginManager {
     plugin: ClientPlugin,
     id?: string,
     commands: string[] = [],
+    capabilities: string[] = [],
   ): Promise<void> {
     const pluginId = id || plugin.metadata?.id || "anonymous-plugin";
     if (this.plugins.has(pluginId)) {
@@ -246,6 +257,9 @@ export class ClientPluginManager {
       },
       storage: new BrowserLocalStorage(pluginId),
       registerSlot: (slot, component, options) => {
+        if (!this.slots[slot]) {
+          this.slots[slot] = [];
+        }
         this.slots[slot].push({
           id: `${pluginId}-${slot}-${this.slots[slot].length}`,
           pluginId,
@@ -290,6 +304,48 @@ export class ClientPluginManager {
         return () => {
           const idx = this.launchHooks.indexOf(hook);
           if (idx !== -1) this.launchHooks.splice(idx, 1);
+        };
+      },
+      registerStoreScanner: (scanner: StoreScanner) => {
+        if (
+          capabilities.length > 0 &&
+          !capabilities.includes("client:library-scan")
+        ) {
+          throw new Error(
+            `Client plugin '${pluginId}' attempted 'registerStoreScanner' without the 'client:library-scan' capability`,
+          );
+        }
+        if (!scanner || typeof scanner.id !== "string" || !scanner.id.trim()) {
+          throw new Error("Store scanner must have a valid non-empty id");
+        }
+        const entry = { pluginId, scanner };
+        this.storeScanners.push(entry);
+        return () => {
+          const idx = this.storeScanners.indexOf(entry);
+          if (idx !== -1) this.storeScanners.splice(idx, 1);
+        };
+      },
+      registerMetadataProvider: (provider: MetadataProvider) => {
+        if (
+          capabilities.length > 0 &&
+          !capabilities.includes("metadata:provider")
+        ) {
+          throw new Error(
+            `Client plugin '${pluginId}' attempted 'registerMetadataProvider' without the 'metadata:provider' capability`,
+          );
+        }
+        if (
+          !provider ||
+          typeof provider.id !== "string" ||
+          !provider.id.trim()
+        ) {
+          throw new Error("Metadata provider must have a valid non-empty id");
+        }
+        const entry = { pluginId, provider };
+        this.metadataProviders.push(entry);
+        return () => {
+          const idx = this.metadataProviders.indexOf(entry);
+          if (idx !== -1) this.metadataProviders.splice(idx, 1);
         };
       },
       gameFs: new TauriScopedGameFs(),
@@ -362,6 +418,26 @@ export class ClientPluginManager {
         (s) => s.pluginId !== pluginId,
       );
     }
+
+    // Clean up store scanners and metadata providers registered by this plugin
+    for (let i = this.storeScanners.length - 1; i >= 0; i--) {
+      if (this.storeScanners[i].pluginId === pluginId) {
+        this.storeScanners.splice(i, 1);
+      }
+    }
+    for (let i = this.metadataProviders.length - 1; i >= 0; i--) {
+      if (this.metadataProviders[i].pluginId === pluginId) {
+        this.metadataProviders.splice(i, 1);
+      }
+    }
+  }
+
+  getStoreScanners(): StoreScanner[] {
+    return this.storeScanners.map((e) => e.scanner);
+  }
+
+  getMetadataProviders(): MetadataProvider[] {
+    return this.metadataProviders.map((e) => e.provider);
   }
 
   /**
@@ -372,6 +448,7 @@ export class ClientPluginManager {
     bundleUrl: string,
     cssUrl?: string,
     commands: string[] = [],
+    capabilities: string[] = [],
   ): Promise<void> {
     if (cssUrl) {
       const link = document.createElement("link");
@@ -394,7 +471,7 @@ export class ClientPluginManager {
       );
     }
 
-    await this.registerPlugin(pluginExport, pluginId, commands);
+    await this.registerPlugin(pluginExport, pluginId, commands, capabilities);
   }
 
   /**

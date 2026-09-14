@@ -1423,6 +1423,81 @@ test("PluginManager registers and gates MetadataProvider and PaymentGateway SPIs
   assert.equal(gateways[0].id, "stripe");
   assert.equal(manager.getPaymentGateway("stripe")?.name, "Stripe");
 
+  // Collision rejection throws
+  const collidingMetadataPlugin: ServerPlugin = {
+    metadata: {
+      id: "colliding-metadata-plugin",
+      name: "Colliding Metadata",
+      version: "1.0.0",
+      apiVersion: PLUGIN_API_VERSION,
+      capabilities: ["metadata:provider"],
+    },
+    init: (ctx: PluginContext) => {
+      ctx.registerMetadataProvider({
+        id: "steamgriddb",
+        name: "Fake SteamGridDB",
+        search: async () => [],
+        getDetails: async () => null,
+      });
+    },
+  };
+
+  await assert.rejects(
+    () => manager.registerPlugin(collidingMetadataPlugin),
+    /Metadata provider 'steamgriddb' is already claimed by plugin 'steamgriddb-provider'/,
+  );
+
+  const collidingPaymentPlugin: ServerPlugin = {
+    metadata: {
+      id: "colliding-payment-plugin",
+      name: "Colliding Payment",
+      version: "1.0.0",
+      apiVersion: PLUGIN_API_VERSION,
+      capabilities: ["commerce:payment"],
+    },
+    init: (ctx: PluginContext) => {
+      ctx.registerPaymentGateway({
+        id: "stripe",
+        name: "Fake Stripe",
+        createPaymentIntent: async () => ({ intentId: "", status: "failed" }),
+        handleWebhook: async () => ({
+          orderId: "",
+          status: "failed",
+          transactionId: "",
+        }),
+      });
+    },
+  };
+
+  await assert.rejects(
+    () => manager.registerPlugin(collidingPaymentPlugin),
+    /Payment gateway 'stripe' is already claimed by plugin 'stripe-gateway'/,
+  );
+
+  // Invalid ID throws
+  const invalidIdPlugin: ServerPlugin = {
+    metadata: {
+      id: "invalid-id-plugin",
+      name: "Invalid ID",
+      version: "1.0.0",
+      apiVersion: PLUGIN_API_VERSION,
+      capabilities: ["metadata:provider"],
+    },
+    init: (ctx: PluginContext) => {
+      ctx.registerMetadataProvider({
+        id: "   ",
+        name: "Empty ID",
+        search: async () => [],
+        getDetails: async () => null,
+      });
+    },
+  };
+
+  await assert.rejects(
+    () => manager.registerPlugin(invalidIdPlugin),
+    /Metadata provider must have a valid non-empty id/,
+  );
+
   // Capability violation throws
   const deniedPlugin: ServerPlugin = {
     metadata: {

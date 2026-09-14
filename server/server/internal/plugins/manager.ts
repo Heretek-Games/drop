@@ -398,6 +398,13 @@ export class PluginManager {
         return fetch(input, init);
       },
       registerMetadataProvider: (provider: MetadataProvider) => {
+        if (
+          !provider ||
+          typeof provider.id !== "string" ||
+          !provider.id.trim()
+        ) {
+          throw new Error("Metadata provider must have a valid non-empty id");
+        }
         if (!this.hasCapability(capabilities, "metadata:provider")) {
           throw new PluginCapabilityError(
             id,
@@ -405,15 +412,30 @@ export class PluginManager {
             `registerMetadataProvider(${provider.id})`,
           );
         }
+        const existing = this.metadataProviders.get(provider.id);
+        if (existing && existing.pluginId !== id) {
+          throw new Error(
+            `Metadata provider '${provider.id}' is already claimed by plugin '${existing.pluginId}'`,
+          );
+        }
         this.metadataProviders.set(provider.id, { pluginId: id, provider });
         pluginLogger.debug(`Registered metadata provider: ${provider.id}`);
       },
       registerPaymentGateway: (gateway: PaymentGateway) => {
+        if (!gateway || typeof gateway.id !== "string" || !gateway.id.trim()) {
+          throw new Error("Payment gateway must have a valid non-empty id");
+        }
         if (!this.hasCapability(capabilities, "commerce:payment")) {
           throw new PluginCapabilityError(
             id,
             "commerce:payment",
             `registerPaymentGateway(${gateway.id})`,
+          );
+        }
+        const existing = this.paymentGateways.get(gateway.id);
+        if (existing && existing.pluginId !== id) {
+          throw new Error(
+            `Payment gateway '${gateway.id}' is already claimed by plugin '${existing.pluginId}'`,
           );
         }
         this.paymentGateways.set(gateway.id, { pluginId: id, gateway });

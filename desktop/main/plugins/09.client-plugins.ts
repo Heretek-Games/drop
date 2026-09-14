@@ -18,10 +18,12 @@ interface RemotePluginInfo {
   version: string;
   status: "active" | "disabled" | "error";
   targets?: string[];
+  capabilities?: string[];
   client?: {
     entry?: string;
     css?: string;
     commands?: string[];
+    capabilities?: string[];
   };
 }
 
@@ -38,6 +40,11 @@ async function loadRemotePlugin(plugin: RemotePluginInfo): Promise<void> {
   const commands = Array.isArray(plugin.client?.commands)
     ? plugin.client.commands
     : [];
+  const capabilities = Array.isArray(plugin.client?.capabilities)
+    ? plugin.client.capabilities
+    : Array.isArray(plugin.capabilities)
+      ? plugin.capabilities
+      : [];
 
   try {
     await clientPluginManager.loadFromUrl(
@@ -45,6 +52,7 @@ async function loadRemotePlugin(plugin: RemotePluginInfo): Promise<void> {
       clientJsUrl,
       clientCssUrl,
       commands,
+      capabilities,
     );
   } catch (loadErr) {
     console.debug(

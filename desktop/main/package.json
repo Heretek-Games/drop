@@ -10,6 +10,7 @@
     "postinstall": "nuxt prepare",
     "tauri": "tauri",
     "typecheck": "nuxt typecheck",
+    "test": "node --test --import jiti/register internal/plugins/__tests__/*.test.ts",
     "lint": "pnpm run dev:prepare && eslint .",
     "lint:fix": "pnpm run dev:prepare && eslint . --fix"
   },
