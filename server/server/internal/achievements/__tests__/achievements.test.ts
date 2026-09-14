@@ -6,12 +6,16 @@ import {
   summarizeProgress,
   type AchievementRecord,
   type AchievementsDeps,
+  type LeaderboardEntryRecord,
+  type LeaderboardRecord,
 } from "../manager";
 
 function createHarness() {
   const definitions = new Map<string, AchievementRecord>();
   const unlocks = new Set<string>();
   const events: Array<{ channel: string; event: unknown }> = [];
+  const leaderboards = new Map<string, LeaderboardRecord>();
+  const leaderboardEntries = new Map<string, LeaderboardEntryRecord>();
   let nextId = 1;
 
   const keyOf = (gameId: string, key: string) => `${gameId}:${key}`;
@@ -51,6 +55,63 @@ function createHarness() {
         create: async ({ data }) => {
           unlocks.add(`${data.userId}:${data.achievementId}`);
           return { achievementId: data.achievementId, unlockedAt: new Date() };
+        },
+      },
+      leaderboard: {
+        findUnique: async ({ where }) =>
+          leaderboards.get(
+            keyOf(where.gameId_key.gameId, where.gameId_key.key),
+          ) ?? null,
+        create: async ({ data }) => {
+          const record: LeaderboardRecord = {
+            id: `lb-${nextId++}`,
+            gameId: data.gameId,
+            key: data.key,
+            name: data.name,
+            sortOrder: data.sortOrder,
+          };
+          leaderboards.set(keyOf(data.gameId, data.key), record);
+          return record;
+        },
+      },
+      leaderboardEntry: {
+        findMany: async ({ where, orderBy, take }) => {
+          const entries = [...leaderboardEntries.values()].filter(
+            (entry) => entry.leaderboardId === where.leaderboardId,
+          );
+          entries.sort((a, b) =>
+            orderBy.score === "asc" ? a.score - b.score : b.score - a.score,
+          );
+          return take ? entries.slice(0, take) : entries;
+        },
+        findUnique: async ({ where }) =>
+          leaderboardEntries.get(
+            `${where.leaderboardId_userId.leaderboardId}:${where.leaderboardId_userId.userId}`,
+          ) ?? null,
+        create: async ({ data }) => {
+          const record: LeaderboardEntryRecord = {
+            leaderboardId: data.leaderboardId,
+            userId: data.userId,
+            score: data.score,
+            updatedAt: new Date(),
+          };
+          leaderboardEntries.set(
+            `${data.leaderboardId}:${data.userId}`,
+            record,
+          );
+          return record;
+        },
+        update: async ({ where, data }) => {
+          const key = `${where.leaderboardId_userId.leaderboardId}:${where.leaderboardId_userId.userId}`;
+          const existing = leaderboardEntries.get(key);
+          if (!existing) throw new Error("missing entry");
+          const record: LeaderboardEntryRecord = {
+            ...existing,
+            score: data.score,
+            updatedAt: new Date(),
+          };
+          leaderboardEntries.set(key, record);
+          return record;
         },
       },
     },
@@ -162,4 +223,96 @@ test("summarizeProgress ignores unlocks without definitions", () => {
     totalPoints: 10,
     unlockedPoints: 10,
   });
+});
+
+test("submitScore keeps only the best result per user", async () => {
+  const { manager } = createHarness();
+
+  const first = await manager.submitScore("user-1", {
+    gameId: "game-1",
+    key: "high-score",
+    name: "High Score",
+    score: 100,
+  });
+  assert.equal(first.improved, true);
+
+  const worse = await manager.submitScore("user-1", {
+    gameId: "game-1",
+    key: "high-score",
+    name: "High Score",
+    score: 50,
+  });
+  assert.equal(worse.improved, false);
+  assert.equal(worse.entry.score, 100);
+
+  const better = await manager.submitScore("user-1", {
+    gameId: "game-1",
+    key: "high-score",
+    name: "High Score",
+    score: 150,
+  });
+  assert.equal(better.improved, true);
+  assert.equal(better.entry.score, 150);
+
+  const { entries } = await manager.listLeaderboard("game-1", "high-score");
+  assert.deepEqual(
+    entries.map((entry) => entry.score),
+    [150],
+  );
+});
+
+test("asc leaderboards keep the lowest score and list ascending", async () => {
+  const { manager } = createHarness();
+
+  await manager.submitScore("user-1", {
+    gameId: "game-1",
+    key: "fastest",
+    name: "Fastest Time",
+    sortOrder: "asc",
+    score: 30,
+  });
+  await manager.submitScore("user-2", {
+    gameId: "game-1",
+    key: "fastest",
+    name: "Fastest Time",
+    sortOrder: "asc",
+    score: 10,
+  });
+  const slower = await manager.submitScore("user-1", {
+    gameId: "game-1",
+    key: "fastest",
+    name: "Fastest Time",
+    sortOrder: "asc",
+    score: 45,
+  });
+  assert.equal(slower.improved, false);
+  assert.equal(slower.entry.score, 30);
+
+  const { entries } = await manager.listLeaderboard("game-1", "fastest");
+  assert.deepEqual(
+    entries.map((entry) => entry.score),
+    [10, 30],
+  );
+});
+
+test("listLeaderboard rejects unknown leaderboards", async () => {
+  const { manager } = createHarness();
+  await assert.rejects(
+    () => manager.listLeaderboard("game-1", "missing"),
+    /Unknown leaderboard/,
+  );
+});
+
+test("submitScore rejects non-finite scores", async () => {
+  const { manager } = createHarness();
+  await assert.rejects(
+    () =>
+      manager.submitScore("user-1", {
+        gameId: "game-1",
+        key: "score",
+        name: "Score",
+        score: Number.NaN,
+      }),
+    /finite/,
+  );
 });

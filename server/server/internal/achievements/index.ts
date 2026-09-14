@@ -16,6 +16,11 @@ export {
   type AchievementProgress,
   type AchievementRecord,
   type AchievementsDeps,
+  type LeaderboardEntryRecord,
+  type LeaderboardInput,
+  type LeaderboardRecord,
+  type LeaderboardSort,
+  type SubmitScoreInput,
   type UserAchievementRecord,
 } from "./manager";
 export default achievementManager;

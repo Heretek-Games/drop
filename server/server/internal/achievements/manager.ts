@@ -33,6 +33,34 @@ export interface AchievementProgress {
   unlockedPoints: number;
 }
 
+export type LeaderboardSort = "asc" | "desc";
+
+export interface LeaderboardRecord {
+  id: string;
+  gameId: string;
+  key: string;
+  name: string;
+  sortOrder: string;
+}
+
+export interface LeaderboardEntryRecord {
+  leaderboardId: string;
+  userId: string;
+  score: number;
+  updatedAt: Date;
+}
+
+export interface LeaderboardInput {
+  gameId: string;
+  key: string;
+  name: string;
+  sortOrder?: LeaderboardSort;
+}
+
+export interface SubmitScoreInput extends LeaderboardInput {
+  score: number;
+}
+
 /** Dependency surface kept structural so the manager is unit-testable. */
 export interface AchievementsDeps {
   prisma: {
@@ -54,6 +82,40 @@ export interface AchievementsDeps {
       create(args: {
         data: { userId: string; achievementId: string };
       }): Promise<UserAchievementRecord>;
+    };
+    leaderboard: {
+      findUnique(args: {
+        where: { gameId_key: { gameId: string; key: string } };
+      }): Promise<LeaderboardRecord | null>;
+      create(args: {
+        data: {
+          gameId: string;
+          key: string;
+          name: string;
+          sortOrder: string;
+        };
+      }): Promise<LeaderboardRecord>;
+    };
+    leaderboardEntry: {
+      findMany(args: {
+        where: { leaderboardId: string };
+        orderBy: { score: LeaderboardSort };
+        take?: number;
+      }): Promise<LeaderboardEntryRecord[]>;
+      findUnique(args: {
+        where: {
+          leaderboardId_userId: { leaderboardId: string; userId: string };
+        };
+      }): Promise<LeaderboardEntryRecord | null>;
+      create(args: {
+        data: { leaderboardId: string; userId: string; score: number };
+      }): Promise<LeaderboardEntryRecord>;
+      update(args: {
+        where: {
+          leaderboardId_userId: { leaderboardId: string; userId: string };
+        };
+        data: { score: number };
+      }): Promise<LeaderboardEntryRecord>;
     };
   };
   emit: (channel: string, event: unknown) => void;
@@ -163,5 +225,95 @@ export class AchievementManager {
       unlockedIds,
       progress: summarizeProgress(definitions, new Set(unlockedIds)),
     };
+  }
+
+  /** Idempotently registers a leaderboard for a game. */
+  async upsertLeaderboard(input: LeaderboardInput): Promise<LeaderboardRecord> {
+    const existing = await this.deps.prisma.leaderboard.findUnique({
+      where: { gameId_key: { gameId: input.gameId, key: input.key } },
+    });
+    if (existing) return existing;
+    return this.deps.prisma.leaderboard.create({
+      data: {
+        gameId: input.gameId,
+        key: input.key,
+        name: input.name,
+        sortOrder: input.sortOrder ?? "desc",
+      },
+    });
+  }
+
+  /**
+   * Records a score, keeping only the user's best result. `asc` leaderboards
+   * (e.g. fastest time) keep the lowest score; `desc` keep the highest.
+   */
+  async submitScore(
+    userId: string,
+    input: SubmitScoreInput,
+  ): Promise<{
+    leaderboard: LeaderboardRecord;
+    entry: LeaderboardEntryRecord;
+    improved: boolean;
+  }> {
+    if (!Number.isFinite(input.score)) {
+      throw createError({
+        statusCode: 400,
+        statusMessage: "score must be a finite number",
+      });
+    }
+    const leaderboard = await this.upsertLeaderboard(input);
+    const existing = await this.deps.prisma.leaderboardEntry.findUnique({
+      where: {
+        leaderboardId_userId: { leaderboardId: leaderboard.id, userId },
+      },
+    });
+    if (!existing) {
+      const entry = await this.deps.prisma.leaderboardEntry.create({
+        data: { leaderboardId: leaderboard.id, userId, score: input.score },
+      });
+      return { leaderboard, entry, improved: true };
+    }
+    const better =
+      leaderboard.sortOrder === "asc"
+        ? input.score < existing.score
+        : input.score > existing.score;
+    if (!better) {
+      return { leaderboard, entry: existing, improved: false };
+    }
+    const entry = await this.deps.prisma.leaderboardEntry.update({
+      where: {
+        leaderboardId_userId: { leaderboardId: leaderboard.id, userId },
+      },
+      data: { score: input.score },
+    });
+    return { leaderboard, entry, improved: true };
+  }
+
+  /** Lists a leaderboard's top entries in its configured order. */
+  async listLeaderboard(
+    gameId: string,
+    key: string,
+    limit = 50,
+  ): Promise<{
+    leaderboard: LeaderboardRecord;
+    entries: LeaderboardEntryRecord[];
+  }> {
+    const leaderboard = await this.deps.prisma.leaderboard.findUnique({
+      where: { gameId_key: { gameId, key } },
+    });
+    if (!leaderboard) {
+      throw createError({
+        statusCode: 404,
+        statusMessage: "Unknown leaderboard",
+      });
+    }
+    const sortOrder: LeaderboardSort =
+      leaderboard.sortOrder === "asc" ? "asc" : "desc";
+    const entries = await this.deps.prisma.leaderboardEntry.findMany({
+      where: { leaderboardId: leaderboard.id },
+      orderBy: { score: sortOrder },
+      take: limit,
+    });
+    return { leaderboard, entries };
   }
 }
