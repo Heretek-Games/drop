@@ -259,7 +259,7 @@ pub fn run() {
             plugin_game_fs_exists,
             plugin_game_fs_delete,
             plugin_game_scan_executables,
-            plugin_game_check_anticheat,
+            plugin_game_find_files,
             plugin_register_commands,
             plugin_system_run,
             // Library
