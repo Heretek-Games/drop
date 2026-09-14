@@ -11,6 +11,8 @@ pub mod ssdp;
 use std::net::SocketAddr;
 use std::time::{Duration, Instant};
 
+use sha2::{Digest, Sha256};
+
 /// A peer that advertises the same depot content on the local network.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LanPeer {
@@ -116,6 +118,55 @@ pub fn fetch_from_best_peer<F: ChunkFetcher>(
     Some(fetcher.fetch(&peer, content_id, chunk_index))
 }
 
+/// Verify that `bytes` hash to `expected_hex` (a lowercase/uppercase 64-char
+/// SHA-256 digest).
+///
+/// This is the integrity check a client must run **before committing** a
+/// peer-fetched chunk to disk: LAN peers are untrusted, so bytes are only ever
+/// trusted after they match the checksum from the local droplet manifest.
+///
+/// # Errors
+/// Returns an error string when the expected digest is malformed or the bytes
+/// do not match it.
+pub fn verify_chunk_sha256(bytes: &[u8], expected_hex: &str) -> Result<(), String> {
+    let expected = expected_hex.trim();
+    if expected.len() != 64 || !expected.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return Err(format!("invalid expected checksum '{expected_hex}'"));
+    }
+    let digest = to_hex(Sha256::digest(bytes).as_slice());
+    if digest.eq_ignore_ascii_case(expected) {
+        Ok(())
+    } else {
+        Err(format!(
+            "chunk checksum mismatch: expected {expected}, got {digest}"
+        ))
+    }
+}
+
+/// Fetch a chunk from the best live peer and only return it once its SHA-256
+/// matches the manifest checksum. Returns `None` when no live peer exists.
+pub fn fetch_verified_from_best_peer<F: ChunkFetcher>(
+    registry: &LanPeerRegistry,
+    now: Instant,
+    fetcher: &F,
+    content_id: &str,
+    chunk_index: u64,
+    expected_sha256_hex: &str,
+) -> Option<Result<Vec<u8>, String>> {
+    Some(
+        fetch_from_best_peer(registry, now, fetcher, content_id, chunk_index)?
+            .and_then(|bytes| verify_chunk_sha256(&bytes, expected_sha256_hex).map(|()| bytes)),
+    )
+}
+
+fn to_hex(bytes: &[u8]) -> String {
+    use std::fmt::Write as _;
+    bytes.iter().fold(String::new(), |mut out, byte| {
+        let _ = write!(out, "{byte:02x}");
+        out
+    })
+}
+
 /// The client-to-client HTTP URL for a chunk on a LAN peer.
 #[must_use]
 pub fn chunk_url(peer: &LanPeer, content_id: &str, chunk_index: u64) -> String {
@@ -219,6 +270,57 @@ mod tests {
         assert!(
             fetch_from_best_peer(&registry, Instant::now(), &NeverFetcher, "depot", 0).is_none()
         );
+    }
+
+    #[test]
+    fn verifies_matching_chunk_checksums() {
+        let digest = to_hex(Sha256::digest(b"hello").as_slice());
+        assert!(verify_chunk_sha256(b"hello", &digest).is_ok());
+        assert!(verify_chunk_sha256(b"hello", &digest.to_uppercase()).is_ok());
+        assert!(verify_chunk_sha256(b"hello", "not-a-valid-checksum").is_err());
+        assert!(verify_chunk_sha256(b"world", &digest).is_err());
+    }
+
+    #[test]
+    fn rejects_a_chunk_that_does_not_match_the_manifest_checksum() {
+        struct FixedFetcher(Vec<u8>);
+        impl ChunkFetcher for FixedFetcher {
+            fn fetch(
+                &self,
+                _peer: &LanPeer,
+                _content_id: &str,
+                _chunk_index: u64,
+            ) -> Result<Vec<u8>, String> {
+                Ok(self.0.clone())
+            }
+        }
+
+        let mut registry = LanPeerRegistry::new(Duration::from_secs(30));
+        let now = Instant::now();
+        registry.observe(peer("fast", 1, 100), now);
+
+        let good = b"trusted-bytes".to_vec();
+        let digest = to_hex(Sha256::digest(&good).as_slice());
+
+        let accepted = fetch_verified_from_best_peer(
+            &registry,
+            now,
+            &FixedFetcher(good.clone()),
+            "depot",
+            0,
+            &digest,
+        );
+        assert_eq!(accepted, Some(Ok(good)));
+
+        let tampered = fetch_verified_from_best_peer(
+            &registry,
+            now,
+            &FixedFetcher(b"evil-bytes".to_vec()),
+            "depot",
+            0,
+            &digest,
+        );
+        assert!(matches!(tampered, Some(Err(_))));
     }
 
     fn peer(id: &str, rtt: u32, kibps: u32) -> LanPeer {
