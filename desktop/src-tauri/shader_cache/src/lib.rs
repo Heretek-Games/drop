@@ -77,6 +77,38 @@ pub fn collect_shader_caches(
     Ok(copied)
 }
 
+/// Restore cached DXVK/VKD3D state files into the install directory before a
+/// game launches (the "sync" half of community shader pre-caching).
+///
+/// Non-cache sources are ignored. Existing files are preserved unless
+/// `overwrite` is set, so a locally warmed cache is never replaced by an older
+/// download during a normal launch.
+pub fn stage_shader_caches(
+    sources: &[PathBuf],
+    install_dir: &Path,
+    overwrite: bool,
+) -> io::Result<Vec<PathBuf>> {
+    fs::create_dir_all(install_dir)?;
+
+    let mut staged = Vec::new();
+    for source in sources {
+        if !is_shader_cache_file(source) {
+            continue;
+        }
+        let Some(name) = source.file_name() else {
+            continue;
+        };
+        let target = install_dir.join(name);
+        if target.exists() && !overwrite {
+            continue;
+        }
+        fs::copy(source, &target)?;
+        staged.push(target);
+    }
+
+    Ok(staged)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -129,5 +161,55 @@ mod tests {
             .collect();
         assert!(names.contains(&"game.dxvk-cache".to_string()));
         assert!(names.contains(&"1-game.dxvk-cache".to_string()));
+    }
+
+    #[test]
+    fn stages_only_cache_files_and_preserves_local_warm_cache() {
+        let source = tempdir().unwrap();
+        let install = tempdir().unwrap();
+        fs::write(source.path().join("game.dxvk-cache"), b"downloaded").unwrap();
+        fs::write(source.path().join("readme.txt"), b"ignore").unwrap();
+
+        let staged = stage_shader_caches(
+            &[
+                source.path().join("game.dxvk-cache"),
+                source.path().join("readme.txt"),
+            ],
+            install.path(),
+            false,
+        )
+        .unwrap();
+        assert_eq!(staged.len(), 1);
+        assert_eq!(
+            fs::read(install.path().join("game.dxvk-cache")).unwrap(),
+            b"downloaded"
+        );
+
+        // A locally warmed cache is preserved without overwrite...
+        fs::write(install.path().join("game.dxvk-cache"), b"local-warm").unwrap();
+        let preserved = stage_shader_caches(
+            &[source.path().join("game.dxvk-cache")],
+            install.path(),
+            false,
+        )
+        .unwrap();
+        assert!(preserved.is_empty());
+        assert_eq!(
+            fs::read(install.path().join("game.dxvk-cache")).unwrap(),
+            b"local-warm"
+        );
+
+        // ...and replaced when overwrite is requested.
+        let replaced = stage_shader_caches(
+            &[source.path().join("game.dxvk-cache")],
+            install.path(),
+            true,
+        )
+        .unwrap();
+        assert_eq!(replaced.len(), 1);
+        assert_eq!(
+            fs::read(install.path().join("game.dxvk-cache")).unwrap(),
+            b"downloaded"
+        );
     }
 }
