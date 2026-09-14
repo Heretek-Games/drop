@@ -63,17 +63,41 @@ tests and a pushed commit; `🟡` usable contract/reference implementation;
   fallback). `@droposs/plugin-sdk` documents `ScopedGameScanner.findFiles` and is
   bumped to `0.5.0` (npm publish pending).
 
+## Remaining work (tracked)
+
+Concrete, still-open items mapped to their tracking issues:
+
+- **Client WebRTC hole-punching validation** — the server ICE config, the
+  federation signaling relay, and the webview peer module exist; a live
+  two-peer NAT-traversal run is not automated (`drop-federation` #4, `drop` #19).
+- **Seedbox torrent-backed depot + streaming** — depot registration, health, and
+  the registry exist; piece-level range reads from torrent data and
+  play-while-download are not implemented (`drop-seedbox` #3/#4/#5).
+- **GameBox import-pipeline integration** — fingerprinting, `/identify`, save
+  paths, mirrors and moderation exist; wiring identification into the core
+  import pipeline is not done (`drop-gamebox` #5).
+- **Multi-store unified bridge** — store scanners + desktop aggregation exist;
+  launching/tracking games imported from other stores is not wired
+  (`drop` #21).
+- **GSE sidecar staging** — `gse-engine` builds a CLI binary; the client addon
+  does not invoke it yet (`drop-gse` M4).
+- **Windows ViGEm backend** and **Vulkan/DXGI overlay** — blocked on external
+  toolchains (see Hard blockers).
+
 ## Verification (all green)
 
 ```sh
-pnpm --filter drop run test             # 21/21 files
+pnpm --filter drop run test             # 22/22 files
 pnpm --filter drop run typecheck        # 0
 pnpm -C desktop/main run typecheck      # 0
 pnpm -C desktop/main run lint           # 0 errors
-cargo +nightly test -p cloud_saves -p database -p input -p shader_cache
+pnpm -C desktop/main run test           # 16 tests (planner, toasts, plugins)
+cargo +nightly test -p cloud_saves -p database -p input -p power -p shader_cache
+                                        # input 14, power 5
 cd torrential && cargo +nightly test    # 43
 cd cli && cargo +nightly test           # 9
-pnpm -r run test                        # drop-plugin-sdk
-# drop-gamebox (29), drop-federation (47), drop-seedbox (31), drop-gse
+cd drop-gse/packages/gse-engine && cargo test   # 32 lib + 3 CLI
+# drop-gamebox 29, drop-federation 52, drop-seedbox 33, drop-gse
 # (client 19 + server 15), and all 17 plugin repos: build + tests green
+# dropworks-sdk: TypeScript 4, Rust 9, C smoke, C# smoke, GDScript headless
 ```
