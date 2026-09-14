@@ -2,7 +2,7 @@ use std::{
     collections::HashMap,
     fs::{OpenOptions, create_dir_all},
     io,
-    path::PathBuf,
+    path::{Path, PathBuf},
     process::{Command, ExitStatus},
     sync::Arc,
     thread::spawn,
@@ -31,6 +31,7 @@ use crate::{
     process_handlers::{
         AsahiMuvmLauncher, LinuxNativeLauncher, MacLauncher, UMUCompatLauncher, UMUNativeLauncher,
         WindowsCmdLauncher, WindowsDirectLauncher, WindowsLauncher, WindowsPowershellLauncher,
+        browser_launch_command, is_html_launch,
     },
 };
 
@@ -335,6 +336,72 @@ impl ProcessManager<'_> {
         Ok(launch_options)
     }
 
+    /// Runs a version's optional game-provided uninstaller before the managed
+    /// install directory is removed (#235). Returns `Ok(false)` when the
+    /// version has no uninstaller registered for the target platform, and logs
+    /// (without failing the uninstall) when the uninstaller itself errors.
+    pub fn run_uninstaller(&self, meta: &DownloadableMetadata) -> Result<bool, ProcessError> {
+        let db_lock = borrow_db_checked();
+
+        let install_dir = match db_lock.applications.game_statuses.get(&meta.id) {
+            Some(GameDownloadStatus::Installed { install_dir, .. }) => install_dir.clone(),
+            _ => return Ok(false),
+        };
+
+        let game_version = db_lock
+            .applications
+            .game_versions
+            .get(&meta.version)
+            .ok_or(ProcessError::InvalidVersion)?;
+
+        let Some(uninstaller) = game_version
+            .uninstallers
+            .iter()
+            .find(|v| v.platform == meta.target_platform)
+        else {
+            return Ok(false);
+        };
+
+        let process_handler = self.fetch_process_handler(&db_lock, &meta.target_platform, None)?;
+        let launch_string = process_handler.create_launch_process(
+            meta,
+            uninstaller.command.clone(),
+            game_version,
+            &install_dir,
+            &db_lock,
+        )?;
+
+        let mut parsed = ParsedCommand::parse(launch_string)?;
+        parsed.make_command_absolute_if_local(Path::new(&install_dir));
+        parsed.ensure_executable()?;
+
+        info!(
+            "running uninstaller for {} with handler {}: {:?}",
+            meta.id,
+            process_handler.id(),
+            parsed
+        );
+
+        let mut command = Command::new(&parsed.command);
+        command.args(&parsed.args).current_dir(&install_dir);
+        for assignment in &parsed.env {
+            if let Some((key, value)) = assignment.split_once('=') {
+                command.env(key, value);
+            }
+        }
+        process_handler.modify_command(&mut command);
+
+        let status = command.status()?;
+        if !status.success() {
+            warn!(
+                "uninstaller for {} exited with status {:?}",
+                meta.id, status
+            );
+        }
+
+        Ok(true)
+    }
+
     pub fn launch_process(
         &mut self,
         game_id: String,
@@ -437,6 +504,10 @@ impl ProcessManager<'_> {
                 install_type: InstalledGameType::SetupRequired,
                 ..
             } => {
+                // Legacy fallback for versions imported before the recipe
+                // engine: only the first matching setup runs here. Versions
+                // with a pipeline recipe run every admin-registered setup in
+                // order natively (see `pipeline::append_admin_setup_steps`).
                 let setup_config = game_version
                     .setups
                     .iter()
@@ -470,7 +541,13 @@ impl ProcessManager<'_> {
 
         let mut target_command = ParsedCommand::parse(target_command)?;
 
-        let target_launch_string = if let Some(emulator) = emulator {
+        let target_launch_string = if is_html_launch(&target_command) {
+            info!(
+                "launching HTML title in the default browser (host platform {:?})",
+                self.current_platform
+            );
+            browser_launch_command(&target_command, install_dir, self.current_platform)?
+        } else if let Some(emulator) = emulator {
             let err = ProcessError::RequiredDependency(
                 emulator.game_id.clone(),
                 emulator.version_id.clone(),
@@ -578,8 +655,10 @@ impl ProcessManager<'_> {
         launch_parameters.0.ensure_executable()?;
 
         info!(
-            "launching (in {}): {:?}",
+            "launching (in {}) with handler {} for platform {:?}: {:?}",
             launch_parameters.1.to_string_lossy(),
+            process_handler.id(),
+            target_platform,
             launch_parameters.0
         );
 

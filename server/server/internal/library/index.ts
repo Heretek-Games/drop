@@ -383,6 +383,7 @@ class LibraryManager {
           // Empty setups lets importVersion auto-attach the generated
           // drop-pipeline-setup command for formats that need one.
           setups: [],
+          uninstallers: [],
           onlySetup: false,
           delta: false,
           requiredContent: [],
@@ -470,11 +471,17 @@ class LibraryManager {
         "",
         // AppImages
         ".appimage",
+        // HTML games (opened in the default browser)
+        ".html",
+        ".htm",
       ],
-      Windows: [".exe", ".bat"],
+      Windows: [".exe", ".bat", ".html", ".htm"],
       macOS: [
         // App files
         ".app",
+        // HTML games (opened in the default browser)
+        ".html",
+        ".htm",
       ],
     };
 
@@ -856,6 +863,14 @@ class LibraryManager {
               delta: metadata.delta,
 
               onlySetup: metadata.onlySetup,
+              uninstallers: {
+                createMany: {
+                  data: metadata.uninstallers.map((v) => ({
+                    command: v.launch,
+                    platform: v.platform,
+                  })),
+                },
+              },
               setups: {
                 createMany: {
                   data: (() => {

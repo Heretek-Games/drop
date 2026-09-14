@@ -112,6 +112,45 @@ fn windows_launch_command(
     Ok(parsed.reconstruct())
 }
 
+/// HTML games (Twine, etc.) are not executables: they are opened by the default
+/// browser on the machine running Drop, regardless of the target platform.
+pub fn is_html_launch(command: &ParsedCommand) -> bool {
+    Path::new(&command.command)
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .map(str::to_ascii_lowercase)
+        .is_some_and(|ext| ext == "html" || ext == "htm")
+}
+
+/// Wraps an HTML launch in the host platform's default-browser opener. This
+/// intentionally uses the host platform rather than the target platform: a
+/// Windows-targeted HTML title is still opened by the local browser. On Windows
+/// the empty second argument is `start`'s window-title placeholder.
+pub fn browser_launch_command(
+    command: &ParsedCommand,
+    current_dir: &str,
+    host_platform: Platform,
+) -> Result<String, ProcessError> {
+    let mut parsed = command.clone();
+    parsed.make_absolute(PathBuf::from(current_dir));
+
+    let (opener, mut args) = match host_platform {
+        Platform::Windows => (
+            "cmd",
+            vec!["/C".to_owned(), "start".to_owned(), String::new()],
+        ),
+        Platform::macOS => ("open", Vec::new()),
+        Platform::Linux => ("xdg-open", Vec::new()),
+    };
+
+    args.push(parsed.command.clone());
+    args.extend(parsed.args.clone());
+    parsed.command = opener.to_owned();
+    parsed.args = args;
+
+    Ok(parsed.reconstruct())
+}
+
 pub struct WindowsLauncher;
 impl ProcessHandler for WindowsLauncher {
     fn create_launch_process(
@@ -156,7 +195,11 @@ impl ProcessHandler for WindowsDirectLauncher {
         current_dir: &str,
         _database: &Database,
     ) -> Result<String, ProcessError> {
-        windows_launch_command(launch_command, current_dir, Some(WindowsLaunchStrategy::Direct))
+        windows_launch_command(
+            launch_command,
+            current_dir,
+            Some(WindowsLaunchStrategy::Direct),
+        )
     }
 
     fn valid_for_platform(&self, _db: &Database, _target: &Platform) -> bool {
@@ -190,7 +233,11 @@ impl ProcessHandler for WindowsCmdLauncher {
         current_dir: &str,
         _database: &Database,
     ) -> Result<String, ProcessError> {
-        windows_launch_command(launch_command, current_dir, Some(WindowsLaunchStrategy::Cmd))
+        windows_launch_command(
+            launch_command,
+            current_dir,
+            Some(WindowsLaunchStrategy::Cmd),
+        )
     }
 
     fn valid_for_platform(&self, _db: &Database, _target: &Platform) -> bool {
@@ -500,5 +547,57 @@ impl ProcessHandler for AsahiMuvmLauncher {
 
     fn description(&self) -> &'static str {
         "Runs through Proton inside a muvm microVM, for Apple Silicon / Asahi Linux."
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{browser_launch_command, is_html_launch};
+    use crate::{parser::ParsedCommand, process_handlers::Platform};
+
+    #[test]
+    fn detects_html_launches_case_insensitively() {
+        for command in ["game.html", "Game.HTML", "nested/game.htm"] {
+            let parsed = ParsedCommand::parse(command.to_owned()).expect("failed to parse");
+            assert!(is_html_launch(&parsed), "{command} should be HTML");
+        }
+
+        for command in ["game.exe", "game.sh", "game"] {
+            let parsed = ParsedCommand::parse(command.to_owned()).expect("failed to parse");
+            assert!(!is_html_launch(&parsed), "{command} should not be HTML");
+        }
+    }
+
+    #[test]
+    fn wraps_html_launch_for_linux() {
+        let parsed = ParsedCommand::parse("game.html".to_owned()).expect("failed to parse");
+        let wrapped =
+            browser_launch_command(&parsed, "/games/twine", Platform::Linux).expect("wrap failed");
+        let parsed = ParsedCommand::parse(wrapped).expect("failed to reparse");
+        assert_eq!(parsed.command, "xdg-open");
+        assert_eq!(parsed.args, vec!["/games/twine/game.html"]);
+    }
+
+    #[test]
+    fn wraps_html_launch_for_windows() {
+        let parsed = ParsedCommand::parse("game.html".to_owned()).expect("failed to parse");
+        let wrapped = browser_launch_command(&parsed, "C:/games/twine", Platform::Windows)
+            .expect("wrap failed");
+        let parsed = ParsedCommand::parse(wrapped).expect("failed to reparse");
+        assert_eq!(parsed.command, "cmd");
+        assert_eq!(
+            parsed.args,
+            vec!["/C", "start", "", "C:/games/twine/game.html"]
+        );
+    }
+
+    #[test]
+    fn wraps_html_launch_for_macos() {
+        let parsed = ParsedCommand::parse("Twine Game.html".to_owned()).expect("failed to parse");
+        let wrapped =
+            browser_launch_command(&parsed, "/games/twine", Platform::macOS).expect("wrap failed");
+        let parsed = ParsedCommand::parse(wrapped).expect("failed to reparse");
+        assert_eq!(parsed.command, "open");
+        assert_eq!(parsed.args, vec!["/games/twine/Twine Game.html"]);
     }
 }

@@ -86,6 +86,7 @@ export default defineEventHandler(async (h3) => {
             version: version.version,
             launches,
             setups,
+            uninstallers: [],
             onlySetup: version.setupMode,
             delta: false,
             requiredContent: [],

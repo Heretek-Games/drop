@@ -138,6 +138,7 @@ model GameVersion {
 
   launches LaunchConfiguration[]
   setups   SetupConfiguration[]
+  uninstallers UninstallConfiguration[]
 
   onlySetup Boolean @default(false)
 
@@ -154,6 +155,19 @@ model GameVersion {
 
 model SetupConfiguration {
   setupId String @id @default(uuid())
+
+  command String
+
+  platform Platform
+
+  versionId   String
+  gameVersion GameVersion @relation(fields: [versionId], references: [versionId], onDelete: Cascade, onUpdate: Cascade)
+}
+
+// An optional game-provided uninstaller, run before Drop deletes the managed
+// install directory (e.g. games that install outside the Drop-created folder).
+model UninstallConfiguration {
+  uninstallId String @id @default(uuid())
 
   command String
 

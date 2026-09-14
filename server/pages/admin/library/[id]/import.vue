@@ -145,6 +145,57 @@
           >{{ $t("common.add") }}</LoadingButton
         >
       </div>
+      <!-- uninstaller executable -->
+      <div class="bg-zinc-800 p-4 rounded-xl relative flex flex-col gap-y-2">
+        <div>
+          <p class="block text-sm font-medium leading-6 text-zinc-100">
+            {{ $t("library.admin.import.version.uninstallerCmd") }}
+          </p>
+          <p class="text-zinc-400 text-xs">
+            {{ $t("library.admin.import.version.uninstallerDesc") }}
+          </p>
+        </div>
+        <ol
+          v-if="versionSettings.uninstallers.length > 0"
+          class="divide-y-1 divide-zinc-700"
+        >
+          <li
+            v-for="(
+              uninstaller, uninstallerIdx
+            ) in versionSettings.uninstallers"
+            :key="uninstallerIdx"
+            class="py-2 inline-flex items-start gap-x-1 w-full"
+          >
+            <ImportVersionLaunchRow
+              v-model="versionSettings.uninstallers[uninstallerIdx]"
+              :version-guesses="versionGuesses"
+              :needs-name="false"
+            />
+            <button
+              type="button"
+              class="transition rounded p-1 bg-zinc-900/30 group hover:bg-red-600/30"
+              @click="
+                () => versionSettings.uninstallers.splice(uninstallerIdx, 1)
+              "
+            >
+              <TrashIcon
+                class="transition size-5 text-zinc-700 group-hover:text-red-700"
+              />
+            </button>
+          </li>
+        </ol>
+        <span
+          v-else
+          class="text-sm text-zinc-700 uppercase font-display font-bold"
+          >{{ $t("library.admin.import.version.noUninstallers") }}</span
+        >
+        <LoadingButton
+          :loading="false"
+          class="w-fit"
+          @click="() => versionSettings.uninstallers.push({} as any)"
+          >{{ $t("common.add") }}</LoadingButton
+        >
+      </div>
       <!-- setup mode -->
       <div class="relative">
         <SwitchGroup
@@ -390,6 +441,7 @@ const versionSettings = ref<Omit<typeof ImportVersion.infer, "version" | "id">>(
     onlySetup: type === GameType.Dependency,
     launches: [],
     setups: [],
+    uninstallers: [],
     requiredContent: [],
   },
 );

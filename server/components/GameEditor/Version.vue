@@ -62,6 +62,12 @@
                   scope="col"
                   class="px-3 py-3 text-left text-xs font-medium tracking-wide text-gray-400 uppercase"
                 >
+                  {{ $t("library.admin.version.table.uninstaller") }}
+                </th>
+                <th
+                  scope="col"
+                  class="px-3 py-3 text-left text-xs font-medium tracking-wide text-gray-400 uppercase"
+                >
                   {{ $t("library.admin.version.table.launch") }}
                 </th>
                 <th scope="col" class="py-3 pr-4 pl-3 sm:pr-0">
@@ -113,6 +119,23 @@
                         class="text-xs uppercase font-display text-zinc-700 font-semibold"
                       >
                         {{ $t("library.admin.version.noSetups") }}
+                      </li>
+                    </ul>
+                  </td>
+                  <td class="px-3 py-4 text-sm whitespace-nowrap text-gray-400">
+                    <ul class="space-y-2">
+                      <li
+                        v-for="uninstaller in version.uninstallers"
+                        :key="uninstaller.uninstallId"
+                        class="font-mono text-xs"
+                      >
+                        {{ uninstaller.command }} ({{ uninstaller.platform }})
+                      </li>
+                      <li
+                        v-if="version.uninstallers.length == 0"
+                        class="text-xs uppercase font-display text-zinc-700 font-semibold"
+                      >
+                        {{ $t("library.admin.version.noUninstallers") }}
                       </li>
                     </ul>
                   </td>
