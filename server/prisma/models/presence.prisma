@@ -1,0 +1,16 @@
+// Local user presence (#20 rich presence).
+
+model UserPresence {
+  userId String @id
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // online | in-game | away | offline
+  status String @default("online")
+
+  // The game currently being played, when status is "in-game".
+  gameId String?
+
+  updatedAt DateTime @updatedAt @db.Timestamptz(0)
+
+  @@index([updatedAt])
+}
