@@ -71,6 +71,7 @@ mod process;
 mod remote;
 mod scheduler;
 mod settings;
+mod presence;
 mod shaders;
 mod updates;
 
@@ -85,6 +86,7 @@ use plugins::*;
 use process::*;
 use remote::*;
 use settings::*;
+use presence::*;
 use shaders::*;
 
 use crate::scheduler::scheduler_task;
@@ -298,6 +300,9 @@ pub fn run() {
             fetch_forum_threads,
             fetch_forum_thread,
             fetch_game_screenshots,
+            // Presence
+            report_presence,
+            clear_presence,
             // Achievements
             unlock_achievements,
             // Shader caches

@@ -978,6 +978,11 @@ async function launchIndex(index: number, actionId?: string) {
         gameId: result.data[0],
         versionId: result.data[1],
       };
+    } else {
+      void invoke("report_presence", {
+        status: "in-game",
+        gameId: game.id,
+      }).catch(() => {});
     }
   } catch (e) {
     createModal(
@@ -1008,6 +1013,7 @@ async function uninstall() {
 async function kill() {
   try {
     await invoke("kill_game", { gameId: game.id });
+    void invoke("report_presence", { status: "online" }).catch(() => {});
   } catch (e) {
     createModal(
       ModalType.Notification,
