@@ -219,17 +219,24 @@ export class ObjectHandler {
    * @param id object id
    * @param sourceFetcher callback used to provide image
    * @param userId user to check, or act as anon user
+   * @param options overwrite must be opted into explicitly
    * @returns
    * @description If we need to fetch a remote resource, it doesn't make sense
    * to immediately fetch the object, *then* check permissions.
    * Instead the caller can pass a simple anonymous function, like
    * () => $dropFetch('/my-image');
    * And if we actually have permission to write, it fetches it then.
+   *
+   * Objects are create-once by default: an existing object is never clobbered
+   * unless the caller opts in. The only caller that does is the generic
+   * `POST /api/v1/object/[id]` update endpoint, whose ACL explicitly grants
+   * `object:update`; every other upload path creates a fresh object id.
    */
   async writeWithPermissions(
     id: string,
     sourceFetcher: () => Promise<Source>,
     userId?: string,
+    options?: { allowOverwrite?: boolean },
   ) {
     const metadata = await this.backend.fetchMetadata(id);
     if (!metadata) return false;
@@ -241,8 +248,9 @@ export class ObjectHandler {
 
     if (!hasPermission) return false;
 
+    if (!options?.allowOverwrite) return false;
+
     const source = await sourceFetcher();
-    // TODO: prevent user from overwriting existing object
     const result = await this.backend.write(id, source);
 
     return result;

@@ -18,10 +18,13 @@ export default defineEventHandler(async (h3) => {
   const buffer = Buffer.from(body);
 
   const id = sanitize(unsafeId);
+  // This endpoint is the explicit object-update path (`object:update`), so it
+  // opts into overwriting; every other upload path creates a fresh object id.
   const result = await objectHandler.writeWithPermissions(
     id,
     async () => buffer,
     userId,
+    { allowOverwrite: true },
   );
   return { success: result };
 });
