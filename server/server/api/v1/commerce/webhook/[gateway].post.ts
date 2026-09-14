@@ -1,4 +1,5 @@
 import pluginManager from "~/server/internal/plugins";
+import commerceManager from "~/server/internal/commerce";
 import { dispatchPaymentWebhook } from "~/server/internal/commerce/webhooks";
 
 /**
@@ -31,10 +32,20 @@ export default defineEventHandler(async (h3) => {
     }
   }
 
-  return await dispatchPaymentWebhook(
+  const result = await dispatchPaymentWebhook(
     pluginManager,
     gatewayId,
     payload,
     headers,
   );
+
+  // Mark the order paid and issue the ownership receipt. An unknown order (for
+  // example a sandbox event) must not fail the provider's webhook delivery.
+  try {
+    await commerceManager.settleOrder(result);
+  } catch (error) {
+    console.warn("commerce webhook could not settle order:", error);
+  }
+
+  return result;
 });

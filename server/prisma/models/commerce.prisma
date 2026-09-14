@@ -1,0 +1,30 @@
+// Indie commerce: purchase orders and Ed25519 ownership receipts (#21).
+
+model PurchaseOrder {
+  id String @id @default(uuid())
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  gameId String
+  game   Game   @relation(fields: [gameId], references: [id], onDelete: Cascade)
+
+  // Minor units (e.g. cents) to avoid floating-point money.
+  amount   Int
+  currency String
+
+  gateway    String
+  gatewayRef String?
+
+  // pending | succeeded | failed | refunded
+  status String @default("pending")
+
+  // JSON-encoded `PurchaseReceipt` and its base64 Ed25519 signature.
+  receipt   String?
+  signature String?
+
+  createdAt DateTime  @default(now())
+  paidAt    DateTime?
+
+  @@index([userId])
+  @@index([gateway, gatewayRef])
+}

@@ -29,6 +29,7 @@ model User {
     modSubscriptions   ModSubscription[]
     forumThreads       ForumThread[]
     forumPosts         ForumPost[]
+    purchaseOrders     PurchaseOrder[]
 
     groups UserGroup[]
 }
