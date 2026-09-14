@@ -447,19 +447,19 @@ export class ClientPluginManager {
     }
 
     // Clean up store scanners and metadata providers registered by this plugin
-    for (let i = this.storeScanners.length - 1; i >= 0; i--) {
-      if (this.storeScanners[i].pluginId === pluginId) {
-        this.storeScanners.splice(i, 1);
-      }
-    }
-    for (let i = this.metadataProviders.length - 1; i >= 0; i--) {
-      if (this.metadataProviders[i].pluginId === pluginId) {
-        this.metadataProviders.splice(i, 1);
-      }
-    }
-    for (let i = this.cloudSaveResolvers.length - 1; i >= 0; i--) {
-      if (this.cloudSaveResolvers[i].pluginId === pluginId) {
-        this.cloudSaveResolvers.splice(i, 1);
+    this.purgeOwned(this.storeScanners, pluginId);
+    this.purgeOwned(this.metadataProviders, pluginId);
+    this.purgeOwned(this.cloudSaveResolvers, pluginId);
+  }
+
+  /** Removes every reactive entry owned by `pluginId` from `entries`. */
+  private purgeOwned<T extends { pluginId: string }>(
+    entries: T[],
+    pluginId: string,
+  ): void {
+    for (let i = entries.length - 1; i >= 0; i--) {
+      if (entries[i].pluginId === pluginId) {
+        entries.splice(i, 1);
       }
     }
   }
