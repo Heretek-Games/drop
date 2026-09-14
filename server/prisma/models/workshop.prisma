@@ -1,0 +1,56 @@
+// The Drop Workshop: open mod repository (#20 / Phase 4).
+
+model Mod {
+  id String @id @default(uuid())
+
+  gameId String
+  game   Game   @relation(fields: [gameId], references: [id], onDelete: Cascade)
+
+  // Stable identifier from the mod manifest (`mod.json.id`).
+  key     String
+  name    String
+  summary String @default("")
+  author  String?
+
+  createdAt DateTime @default(now())
+
+  releases      ModRelease[]
+  subscriptions ModSubscription[]
+
+  @@unique([gameId, key])
+  @@index([gameId])
+}
+
+model ModRelease {
+  id String @id @default(uuid())
+
+  modId String
+  mod   Mod    @relation(fields: [modId], references: [id], onDelete: Cascade)
+
+  version String
+  // JSON-encoded, validated `mod.json` manifest.
+  manifest    String
+  downloadUrl String?
+  checksum    String?
+
+  createdAt DateTime @default(now())
+
+  @@unique([modId, version])
+  @@index([modId])
+}
+
+model ModSubscription {
+  id String @id @default(uuid())
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  modId String
+  mod   Mod    @relation(fields: [modId], references: [id], onDelete: Cascade)
+
+  pinnedVersion String?
+  createdAt     DateTime @default(now())
+
+  @@unique([userId, modId])
+  @@index([userId])
+}
