@@ -169,7 +169,7 @@ export default defineNuxtConfig({
     },
   },
 
-  carousel: {
+  "vue3-carousel-nuxt": {
     prefix: "Vue",
   },
 
