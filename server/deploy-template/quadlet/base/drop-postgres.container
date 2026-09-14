@@ -14,9 +14,14 @@ EnvironmentFile=%E/containers/systemd/drop.env
 Environment=POSTGRES_DB=drop
 Environment=HOSTNAME=drop-postgres
 SecurityLabelDisable=true
+HealthCmd=pg_isready -d drop -U drop
+HealthInterval=30s
+HealthTimeout=60s
+HealthRetries=5
+HealthStartPeriod=10s
 
 [Service]
 Restart=always
 
 [Install]
-WantedBy=multi-user.target
+WantedBy=multi-user.target default.target

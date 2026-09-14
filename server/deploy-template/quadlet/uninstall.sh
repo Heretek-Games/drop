@@ -37,15 +37,15 @@ echo "==> 2. Removing Quadlet unit files from ${QUADLET_DIR}..."
 rm -f "${QUADLET_DIR}/drop-network.network" \
       "${QUADLET_DIR}/drop-postgres.container" \
       "${QUADLET_DIR}/drop.container" \
-      "${QUADLET_DIR}/drop-*.volume"
+      "${QUADLET_DIR}"/drop-*.volume
 
 echo "==> 3. Reloading systemd daemon..."
 ${SYSTEMCTL} daemon-reload
 
 if [[ "$REMOVE_VOLUMES" = true ]]; then
   echo "==> 4. Purging Podman named volumes..."
-  podman volume rm -f systemd-drop-db systemd-drop-data systemd-drop-cache 2>/dev/null || true
-  podman volume rm -f drop-db drop-data drop-cache 2>/dev/null || true
+  podman volume rm -f systemd-drop-db systemd-drop-data 2>/dev/null || true
+  podman volume rm -f drop-db drop-data 2>/dev/null || true
   rm -f "${QUADLET_DIR}/drop.env"
 fi
 

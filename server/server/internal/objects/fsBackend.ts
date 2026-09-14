@@ -66,13 +66,16 @@ export class FsObjectBackend extends ObjectBackend {
 
     try {
       if (source instanceof Readable) {
+        // Truncate first so overwriting a longer object doesn't leave stale bytes
+        await handle.truncate(0);
         const outputStream = handle.createWriteStream({ autoClose: true });
         await Stream.promises.pipeline(source, outputStream);
         return true;
       }
 
       if (source instanceof Buffer) {
-        await handle.write(source, 0, source.length);
+        await handle.truncate(0);
+        await handle.writeFile(source);
         return true;
       }
 
@@ -180,7 +183,8 @@ export class FsObjectBackend extends ObjectBackend {
 
   async fetchHash(id: ObjectReference): Promise<string | undefined> {
     const cacheResult = await this.hashStore.get(id);
-    if (cacheResult !== null) return cacheResult;
+    // FsHashStore#get returns undefined on a database miss, not null
+    if (cacheResult) return cacheResult;
 
     const obj = await this.fetch(id);
     if (obj === undefined) return;

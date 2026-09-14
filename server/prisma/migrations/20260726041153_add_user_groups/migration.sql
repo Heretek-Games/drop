@@ -1,12 +1,3 @@
--- CreateEnum (guarded; databases that applied the pre-age-ratings
--- carousel migration never got this type, which previously failed this
--- migration with "type AgeRatingOrganization does not exist")
-DO $$ BEGIN
-    CREATE TYPE "AgeRatingOrganization" AS ENUM ('ESRB', 'PEGI', 'CERO', 'USK', 'GRAC', 'ClassInd', 'ACB');
-EXCEPTION
-    WHEN duplicate_object THEN null;
-END $$;
-
 -- DropIndex
 DROP INDEX "Game_mName_idx";
 

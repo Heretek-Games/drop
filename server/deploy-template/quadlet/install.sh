@@ -53,4 +53,8 @@ echo ""
 echo "==============================================================="
 echo " Drop Quadlet deployment completed successfully!"
 echo " Drop Web App: http://localhost:3000"
+if [[ $EUID -ne 0 ]]; then
+  echo " Rootless note: run 'loginctl enable-linger ${USER}' to start Drop"
+  echo " on boot without an active login session."
+fi
 echo "==============================================================="
