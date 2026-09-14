@@ -7,7 +7,7 @@ import type {
   SessionProvider,
   SessionWithToken,
 } from "./types";
-import { randomUUID } from "node:crypto";
+import { generateToken } from "../auth/tokens";
 import { parse as parseCookies } from "cookie-es";
 import type { MinimumRequestObject } from "~/server/h3";
 import type { DurationLike } from "luxon";
@@ -284,9 +284,8 @@ export class SessionHandler {
    * @returns
    */
   private createSessionCookie(h3: H3Event, expiresAt: Date) {
-    const token = randomUUID();
-    // TODO: we should probably switch to jwts to minimize possibility of someone
-    // trying to guess a session id (jwts let us sign + encrypt stuff in a std way)
+    // 256-bit opaque token; only its hash is stored (see session/db.ts).
+    const token = generateToken();
     setCookie(h3, dropTokenCookieName, token, {
       ...this.sessionCookieOptions(),
       expires: expiresAt,

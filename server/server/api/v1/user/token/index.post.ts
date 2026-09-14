@@ -2,6 +2,7 @@ import { type } from "arktype";
 import { APITokenMode } from "~/prisma/client/enums";
 import { readDropValidatedBody, throwingArktype } from "~/server/arktype";
 import aclManager, { userACLs } from "~/server/internal/acls";
+import { generateToken, hashToken } from "~/server/internal/auth/tokens";
 import prisma from "~/server/internal/db/database";
 
 const CreateToken = type({
@@ -23,8 +24,10 @@ export default defineEventHandler(async (h3) => {
       statusMessage: `Invalid ACLs: ${invalidACLs.join(", ")}`,
     });
 
+  const plaintextToken = generateToken();
   const token = await prisma.aPIToken.create({
     data: {
+      token: hashToken(plaintextToken),
       mode: APITokenMode.User,
       name: body.name,
       userId: userId,
@@ -33,5 +36,6 @@ export default defineEventHandler(async (h3) => {
     },
   });
 
-  return token;
+  // The raw token is shown once here; only its digest is persisted.
+  return { ...token, token: plaintextToken };
 });

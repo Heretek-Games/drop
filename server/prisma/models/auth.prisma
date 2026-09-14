@@ -51,7 +51,8 @@ enum APITokenMode {
 
 model APIToken {
     id    String       @id @default(uuid())
-    token String       @unique @default(uuid())
+    /// SHA-256 digest of the bearer token; the raw value is shown once on create.
+    token String       @unique
     mode  APITokenMode
     name  String
 

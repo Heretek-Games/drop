@@ -2,6 +2,7 @@ import path from "node:path";
 import fs from "node:fs";
 import type { CertificateBundle } from "./ca";
 import prisma from "../db/database";
+import { openPrivateKey, sealPrivateKey } from "./cert-secrets";
 import { systemConfig } from "../config/sys-conf";
 
 export type CertificateStore = {
@@ -40,17 +41,18 @@ export const fsCertificateStore = () => {
 export const dbCertificateStore = () => {
   const store: CertificateStore = {
     async store(name: string, data: CertificateBundle) {
+      const sealedPrivateKey = sealPrivateKey(data.priv);
       await prisma.certificate.upsert({
         where: {
           id: name,
         },
         create: {
           id: name,
-          privateKey: data.priv,
+          privateKey: sealedPrivateKey,
           certificate: data.cert,
         },
         update: {
-          privateKey: data.priv,
+          privateKey: sealedPrivateKey,
           certificate: data.cert,
         },
       });
@@ -67,7 +69,7 @@ export const dbCertificateStore = () => {
       });
       if (result === null) return undefined;
       return {
-        priv: result.privateKey,
+        priv: openPrivateKey(result.privateKey),
         cert: result.certificate,
       };
     },

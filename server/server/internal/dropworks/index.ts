@@ -1,4 +1,5 @@
 import prisma from "../db/database";
+import { hashToken } from "../auth/tokens";
 import achievementManager from "../achievements";
 import presenceManager from "../presence";
 import { APITokenMode } from "~/prisma/client/enums";
@@ -8,7 +9,7 @@ const deps: DropworksDeps = {
   resolveUserByToken: async (token) => {
     const record = await prisma.aPIToken.findUnique({
       where: {
-        token,
+        token: hashToken(token),
         mode: { in: [APITokenMode.User, APITokenMode.Client] },
       },
     });

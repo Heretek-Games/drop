@@ -1,6 +1,7 @@
 import { DateTime } from "luxon";
 
 import prisma from "../db/database";
+import { hashToken } from "../auth/tokens";
 import type { SessionProvider, SessionWithToken } from "./types";
 import cacheHandler from "../cache";
 import type { SessionWhereInput, JsonFilter } from "~/prisma/client/models";
@@ -11,14 +12,17 @@ export default function createDBSessionHandler(): SessionProvider {
 
   return {
     async setSession(token, session) {
-      await cache.set(token, { ...session, token });
+      // Only the digest is persisted; the raw cookie value never touches the DB
+      // or the cache.
+      const key = hashToken(token);
+      await cache.set(key, { ...session, token: key });
 
       const result = await prisma.session.upsert({
         where: {
-          token,
+          token: key,
         },
         create: {
-          token,
+          token: key,
           ...(session.authenticated?.userId
             ? { userId: session.authenticated?.userId }
             : undefined),
@@ -39,19 +43,20 @@ export default function createDBSessionHandler(): SessionProvider {
       return (await this.setSession(token, data)) !== undefined;
     },
     async getSession<T extends SessionWithToken>(token: string) {
-      const cached = await cache.get(token);
+      const key = hashToken(token);
+      const cached = await cache.get(key);
       if (cached !== null) return cached as T;
 
       const result = await prisma.session.findUnique({
         where: {
-          token,
+          token: key,
         },
       });
       if (result === null) return undefined;
 
       // add to cache
       // need to cast to Session since prisma returns a more specific type
-      await cache.set(token, result as SessionWithToken);
+      await cache.set(key, result as SessionWithToken);
 
       // i hate casting
       // need to cast to unknown since result.data can be an N deep json object technically
@@ -59,10 +64,11 @@ export default function createDBSessionHandler(): SessionProvider {
       return result.data as unknown as T;
     },
     async removeSession(token) {
-      await cache.remove(token);
+      const key = hashToken(token);
+      await cache.remove(key);
       const { count } = await prisma.session.deleteMany({
         where: {
-          token,
+          token: key,
         },
       });
       return count > 0;
