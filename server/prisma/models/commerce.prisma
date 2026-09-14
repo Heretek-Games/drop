@@ -28,3 +28,23 @@ model PurchaseOrder {
   @@index([userId])
   @@index([gateway, gatewayRef])
 }
+
+// Per-game price tiers shown in the storefront (#21 developer publishing).
+
+model GamePrice {
+  id String @id @default(uuid())
+
+  gameId String
+  game   Game   @relation(fields: [gameId], references: [id], onDelete: Cascade)
+
+  currency String
+  // Minor units (e.g. cents). 0 marks a free title.
+  amount   Int
+  active   Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @default(now()) @updatedAt
+
+  @@unique([gameId, currency])
+  @@index([gameId])
+}

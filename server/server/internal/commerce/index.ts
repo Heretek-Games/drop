@@ -2,6 +2,7 @@ import { createError } from "h3";
 import prisma from "../db/database";
 import pluginManager from "../plugins";
 import { CommerceManager, type CommerceDeps } from "./orders";
+import { PricingManager, type PricingDeps } from "./pricing";
 import { signReceipt, type PurchaseReceipt } from "./receipts";
 
 export const RECEIPT_SIGNING_KEY_ENV = "DROP_RECEIPT_SIGNING_KEY";
@@ -32,6 +33,13 @@ export type {
   IssuedReceipt,
   OrderRecord,
 } from "./orders";
+
+const pricingDeps: PricingDeps = {
+  prisma: prisma as unknown as PricingDeps["prisma"],
+};
+export const pricingManager = new PricingManager(pricingDeps);
+export { PricingManager };
+export type { PriceRecord, PricingDeps } from "./pricing";
 export {
   canonicalizeReceipt,
   signReceipt,
