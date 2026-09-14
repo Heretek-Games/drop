@@ -1,5 +1,5 @@
 use std::{
-    fs::{self, create_dir_all, File},
+    fs::{self, File, create_dir_all},
     io::{self, Read, Write},
     path::{Path, PathBuf},
 };
@@ -44,14 +44,40 @@ pub fn resolve(meta: &mut CloudSaveMetadata) -> File {
             None => continue,
         };
         let t_path = PathBuf::from(normalize(&file.path, os));
-        let path = parse_path(t_path, handler, &meta.game_version).unwrap();
-        let f = std::fs::metadata(&path).unwrap(); // TODO: Fix unwrap here
-        if f.is_dir() {
-            tarball.append_dir_all(&id, path).unwrap();
-        } else if f.is_file() {
-            tarball
-                .append_file(&id, &mut File::open(path).unwrap())
-                .unwrap();
+        let path = match parse_path(t_path, handler, &meta.game_version) {
+            Ok(path) => path,
+            Err(err) => {
+                warn!("Skipping save path for {:?}: {err}", &file);
+                continue;
+            }
+        };
+        let metadata = match std::fs::metadata(&path) {
+            Ok(metadata) => metadata,
+            Err(err) => {
+                warn!("Skipping save path {}: {err}", path.display());
+                continue;
+            }
+        };
+        if metadata.is_dir() {
+            if let Err(err) = tarball.append_dir_all(&id, &path) {
+                warn!("Failed to archive directory {}: {err}", path.display());
+                continue;
+            }
+        } else if metadata.is_file() {
+            let mut source = match File::open(&path) {
+                Ok(file) => file,
+                Err(err) => {
+                    warn!(
+                        "Skipping {} because it could not be opened: {err}",
+                        path.display()
+                    );
+                    continue;
+                }
+            };
+            if let Err(err) = tarball.append_file(&id, &mut source) {
+                warn!("Failed to archive file {}: {err}", path.display());
+                continue;
+            }
         }
         file.id = Some(id);
     }
