@@ -6,6 +6,8 @@
 //! QUIC/HTTP transport are separate integrations; this module fixes the
 //! selection + expiry behaviour both must agree on.
 
+pub mod ssdp;
+
 use std::net::SocketAddr;
 use std::time::{Duration, Instant};
 
