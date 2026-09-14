@@ -15,6 +15,7 @@ import {
 } from "./errors";
 import { PluginRegistry } from "./registry";
 import type {
+  CloudSavePathResolver,
   HttpMethod,
   MetadataProvider,
   PaymentGateway,
@@ -166,6 +167,10 @@ export class PluginManager {
   private readonly metadataProviders = new Map<
     string,
     { pluginId: string; provider: MetadataProvider }
+  >();
+  private readonly cloudSaveResolvers = new Map<
+    string,
+    { pluginId: string; resolver: CloudSavePathResolver }
   >();
   private readonly paymentGateways = new Map<
     string,
@@ -420,6 +425,33 @@ export class PluginManager {
         }
         this.metadataProviders.set(provider.id, { pluginId: id, provider });
         pluginLogger.debug(`Registered metadata provider: ${provider.id}`);
+      },
+      registerCloudSaveResolver: (resolver: CloudSavePathResolver) => {
+        if (
+          !resolver ||
+          typeof resolver.id !== "string" ||
+          !resolver.id.trim()
+        ) {
+          throw new Error("Cloud save resolver must have a valid non-empty id");
+        }
+        if (!this.hasCapability(capabilities, "cloudsave:provider")) {
+          throw new PluginCapabilityError(
+            id,
+            "cloudsave:provider",
+            `registerCloudSaveResolver(${resolver.id})`,
+          );
+        }
+        const existing = this.cloudSaveResolvers.get(resolver.id);
+        if (existing && existing.pluginId !== id) {
+          throw new Error(
+            `Cloud save resolver '${resolver.id}' is already claimed by plugin '${existing.pluginId}'`,
+          );
+        }
+        this.cloudSaveResolvers.set(resolver.id, {
+          pluginId: id,
+          resolver,
+        });
+        pluginLogger.debug(`Registered cloud save resolver: ${resolver.id}`);
       },
       registerPaymentGateway: (gateway: PaymentGateway) => {
         if (!gateway || typeof gateway.id !== "string" || !gateway.id.trim()) {
@@ -834,29 +866,30 @@ export class PluginManager {
     this.log.info(`Plugin ${id} unregistered`);
   }
 
+  /** Deletes every map entry whose value is owned by plugin `id`. */
+  private purgeOwned<V extends { pluginId: string }>(
+    map: Map<string, V>,
+    id: string,
+  ): void {
+    for (const [key, entry] of map) {
+      if (entry.pluginId === id) {
+        map.delete(key);
+      }
+    }
+  }
+
   /** Drop a plugin's routes, sockets and event subscriptions. */
   private releasePluginResources(id: string): void {
     this.routes.delete(id);
-    for (const [channel, entry] of this.webSockets) {
-      if (entry.pluginId === id) {
-        this.webSockets.delete(channel);
-      }
-    }
+    this.purgeOwned(this.webSockets, id);
     for (const [channel, pluginId] of this.publicChannels) {
       if (pluginId === id) {
         this.publicChannels.delete(channel);
       }
     }
-    for (const [providerId, entry] of this.metadataProviders) {
-      if (entry.pluginId === id) {
-        this.metadataProviders.delete(providerId);
-      }
-    }
-    for (const [gatewayId, entry] of this.paymentGateways) {
-      if (entry.pluginId === id) {
-        this.paymentGateways.delete(gatewayId);
-      }
-    }
+    this.purgeOwned(this.metadataProviders, id);
+    this.purgeOwned(this.cloudSaveResolvers, id);
+    this.purgeOwned(this.paymentGateways, id);
     this.subscriptionAuthorizers.delete(id);
     const subscriptions = this.pluginEventSubscriptions.get(id) ?? [];
     for (const off of subscriptions) {
@@ -1256,6 +1289,14 @@ export class PluginManager {
 
   getMetadataProvider(id: string): MetadataProvider | undefined {
     return this.metadataProviders.get(id)?.provider;
+  }
+
+  getCloudSaveResolvers(): CloudSavePathResolver[] {
+    return Array.from(this.cloudSaveResolvers.values()).map((e) => e.resolver);
+  }
+
+  getCloudSaveResolver(id: string): CloudSavePathResolver | undefined {
+    return this.cloudSaveResolvers.get(id)?.resolver;
   }
 
   getPaymentGateways(): PaymentGateway[] {

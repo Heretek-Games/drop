@@ -6,6 +6,7 @@ import type {
   ClientPluginContext,
   ClientPluginStorage,
   ClientPluginWebSocket,
+  CloudSavePathResolver,
   CommandResult,
   GameMenuItem,
   HttpMethod,
@@ -214,6 +215,9 @@ export class ClientPluginManager {
   public readonly metadataProviders = reactive<
     Array<{ pluginId: string; provider: MetadataProvider }>
   >([]);
+  public readonly cloudSaveResolvers = reactive<
+    Array<{ pluginId: string; resolver: CloudSavePathResolver }>
+  >([]);
 
   public readonly isInitialized = ref(false);
 
@@ -348,6 +352,29 @@ export class ClientPluginManager {
           if (idx !== -1) this.metadataProviders.splice(idx, 1);
         };
       },
+      registerCloudSaveResolver: (resolver: CloudSavePathResolver) => {
+        if (
+          capabilities.length > 0 &&
+          !capabilities.includes("cloudsave:provider")
+        ) {
+          throw new Error(
+            `Client plugin '${pluginId}' attempted 'registerCloudSaveResolver' without the 'cloudsave:provider' capability`,
+          );
+        }
+        if (
+          !resolver ||
+          typeof resolver.id !== "string" ||
+          !resolver.id.trim()
+        ) {
+          throw new Error("Cloud save resolver must have a valid non-empty id");
+        }
+        const entry = { pluginId, resolver };
+        this.cloudSaveResolvers.push(entry);
+        return () => {
+          const idx = this.cloudSaveResolvers.indexOf(entry);
+          if (idx !== -1) this.cloudSaveResolvers.splice(idx, 1);
+        };
+      },
       gameFs: new TauriScopedGameFs(),
       gameScanner: new TauriScopedGameScanner(),
       serverWs: new TauriPluginWebSocket(),
@@ -430,6 +457,11 @@ export class ClientPluginManager {
         this.metadataProviders.splice(i, 1);
       }
     }
+    for (let i = this.cloudSaveResolvers.length - 1; i >= 0; i--) {
+      if (this.cloudSaveResolvers[i].pluginId === pluginId) {
+        this.cloudSaveResolvers.splice(i, 1);
+      }
+    }
   }
 
   getStoreScanners(): StoreScanner[] {
@@ -438,6 +470,10 @@ export class ClientPluginManager {
 
   getMetadataProviders(): MetadataProvider[] {
     return this.metadataProviders.map((e) => e.provider);
+  }
+
+  getCloudSaveResolvers(): CloudSavePathResolver[] {
+    return this.cloudSaveResolvers.map((e) => e.resolver);
   }
 
   /**

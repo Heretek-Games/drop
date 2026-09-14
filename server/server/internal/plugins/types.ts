@@ -27,6 +27,7 @@ export type ServerCapability =
   | "events"
   | "network"
   | "metadata:provider"
+  | "cloudsave:provider"
   | "commerce:payment";
 
 export type ClientCapability =
@@ -43,6 +44,7 @@ export type ClientCapability =
   | "system:sidecar"
   | "system:command"
   | "metadata:provider"
+  | "cloudsave:provider"
   | "client:library-scan";
 
 export type PluginCapability = ServerCapability | ClientCapability;
@@ -217,6 +219,11 @@ export interface PluginContext {
    */
   registerMetadataProvider(provider: MetadataProvider): void;
   /**
+   * Register a cloud save path resolver SPI implementation.
+   * Requires the `cloudsave:provider` capability.
+   */
+  registerCloudSaveResolver(resolver: CloudSavePathResolver): void;
+  /**
    * Register a payment gateway SPI implementation.
    * Requires the `commerce:payment` capability.
    */
@@ -266,6 +273,32 @@ export interface MetadataProvider {
   name: string;
   search(query: string): Promise<MetadataSearchResult[]>;
   getDetails(id: string): Promise<MetadataDetails | null>;
+}
+
+// ==========================================
+// Cloud Save Provider SPI (#9)
+// ==========================================
+
+export interface CloudSavePattern {
+  pattern: string;
+  platform?: "windows" | "linux" | "macos";
+  winePrefix?: boolean;
+}
+
+export interface GameInstallContext {
+  gameId: string;
+  gameTitle: string;
+  installDir?: string;
+  winePrefix?: string;
+  executableName?: string;
+}
+
+export interface CloudSavePathResolver {
+  id: string;
+  name: string;
+  resolveSavePaths(
+    gameContext: GameInstallContext,
+  ): Promise<CloudSavePattern[]>;
 }
 
 // ==========================================

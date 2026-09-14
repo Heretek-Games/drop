@@ -1357,7 +1357,7 @@ test("signed bundle with FilePluginStorage survives storage mutations and reload
   }
 });
 
-test("PluginManager registers and gates MetadataProvider and PaymentGateway SPIs", async () => {
+test("PluginManager registers and gates MetadataProvider, CloudSavePathResolver, and PaymentGateway SPIs", async () => {
   const manager = createTestManager();
 
   const metadataPlugin: ServerPlugin = {
@@ -1411,6 +1411,34 @@ test("PluginManager registers and gates MetadataProvider and PaymentGateway SPIs
 
   await manager.registerPlugin(metadataPlugin);
   await manager.registerPlugin(paymentPlugin);
+
+  const cloudSavePlugin: ServerPlugin = {
+    metadata: {
+      id: "ludusavi-cloudsave",
+      name: "Ludusavi Cloud Saves",
+      version: "1.0.0",
+      apiVersion: PLUGIN_API_VERSION,
+      capabilities: ["cloudsave:provider"],
+    },
+    init: (ctx: PluginContext) => {
+      ctx.registerCloudSaveResolver({
+        id: "ludusavi",
+        name: "Ludusavi Manifest Resolver",
+        resolveSavePaths: async (gameContext) => [
+          { pattern: `%APPDATA%/${gameContext.gameTitle}/saves` },
+        ],
+      });
+    },
+  };
+  await manager.registerPlugin(cloudSavePlugin);
+
+  const resolvers = manager.getCloudSaveResolvers();
+  assert.equal(resolvers.length, 1);
+  assert.equal(resolvers[0].id, "ludusavi");
+  assert.equal(
+    manager.getCloudSaveResolver("ludusavi")?.name,
+    "Ludusavi Manifest Resolver",
+  );
 
   // Assert registered
   const providers = manager.getMetadataProviders();
@@ -1522,10 +1550,59 @@ test("PluginManager registers and gates MetadataProvider and PaymentGateway SPIs
     /attempted 'registerMetadataProvider\(denied\)' without the 'metadata:provider' capability/,
   );
 
+  // Cloud save resolver: collision, invalid id, and capability gate
+  const collidingCloudSavePlugin: ServerPlugin = {
+    metadata: {
+      id: "colliding-cloudsave-plugin",
+      name: "Colliding Cloud Save",
+      version: "1.0.0",
+      apiVersion: PLUGIN_API_VERSION,
+      capabilities: ["cloudsave:provider"],
+    },
+    init: (ctx: PluginContext) => {
+      ctx.registerCloudSaveResolver({
+        id: "ludusavi",
+        name: "Fake Ludusavi",
+        resolveSavePaths: async () => [],
+      });
+    },
+  };
+
+  await assert.rejects(
+    () => manager.registerPlugin(collidingCloudSavePlugin),
+    /Cloud save resolver 'ludusavi' is already claimed by plugin 'ludusavi-cloudsave'/,
+  );
+
+  const deniedCloudSavePlugin: ServerPlugin = {
+    metadata: {
+      id: "denied-cloudsave",
+      name: "Denied Cloud Save",
+      version: "1.0.0",
+      apiVersion: PLUGIN_API_VERSION,
+      capabilities: ["routes"],
+    },
+    init: (ctx: PluginContext) => {
+      ctx.registerCloudSaveResolver({
+        id: "denied",
+        name: "Denied",
+        resolveSavePaths: async () => [],
+      });
+    },
+  };
+
+  await assert.rejects(
+    () => manager.registerPlugin(deniedCloudSavePlugin),
+    /attempted 'registerCloudSaveResolver\(denied\)' without the 'cloudsave:provider' capability/,
+  );
+
   // Unregister cleans up SPI entries
   await manager.unregisterPlugin("steamgriddb-provider");
   assert.equal(manager.getMetadataProviders().length, 0);
   assert.equal(manager.getMetadataProvider("steamgriddb"), undefined);
+
+  await manager.unregisterPlugin("ludusavi-cloudsave");
+  assert.equal(manager.getCloudSaveResolvers().length, 0);
+  assert.equal(manager.getCloudSaveResolver("ludusavi"), undefined);
 
   await manager.unregisterPlugin("stripe-gateway");
   assert.equal(manager.getPaymentGateways().length, 0);

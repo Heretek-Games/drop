@@ -22,6 +22,7 @@ export type ClientCapability =
   | "system:sidecar"
   | "system:command"
   | "metadata:provider"
+  | "cloudsave:provider"
   | "client:library-scan";
 
 export type HttpMethod = "GET" | "POST" | "PUT" | "DELETE" | "PATCH" | "ALL";
@@ -189,6 +190,11 @@ export interface ClientPluginContext {
    * Requires the `metadata:provider` capability.
    */
   registerMetadataProvider?(provider: MetadataProvider): () => void;
+  /**
+   * Register a client-side cloud save path resolver SPI implementation.
+   * Requires the `cloudsave:provider` capability.
+   */
+  registerCloudSaveResolver?(resolver: CloudSavePathResolver): () => void;
   gameFs: ScopedGameFs;
   gameScanner: ScopedGameScanner;
   serverWs: ClientPluginWebSocket;
@@ -269,4 +275,30 @@ export interface StoreScanner {
   store: string;
   scan(): Promise<ScannedGame[]>;
   launch?(externalId: string): Promise<void>;
+}
+
+// ==========================================
+// Cloud Save Provider SPI (#9)
+// ==========================================
+
+export interface CloudSavePattern {
+  pattern: string;
+  platform?: "windows" | "linux" | "macos";
+  winePrefix?: boolean;
+}
+
+export interface GameInstallContext {
+  gameId: string;
+  gameTitle: string;
+  installDir?: string;
+  winePrefix?: string;
+  executableName?: string;
+}
+
+export interface CloudSavePathResolver {
+  id: string;
+  name: string;
+  resolveSavePaths(
+    gameContext: GameInstallContext,
+  ): Promise<CloudSavePattern[]>;
 }

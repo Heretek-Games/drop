@@ -51,6 +51,11 @@ test("Upstream Invariant: Zero-plugin baseline leaves server in pure vanilla sta
     "No metadata providers should exist by default",
   );
   assert.equal(
+    manager.getCloudSaveResolvers().length,
+    0,
+    "No cloud save resolvers should exist by default",
+  );
+  assert.equal(
     manager.getPaymentGateways().length,
     0,
     "No payment gateways should exist by default",

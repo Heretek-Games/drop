@@ -4,6 +4,7 @@ import { ClientPluginManager } from "../ClientPluginManager";
 import type {
   ClientPlugin,
   ClientPluginContext,
+  CloudSavePathResolver,
   MetadataProvider,
   StoreScanner,
 } from "../types";
@@ -72,6 +73,15 @@ test("ClientPluginManager registers StoreScanner and MetadataProvider SPIs", asy
 
   let unregisterScanner: (() => void) | undefined;
   let unregisterProvider: (() => void) | undefined;
+  let unregisterCloudSave: (() => void) | undefined;
+
+  const ludusaviResolver: CloudSavePathResolver = {
+    id: "ludusavi",
+    name: "Ludusavi",
+    resolveSavePaths: async (gameContext) => [
+      { pattern: `%APPDATA%/${gameContext.gameTitle}` },
+    ],
+  };
 
   const aggregatorPlugin: ClientPlugin = {
     metadata: {
@@ -86,6 +96,7 @@ test("ClientPluginManager registers StoreScanner and MetadataProvider SPIs", asy
           screenscraperProvider,
         );
       }
+      unregisterCloudSave = ctx.registerCloudSaveResolver?.(ludusaviResolver);
     },
   };
 
@@ -93,7 +104,7 @@ test("ClientPluginManager registers StoreScanner and MetadataProvider SPIs", asy
     aggregatorPlugin,
     "aggregator",
     [],
-    ["client:library-scan", "metadata:provider"],
+    ["client:library-scan", "metadata:provider", "cloudsave:provider"],
   );
 
   // Assert registered
@@ -107,6 +118,10 @@ test("ClientPluginManager registers StoreScanner and MetadataProvider SPIs", asy
   const providers = manager.getMetadataProviders();
   assert.equal(providers.length, 1);
   assert.equal(providers[0].id, "screenscraper");
+
+  const resolvers = manager.getCloudSaveResolvers();
+  assert.equal(resolvers.length, 1);
+  assert.equal(resolvers[0].id, "ludusavi");
 
   // Capability enforcement
   const restrictedPlugin: ClientPlugin = {
@@ -140,6 +155,9 @@ test("ClientPluginManager registers StoreScanner and MetadataProvider SPIs", asy
 
   unregisterProvider?.();
   assert.equal(manager.getMetadataProviders().length, 0);
+
+  unregisterCloudSave?.();
+  assert.equal(manager.getCloudSaveResolvers().length, 0);
 });
 
 test("ClientPluginManager cleans up SPI entries and slots on unregisterPlugin", async () => {
