@@ -54,12 +54,12 @@ tests and a pushed commit; `🟡` usable contract/reference implementation;
 
 ## Known follow-ups
 
-- **Genericize anti-cheat detection in the desktop host.** `plugin_game_check_anticheat`
-  (`desktop/src-tauri/src/plugins.rs`) hardcodes EAC/BattlEye/Vanguard/Denuvo
-  names, and `ScopedGameScanner.checkAntiCheat` is part of the SPI. Moving this
-  knowledge into `drop-gse` (a generic "find files by name" host primitive)
-  requires a coordinated `drop-plugin-sdk` + `drop-gse` contract change, so it
-  is deferred rather than changed piecemeal.
+- **Genericize anti-cheat detection in the desktop host — done.** The host now
+  exposes `plugin_game_find_files` and drops `AntiCheatReport`/`checkAntiCheat`
+  from the SPI; `drop-gse` owns the EAC/BattlEye/Vanguard/Denuvo patterns and
+  detects the capability at runtime (generic `findFiles`, legacy `checkAntiCheat`
+  fallback). `@droposs/plugin-sdk` documents `ScopedGameScanner.findFiles` and is
+  bumped to `0.5.0` (npm publish pending).
 
 ## Verification (all green)
 
