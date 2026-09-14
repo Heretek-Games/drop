@@ -33,12 +33,25 @@
   <div
     class="mt-6 rounded-xl border border-zinc-800 bg-zinc-850/60 p-5 space-y-3"
   >
-    <h4 class="text-sm font-semibold text-zinc-100">Install external bundle</h4>
+    <div class="flex items-center justify-between">
+      <h4 class="text-sm font-semibold text-zinc-100">
+        Install external bundle
+      </h4>
+      <label
+        class="cursor-pointer inline-flex items-center gap-x-1.5 rounded-md bg-zinc-800 px-3 py-1.5 text-xs font-semibold text-zinc-200 hover:bg-zinc-700 transition"
+      >
+        <span>Upload .dropplugin / JSON</span>
+        <input
+          type="file"
+          accept=".dropplugin,.json"
+          class="sr-only"
+          @change="handleFileUpload"
+        />
+      </label>
+    </div>
     <p class="text-xs text-zinc-400">
-      Paste a bundle as JSON:
-      <code class="font-mono"
-        >{ "manifest": {...}, "entry": "&lt;base64&gt;" }</code
-      >.
+      Upload a <code class="font-mono">.dropplugin</code> package, or paste
+      bundle JSON:
     </p>
     <label for="install-plugin-bundle" class="sr-only"
       >External plugin bundle JSON</label
@@ -48,7 +61,7 @@
       v-model="installJson"
       rows="4"
       class="w-full rounded-md bg-zinc-900 border border-zinc-700 px-3 py-2 text-xs font-mono text-zinc-200 focus:outline-none focus:border-purple-500"
-      placeholder='{"manifest":{"id":"my-plugin","name":"My Plugin","version":"1.0.0","apiVersion":1,"capabilities":["routes"]},"entry":"<base64>"}'
+      placeholder='{"manifest":{"id":"my-plugin","name":"My Plugin","version":"1.0.0","apiVersion":2,"capabilities":["routes"]},"entry":"<base64>"}'
     ></textarea>
     <button
       type="button"
@@ -329,6 +342,17 @@ async function handleRemovePlugin(id: string) {
 const installJson = ref("");
 const installReady = computed(() => installJson.value.trim().length > 0);
 
+function handleFileUpload(event: Event) {
+  const input = event.target as HTMLInputElement;
+  const file = input.files?.[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    installJson.value = reader.result as string;
+  };
+  reader.readAsText(file);
+}
+
 async function handleInstallBundle() {
   isLoading.value = true;
   error.value = null;
@@ -336,10 +360,12 @@ async function handleInstallBundle() {
     const parsed = JSON.parse(installJson.value) as {
       manifest?: unknown;
       entry?: string;
+      files?: Record<string, string>;
+      format?: string;
     };
-    if (!parsed?.manifest || typeof parsed.entry !== "string") {
+    if (!parsed?.manifest || (!parsed.entry && !parsed.files)) {
       throw new Error(
-        'Bundle must be { "manifest": {...}, "entry": "<base64>" }',
+        'Bundle must contain a "manifest" and either an "entry" or "files" map',
       );
     }
     await invoke("plugin_request", {

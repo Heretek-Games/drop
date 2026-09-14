@@ -702,6 +702,72 @@ test("PluginManager installs and removes external bundles", async () => {
   await assert.rejects(() => manager.removeBundle("hello-world"), /builtin/);
 });
 
+test("PluginManager installs multi-file bundles with files map", async () => {
+  const dataDir = tmpDataDir();
+  const manager = new PluginManager({
+    dataDir,
+    storageFactory: () => new MemoryStorage(),
+    authResolver: async () => ({}),
+  });
+
+  const helper = "export const val = 42;\n";
+  const helperHash = createHash("sha256").update(helper).digest("hex");
+
+  const entry =
+    "import { val } from './helper.mjs';\n" +
+    "export default { metadata: { id: 'multi-install-demo', name: 'Multi Install'," +
+    " version: '1.0.0', apiVersion: 2, capabilities: ['routes'] }," +
+    " init(ctx) { ctx.registerRoute('GET', '/check', () => ({ ok: val })); } };\n";
+  const entryHash = createHash("sha256").update(entry).digest("hex");
+
+  const filesMap = {
+    "index.mjs": Buffer.from(entry).toString("base64"),
+    "helper.mjs": Buffer.from(helper).toString("base64"),
+  };
+
+  await manager.installBundle(
+    {
+      id: "multi-install-demo",
+      name: "Multi Install",
+      version: "1.0.0",
+      apiVersion: PLUGIN_API_VERSION,
+      capabilities: ["routes"],
+      entry: "index.mjs",
+      checksum: entryHash,
+      files: {
+        "index.mjs": entryHash,
+        "helper.mjs": helperHash,
+      },
+    },
+    filesMap,
+  );
+
+  assert.equal(
+    manager.listPlugins().find((p) => p.id === "multi-install-demo")?.status,
+    "active",
+  );
+
+  // Rejects invalid file path escaping directory
+  await assert.rejects(
+    () =>
+      manager.installBundle(
+        {
+          id: "escape-demo",
+          name: "Escape",
+          version: "1.0.0",
+          apiVersion: PLUGIN_API_VERSION,
+          capabilities: ["routes"],
+        },
+        {
+          "../escaped.js": Buffer.from("console.log('escaped')").toString(
+            "base64",
+          ),
+        },
+      ),
+    /invalid bundle file path/,
+  );
+});
+
 test("PluginManager.canSubscribe enforces registered subscription authorizers", async () => {
   const manager = createTestManager();
   const plugin: ServerPlugin = {
