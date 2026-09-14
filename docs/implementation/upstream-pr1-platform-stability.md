@@ -1,9 +1,15 @@
 # Upstream PR 1 — Platform & Stability Cleanups
 
 **Target:** `Drop-OSS/drop`
-**Source:** `Heretek-Games/drop` (`upstream/pr1-platform-stability`)
+**Open PR:** [#497](https://github.com/Drop-OSS/drop/pull/497)
+**Source:** `Heretek-Games/drop` (`upstream-pr/platform-stability`)
 **Goal:** land general-purpose platform fixes with zero Heretek-domain content,
 so upstream can merge them independently of the plugin ecosystem.
+
+> [!NOTE]
+> The `upstream/pr1-platform-stability` branch on `Heretek-Games/drop` is a
+> stale duplicate (commit `536e63ac`, no PR). The branch backing #497 is
+> `upstream-pr/platform-stability`.
 
 ## Scope
 

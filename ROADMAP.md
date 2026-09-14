@@ -29,7 +29,7 @@ Steam dominates PC gaming not just because it is a store, but because it is an i
 
 - **Local LAN P2P Chunk Sharing**:
   - Automatic peer discovery via mDNS on local subnets.
-  - P2P chunk transfer over HTTP/QUIC at multi-gigabit LAN speeds, reducing WAN bandwidth during LAN parties and multi-device homes.
+  - P2P chunk transfer over HTTP at multi-gigabit LAN speeds, reducing WAN bandwidth during LAN parties and multi-device homes. (QUIC is a deferred/optional transport: only the `ChunkFetcher` contract exists today, and HTTP is the implemented transport.)
 - **`downpour push` Developer Tooling**:
   - Headless CLI for game developers to upload builds to target depots and manage release branches (`main`, `beta`, `nightly`).
   - Rolling hash chunking, Zstandard compression, and binary deltas.
