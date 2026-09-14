@@ -48,6 +48,55 @@
         No reviews yet.
       </li>
     </ul>
+
+    <section class="mt-12">
+      <h2 class="text-xl font-semibold">Discussion</h2>
+      <ul class="mt-4 space-y-2">
+        <li v-for="thread in threads" :key="thread.id">
+          <button
+            type="button"
+            class="w-full rounded-lg bg-zinc-900/60 px-4 py-3 text-left ring-1 ring-white/5 hover:ring-blue-500/40"
+            @click="openThread(thread.id)"
+          >
+            <div class="flex items-center gap-2">
+              <span class="text-sm font-medium">{{ thread.title }}</span>
+              <span
+                v-if="thread.locked"
+                class="rounded bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-400 ring-1 ring-amber-500/20"
+              >
+                Locked
+              </span>
+            </div>
+            <p class="mt-1 line-clamp-2 text-xs text-zinc-400">
+              {{ thread.body }}
+            </p>
+          </button>
+        </li>
+        <li
+          v-if="threads.length === 0 && !loading"
+          class="text-sm text-zinc-500"
+        >
+          No threads yet.
+        </li>
+      </ul>
+
+      <div
+        v-if="threadDetail"
+        class="mt-6 rounded-xl bg-zinc-900/60 p-5 ring-1 ring-white/5"
+      >
+        <h3 class="text-sm font-semibold">{{ threadDetail.thread.title }}</h3>
+        <p class="mt-2 text-sm text-zinc-300">{{ threadDetail.thread.body }}</p>
+        <ul class="mt-4 space-y-3">
+          <li
+            v-for="post in threadDetail.posts"
+            :key="post.id"
+            class="rounded-lg bg-zinc-950/60 p-3 text-sm text-zinc-300"
+          >
+            {{ post.body }}
+          </li>
+        </ul>
+      </div>
+    </section>
   </div>
 </template>
 
@@ -64,8 +113,32 @@ interface ReviewView {
   createdAt?: string;
 }
 
+interface ForumThreadView {
+  id: string;
+  userId: string;
+  title: string;
+  body: string;
+  locked: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+interface ForumPostView {
+  id: string;
+  userId: string;
+  body: string;
+  createdAt?: string;
+}
+
+interface ForumThreadDetail {
+  thread: ForumThreadView;
+  posts: ForumPostView[];
+}
+
 const gameId = ref("");
 const reviews = ref<ReviewView[]>([]);
+const threads = ref<ForumThreadView[]>([]);
+const threadDetail = ref<ForumThreadDetail>();
 const loading = ref(false);
 const error = ref<string>();
 
@@ -77,16 +150,31 @@ async function load() {
   }
   loading.value = true;
   error.value = undefined;
+  threadDetail.value = undefined;
   try {
-    reviews.value = await invoke<ReviewView[]>("fetch_game_reviews", {
-      gameId: trimmed,
-    });
+    const [reviewList, threadList] = await Promise.all([
+      invoke<ReviewView[]>("fetch_game_reviews", { gameId: trimmed }),
+      invoke<ForumThreadView[]>("fetch_forum_threads", { gameId: trimmed }),
+    ]);
+    reviews.value = reviewList;
+    threads.value = threadList;
   } catch (e) {
-    console.warn("Failed to load reviews:", e);
-    error.value = "Could not load reviews.";
+    console.warn("Failed to load community data:", e);
+    error.value = "Could not load community data.";
     reviews.value = [];
+    threads.value = [];
   } finally {
     loading.value = false;
+  }
+}
+
+async function openThread(threadId: string) {
+  try {
+    threadDetail.value = await invoke<ForumThreadDetail>("fetch_forum_thread", {
+      threadId,
+    });
+  } catch (e) {
+    console.warn("Failed to load thread:", e);
   }
 }
 </script>

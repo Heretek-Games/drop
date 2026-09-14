@@ -295,6 +295,8 @@ pub fn run() {
             provision_ludusavi,
             // Community
             fetch_game_reviews,
+            fetch_forum_threads,
+            fetch_forum_thread,
             // Achievements
             unlock_achievements,
             // Shader caches
