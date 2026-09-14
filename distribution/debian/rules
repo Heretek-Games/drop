@@ -4,7 +4,7 @@
 # The Tauri client is compiled in CI and shipped inside the source tarball, so
 # this package never configures, builds, tests, or strips anything. `dh_install`
 # places the prebuilt files using debian/<package>.install (generated from
-# install.in by scripts/distro/build-deb-source.sh).
+# install.in by scripts/distro/prepare-ppa-source.sh).
 
 export DH_VERBOSE = 1
 

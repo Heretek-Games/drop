@@ -25,38 +25,42 @@ package managers, AppStream and Flatpak agree on the application identity.
 
 ## Ubuntu PPA
 
-Templates live in `distribution/debian/`. `scripts/distro/build-deb-source.sh`
-wraps the prebuilt `drop-app` binary from the CI `.deb` in a Debian source tree
-and signs the `.dsc`/`.changes`; `dput` then uploads them to Launchpad, which
-builds the actual binary packages.
+Templates live in `distribution/debian/`. `scripts/distro/prepare-ppa-source.sh`
+wraps the prebuilt `drop-app` binary from the CI `.deb` in a source tarball plus
+a generated `debian/` directory; the
+[`yuezk/publish-ppa-package`](https://github.com/yuezk/publish-ppa-package)
+action (pinned by SHA in the workflows) then signs and uploads the source
+package, and Launchpad builds the binary packages.
 
-- Stable PPA: `ppa:droposs/drop`
-- Alpha PPA: `ppa:droposs/drop-alpha`
+- Stable PPA: `ppa:heretek-games/drop`
+- Alpha PPA: `ppa:heretek-games/drop-alpha`
+- Series: jammy (22.04) and noble (24.04), amd64
 
-Launchpad requires a unique source version per series, so each upload is
-suffixed `~ubuntu22.04.1` / `~ubuntu24.04.1`. Alpha upstream versions use `~`
-(e.g. `0.4.0~alpha.42+abc1234`) so they sort below `0.4.0` and `apt upgrade`
-moves testers onto stable cleanly.
+Launchpad requires a unique source version per series, so the action suffixes
+each upload with `{REVISION}~ubuntu<SERIES_VERSION>.1` (stable revision `1`,
+alpha revision `0`). Alpha upstream versions use `~` (e.g.
+`0.4.0~alpha.42+abc1234`) so they sort below `0.4.0` and `apt upgrade` moves
+testers onto stable cleanly.
 
 ### One-time setup
 
-1. Create a Launchpad account (or team) and PPAs named `drop` and `drop-alpha`
-   under it. The production namespace is `droposs` (<https://launchpad.net/droposs>).
-2. Create a dedicated GPG signing key and register its **public** key on
-   Launchpad (Account → OpenPGP keys).
+1. Create a Launchpad **team** (e.g. `heretek-games`) and add the uploader
+   (`~germproof471`); create PPAs `drop` and `drop-alpha` under it.
+2. Create a dedicated GPG signing key, register its **public** key on the
+   uploader's Launchpad account, and make the uploader a team member with
+   upload rights.
 3. Add repository secrets:
-   - `PPA_GPG_PRIVATE_KEY` — base64 of the ASCII-armored private key:
-     `gpg --export-secret-keys --armor <KEYID> | base64 -w0`
-   - `PPA_GPG_KEY_ID` — full fingerprint or key ID
+   - `PPA_GPG_PRIVATE_KEY` — ASCII-armored private key. The action runs
+     `gpg --import` on it verbatim, so this must **not** be base64:
+     `gpg --armor --export-secret-keys <KEYID>`
    - `PPA_GPG_PASSPHRASE` — key passphrase (omit for an unprotected key)
-4. Add repository variables:
-   - `PPA_STABLE` = `ppa:droposs/drop`
-   - `PPA_ALPHA` = `ppa:droposs/drop-alpha`
+4. Add repository variables (`owner/archive` format):
+   - `PPA_STABLE` = `heretek-games/drop`
+   - `PPA_ALPHA` = `heretek-games/drop-alpha`
 
-Uploads use Launchpad's anonymous FTP endpoint and are authenticated by the GPG
-signature on the `.changes` file. `scripts/distro/setup-gpg.sh` imports the key
-and presets the passphrase for non-interactive `debsign`. Local dry runs can use
-`build-deb-source.sh --no-sign` (which passes `-us -uc`).
+The action derives the signing key ID from the imported key and uploads over
+Launchpad's anonymous FTP endpoint, authenticated by the GPG signature on the
+`.changes` file.
 
 ## Fedora COPR
 
@@ -66,7 +70,7 @@ SRPM inside a Fedora container, then `copr-cli` submits it.
 
 - Stable project: `heretek-ai/drop`
 - Alpha project: `heretek-ai/drop-alpha`
-- Chroots: `fedora-41-x86_64`, `fedora-42-x86_64`, `fedora-rawhide-x86_64`
+- Chroots: `fedora-43-x86_64`, `fedora-44-x86_64`, `fedora-45-x86_64`
 
 The channel is baked into the SRPM by flipping the spec's `%bcond_with alpha`
 to `%bcond_without alpha`; command-line `--with` flags are not persisted in an

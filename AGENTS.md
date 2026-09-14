@@ -207,12 +207,13 @@ Flatpak manifest. Packaging templates live in `distribution/debian/` and
 - **Stable** is published manually on a `v*` tag/release by
   `client-release.yml` (`ppa-stable`, `copr-stable`); **alpha** publishes on
   every qualifying `develop` push via `client-alpha.yml` (`ppa-alpha`,
-  `copr-alpha`). amd64, Ubuntu jammy/noble, Fedora 41/42/rawhide.
+  `copr-alpha`). amd64, Ubuntu jammy/noble, Fedora 43/44/45.
 - Alpha versions map from semver `X.Y.Z-alpha.N.sha` (Tauri requires semver) to
   the tilde form `X.Y.Z~alpha.N+sha` so alphas sort below stable in apt/dnf.
-- `build-deb-source.sh` wraps the prebuilt binary in a signed Debian source
-  package for Launchpad; `build-rpm-srpm.sh` builds an SRPM in a Fedora
-  container for COPR. See `distribution/README.md` for one-time setup, the
+- `prepare-ppa-source.sh` builds the tarball + generated `debian/` consumed by
+  the pinned `yuezk/publish-ppa-package` action for Launchpad;
+  `build-rpm-srpm.sh` builds an SRPM in a Fedora container for COPR (submitted
+  with `copr-cli`). See `distribution/README.md` for one-time setup, the
   required repository secrets/variables and channel names.
 
 ---

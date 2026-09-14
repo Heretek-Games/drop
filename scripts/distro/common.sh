@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Shared helpers for the distribution packaging scripts.
 #
-# Sourced by scripts/distro/build-deb-source.sh and
+# Sourced by scripts/distro/prepare-ppa-source.sh and
 # scripts/distro/build-rpm-srpm.sh. Not meant to be executed directly.
 
 die() {
@@ -56,24 +56,6 @@ distro_upstream_version() {
   *)
     die "unknown channel: $channel"
     ;;
-  esac
-}
-
-# Debian revision prefix: stable starts at 1, alpha at 0.
-distro_debian_revision_prefix() {
-  case "$1" in
-  stable) printf '1' ;;
-  alpha) printf '0' ;;
-  *) die "unknown channel: $1" ;;
-  esac
-}
-
-# Ubuntu series -> series version used in the Launchpad version suffix.
-distro_ubuntu_version() {
-  case "$1" in
-  jammy) printf '22.04' ;;
-  noble) printf '24.04' ;;
-  *) die "unknown Ubuntu series: $1" ;;
   esac
 }
 

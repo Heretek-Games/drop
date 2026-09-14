@@ -1,4 +1,4 @@
-@PACKAGE_NAME@ (@VERSION@) @DISTRO@; urgency=medium
+@PACKAGE_NAME@ (@UPSTREAM@) UNRELEASED; urgency=medium
 
   * Automated @CHANNEL@ build from @COMMIT@.
 

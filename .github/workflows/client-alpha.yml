@@ -147,35 +147,35 @@ jobs:
           name: drop-alpha-deb
           path: dist/deb
 
-      - name: install packaging tools
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y dput devscripts debhelper gnupg
-
-      - name: import PPA signing key
+      - name: prepare PPA source
+        id: ppa
         env:
-          PPA_GPG_PRIVATE_KEY: ${{ secrets.PPA_GPG_PRIVATE_KEY }}
-          PPA_GPG_KEY_ID: ${{ secrets.PPA_GPG_KEY_ID }}
-          PPA_GPG_PASSPHRASE: ${{ secrets.PPA_GPG_PASSPHRASE }}
-        run: scripts/distro/setup-gpg.sh
-
-      - name: build and upload Debian source packages
-        env:
-          PPA_GPG_KEY_ID: ${{ secrets.PPA_GPG_KEY_ID }}
           ALPHA_VERSION: ${{ needs.build-and-publish-alpha.outputs.alpha_version }}
         run: |
           set -euo pipefail
-          : "${PPA_ALPHA:?PPA_ALPHA repository variable is not set}"
           deb="$(find dist/deb -maxdepth 1 -name '*_amd64.deb' -print -quit)"
           [ -n "$deb" ] || { echo "no alpha deb artifact found" >&2; exit 1; }
-          scripts/distro/build-deb-source.sh \
+          scripts/distro/prepare-ppa-source.sh \
             --channel alpha \
             --version "$ALPHA_VERSION" \
             --deb "$deb" \
-            --outdir dist/ppa
-          for changes in dist/ppa/*/*_source.changes; do
-            dput "$PPA_ALPHA" "$changes"
-          done
+            --outdir dist/ppa >> "$GITHUB_OUTPUT"
+
+      - name: publish to Launchpad PPA
+        uses: yuezk/publish-ppa-package@3e4da8d50b48950e8a84cd4302f031a17b5bfd27 # v2.0.1
+        with:
+          repository: ${{ env.PPA_ALPHA }}
+          series: "jammy noble"
+          revision: "0"
+          include_orig: auto
+          debmake_arguments: "-y"
+          new_version_template: "{VERSION}-{REVISION}~ubuntu{SERIES_VERSION}.1"
+          tarball: ${{ steps.ppa.outputs.tarball }}
+          debian_dir: ${{ steps.ppa.outputs.debian_dir }}
+          deb_email: contact@heretek.games
+          deb_fullname: Heretek Games
+          gpg_private_key: ${{ secrets.PPA_GPG_PRIVATE_KEY }}
+          gpg_passphrase: ${{ secrets.PPA_GPG_PASSPHRASE }}
 
   copr-alpha:
     name: Publish Alpha to Fedora COPR
