@@ -1,0 +1,71 @@
+// Achievements, user unlocks, and leaderboards (#8 / Phase 3).
+
+model AchievementDefinition {
+  id String @id @default(uuid())
+
+  gameId String
+  game   Game   @relation(fields: [gameId], references: [id], onDelete: Cascade)
+
+  // Stable identifier from the game or plugin (e.g. a Goldberg achievement id).
+  key         String
+  name        String
+  description String
+  hidden      Boolean @default(false)
+  points      Int     @default(0)
+  iconObjectId String?
+
+  createdAt DateTime @default(now())
+
+  unlocks UserAchievement[]
+
+  @@unique([gameId, key])
+  @@index([gameId])
+}
+
+model UserAchievement {
+  id     String @id @default(uuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  achievementId String
+  achievement   AchievementDefinition @relation(fields: [achievementId], references: [id], onDelete: Cascade)
+
+  unlockedAt DateTime @default(now())
+
+  @@unique([userId, achievementId])
+  @@index([userId])
+}
+
+model Leaderboard {
+  id String @id @default(uuid())
+
+  gameId String
+  game   Game   @relation(fields: [gameId], references: [id], onDelete: Cascade)
+
+  key       String
+  name      String
+  // "asc" or "desc"
+  sortOrder String @default("desc")
+
+  createdAt DateTime @default(now())
+
+  entries LeaderboardEntry[]
+
+  @@unique([gameId, key])
+}
+
+model LeaderboardEntry {
+  id String @id @default(uuid())
+
+  leaderboardId String
+  leaderboard   Leaderboard @relation(fields: [leaderboardId], references: [id], onDelete: Cascade)
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  score     Float
+  updatedAt DateTime @default(now())
+
+  @@unique([leaderboardId, userId])
+  @@index([leaderboardId])
+}

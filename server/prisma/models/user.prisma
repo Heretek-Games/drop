@@ -23,6 +23,9 @@ model User {
     screenshots Screenshot[]
     playtime    Playtime[]
 
+    achievements       UserAchievement[]
+    leaderboardEntries LeaderboardEntry[]
+
     groups UserGroup[]
 }
 

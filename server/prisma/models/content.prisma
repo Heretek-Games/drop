@@ -56,6 +56,9 @@ model Game {
   tags        GameTag[]
   playtime    Playtime[]
 
+  achievements AchievementDefinition[]
+  leaderboards Leaderboard[]
+
   developers             Company[]               @relation(name: "developers")
   publishers             Company[]               @relation(name: "publishers")
   unimportedGameVersions UnimportedGameVersion[]
