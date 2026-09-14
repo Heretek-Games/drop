@@ -12,7 +12,9 @@ use std::{
 
 use database::{
     DownloadableMetadata, GameDownloadStatus, borrow_db_checked, borrow_db_mut_checked,
-    db::DATA_ROOT_DIR, models::data::InstalledGameType, platform::Platform,
+    db::DATA_ROOT_DIR,
+    models::data::{InstalledGameType, SetupConfiguration},
+    platform::Platform,
 };
 use games::{library::push_game_update, state::GameStatusManager};
 use log::{debug, error, info, warn};
@@ -245,14 +247,80 @@ pub fn prepare_pipeline(game_id: &str) -> Result<PreparedPipeline, String> {
         .get("recipe")
         .ok_or_else(|| "This version has no pipeline recipe; use legacy setup".to_string())?;
 
-    let recipe: PipelineRecipe = serde_json::from_value(recipe_value.clone())
+    let mut recipe: PipelineRecipe = serde_json::from_value(recipe_value.clone())
         .map_err(|e| format!("Failed to parse pipeline recipe: {e}"))?;
+
+    append_admin_setup_steps(&mut recipe, &version.setups, &meta.target_platform);
 
     Ok(PreparedPipeline {
         recipe,
         install_dir,
         meta,
     })
+}
+
+/// Appends admin-provided setup executables as ordered `run_command` steps
+/// after the generated install steps, so secondary installers (DLC, bonus
+/// content) run once the base installation finishes (#352).
+///
+/// The generated `drop-pipeline-setup.*` fallback script is skipped: the recipe
+/// already performs those steps natively. Steps that already run the same
+/// command are skipped too, keeping the pipeline idempotent.
+fn append_admin_setup_steps(
+    recipe: &mut PipelineRecipe,
+    setups: &[SetupConfiguration],
+    target_platform: &Platform,
+) {
+    const GENERATED_SETUP_SCRIPTS: [&str; 2] =
+        ["drop-pipeline-setup.bat", "drop-pipeline-setup.sh"];
+
+    for (index, setup) in setups
+        .iter()
+        .filter(|setup| setup.platform == *target_platform)
+        .enumerate()
+    {
+        let basename = Path::new(&setup.command)
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or(setup.command.as_str());
+        if GENERATED_SETUP_SCRIPTS
+            .iter()
+            .any(|script| script.eq_ignore_ascii_case(basename))
+        {
+            continue;
+        }
+
+        if recipe
+            .setup_command
+            .as_deref()
+            .is_some_and(|command| command == setup.command.as_str())
+        {
+            continue;
+        }
+
+        let already_runs = recipe.steps.iter().any(|step| {
+            step.action == PipelineStepAction::RunCommand
+                && step
+                    .params
+                    .get("command")
+                    .and_then(|value| value.as_str())
+                    .is_some_and(|command| command == setup.command.as_str())
+        });
+        if already_runs {
+            continue;
+        }
+
+        recipe.steps.push(PipelineStep {
+            id: format!("admin_setup_{index}"),
+            action: PipelineStepAction::RunCommand,
+            params: HashMap::from([(
+                "command".to_owned(),
+                serde_json::Value::String(setup.command.clone()),
+            )]),
+            description: format!("Run additional setup executable: {}", setup.command),
+            optional: false,
+        });
+    }
 }
 
 pub async fn run_pipeline_for_game(app_handle: AppHandle, game_id: String) -> Result<u64, String> {
@@ -1007,8 +1075,7 @@ async fn execute_cleanup_step(step: &PipelineStep, install_dir: &Path) -> Result
                         }
                     };
                     if dir.is_dir() {
-                        if let Err(e) = crate::path_guard::remove_dir_all(install_dir, pattern)
-                        {
+                        if let Err(e) = crate::path_guard::remove_dir_all(install_dir, pattern) {
                             warn!(
                                 "Failed to remove temporary directory {}: {}",
                                 dir.display(),
@@ -1390,6 +1457,83 @@ fn find_primary_rar(dir: &Path) -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn setup(command: &str, platform: Platform) -> SetupConfiguration {
+        SetupConfiguration {
+            command: command.to_owned(),
+            platform,
+        }
+    }
+
+    fn empty_recipe() -> PipelineRecipe {
+        PipelineRecipe {
+            version: "1".to_owned(),
+            distribution_type: DistributionType::LoosePortable,
+            release_group: None,
+            steps: Vec::new(),
+            target_executable: "game.exe".to_owned(),
+            target_args: Vec::new(),
+            setup_command: Some("drop-pipeline-setup.bat".to_owned()),
+            setup_script_windows: None,
+            setup_script_linux: None,
+        }
+    }
+
+    fn run_command_step(command: &str) -> PipelineStep {
+        PipelineStep {
+            id: format!("existing_{command}"),
+            action: PipelineStepAction::RunCommand,
+            params: HashMap::from([(
+                "command".to_owned(),
+                serde_json::Value::String(command.to_owned()),
+            )]),
+            description: format!("Run {command}"),
+            optional: false,
+        }
+    }
+
+    #[test]
+    fn test_append_admin_setup_steps_orders_and_dedupes() {
+        let mut recipe = empty_recipe();
+        recipe.steps.push(run_command_step("base-setup.exe"));
+        let setups = vec![
+            setup("dlc-1.exe", Platform::Windows),
+            setup("base-setup.exe", Platform::Windows),
+            setup("linux-extra.sh", Platform::Linux),
+            setup("drop-pipeline-setup.bat", Platform::Windows),
+            setup("dlc-2.exe", Platform::Windows),
+        ];
+
+        append_admin_setup_steps(&mut recipe, &setups, &Platform::Windows);
+
+        let appended: Vec<String> = recipe
+            .steps
+            .iter()
+            .filter(|step| step.id.starts_with("admin_setup_"))
+            .map(|step| {
+                step.params
+                    .get("command")
+                    .and_then(|value| value.as_str())
+                    .unwrap_or_default()
+                    .to_owned()
+            })
+            .collect();
+        assert_eq!(appended, vec!["dlc-1.exe", "dlc-2.exe"]);
+        assert_eq!(
+            recipe.steps.last().map(|step| step.id.as_str()),
+            Some("admin_setup_4")
+        );
+    }
+
+    #[test]
+    fn test_append_admin_setup_steps_skips_recipe_setup_command() {
+        let mut recipe = empty_recipe();
+        let setups = vec![setup("drop-pipeline-setup.bat", Platform::Linux)];
+
+        append_admin_setup_steps(&mut recipe, &setups, &Platform::Linux);
+
+        assert!(recipe.steps.is_empty());
+    }
 
     #[test]
     fn test_parse_7z_progress() {

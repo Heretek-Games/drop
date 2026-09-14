@@ -14,6 +14,8 @@ pub mod data {
     pub type GameDownloadStatus = v1::GameDownloadStatus;
     pub type InstalledGameType = v1::InstalledGameType;
     pub type ApplicationTransientStatus = v1::ApplicationTransientStatus;
+    pub type SetupConfiguration = v1::SetupConfiguration;
+    pub type UninstallConfiguration = v1::UninstallConfiguration;
     /**
      * Need to be universally accessible by the ID, and the version is just a couple sprinkles on top
      */
@@ -119,6 +121,8 @@ pub mod data {
 
             pub launches: Vec<LaunchConfiguration>,
             pub setups: Vec<SetupConfiguration>,
+            #[serde(default)]
+            pub uninstallers: Vec<UninstallConfiguration>,
 
             #[serde(default)]
             pub droplet_manifest: Option<serde_json::Value>,
@@ -151,6 +155,13 @@ pub mod data {
         #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
         #[serde(rename_all = "camelCase")]
         pub struct SetupConfiguration {
+            pub command: String,
+            pub platform: Platform,
+        }
+
+        #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+        #[serde(rename_all = "camelCase")]
+        pub struct UninstallConfiguration {
             pub command: String,
             pub platform: Platform,
         }

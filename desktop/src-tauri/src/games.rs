@@ -3,7 +3,8 @@ use std::sync::nonpoison::Mutex;
 use bitcode::{Decode, Encode};
 use database::{
     DownloadableMetadata, GameDownloadStatus, borrow_db_checked, borrow_db_mut_checked,
-    models::data::{InstalledGameType, UserConfiguration}, platform::Platform,
+    models::data::{InstalledGameType, UserConfiguration},
+    platform::Platform,
 };
 use games::{
     collections::collection::Collection,
@@ -375,6 +376,9 @@ pub fn uninstall_game(game_id: String, app_handle: AppHandle) -> Result<(), Libr
         Some(data) => data,
         None => return Err(LibraryError::MetaNotFound(game_id)),
     };
+    if let Err(e) = PROCESS_MANAGER.lock().run_uninstaller(&meta) {
+        warn!("uninstaller for {game_id} failed, continuing with uninstall: {e}");
+    }
     uninstall_game_logic(meta, &app_handle);
 
     Ok(())

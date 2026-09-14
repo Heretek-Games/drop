@@ -33,6 +33,7 @@ export default defineClientEventHandler(async (h3) => {
         },
       },
       setups: true,
+      uninstallers: true,
     },
   });
 

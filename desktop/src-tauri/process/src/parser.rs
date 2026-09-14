@@ -4,7 +4,7 @@ use log::info;
 
 use crate::error::ProcessError;
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct ParsedCommand {
     pub env: Vec<String>,
     pub command: String,

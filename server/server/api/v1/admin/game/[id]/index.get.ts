@@ -18,6 +18,7 @@ export type AdminFetchGameType = Prisma.GameGetPayload<{
     versions: {
       include: {
         setups: true;
+        uninstallers: true;
         launches: {
           include: {
             emulator: {
@@ -76,6 +77,7 @@ export default defineEventHandler<
       versions: {
         include: {
           setups: true,
+          uninstallers: true,
           launches: {
             include: {
               emulator: {

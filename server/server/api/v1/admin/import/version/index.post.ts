@@ -27,6 +27,13 @@ export const ImportVersion = type({
     launch: "string",
   }).array(),
 
+  uninstallers: type({
+    platform: type.valueOf(Platform),
+    launch: "string",
+  })
+    .array()
+    .default(() => []),
+
   onlySetup: "boolean = false",
   delta: "boolean = false",
 
