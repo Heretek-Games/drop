@@ -6,8 +6,6 @@ const clientChannels = new Map<string, Set<string>>();
 const peerUsers = new Map<string, string | undefined>();
 const peerAcls = new Map<string, string[] | undefined>();
 
-/** Channels readable without authentication. Everything else needs a user. */
-const PUBLIC_CHANNELS = new Set(["gse:rooms"]);
 const CHANNEL_PATTERN = /^[a-zA-Z0-9:_-]{1,128}$/;
 const MAX_MESSAGE_BYTES = 64 * 1024;
 const MAX_SUBSCRIPTIONS_PER_PEER = 32;
@@ -112,7 +110,7 @@ async function authorizeChannel(
   channel: string,
   userId: string | undefined,
 ): Promise<boolean> {
-  if (!userId && !PUBLIC_CHANNELS.has(channel)) {
+  if (!userId && !pluginManager.isPublicChannel(channel)) {
     sendChannelError(peer, channel, "authentication required");
     return false;
   }
@@ -152,7 +150,7 @@ async function dispatchClientMessage(
   userId: string | undefined,
 ): Promise<void> {
   // Unauthenticated peers may only send on public channels.
-  if (!userId && !PUBLIC_CHANNELS.has(channel)) {
+  if (!userId && !pluginManager.isPublicChannel(channel)) {
     sendChannelError(peer, channel, "authentication required");
     return;
   }

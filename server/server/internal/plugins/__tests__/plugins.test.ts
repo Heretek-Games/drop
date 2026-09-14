@@ -532,6 +532,30 @@ test("PluginManager routes WebSocket messages and enforces the capability", asyn
     false,
   );
 
+  // Verify public channel registration
+  assert.equal(manager.isPublicChannel("ws:test"), false);
+  const publicPlugin: ServerPlugin = {
+    metadata: {
+      id: "public-ws-plugin",
+      name: "Public WS Plugin",
+      version: "1.0.0",
+      apiVersion: PLUGIN_API_VERSION,
+      capabilities: ["websocket"],
+    },
+    init: (ctx: PluginContext) => {
+      ctx.registerWebSocket("ws:public", () => {}, { public: true });
+      ctx.registerPublicWebSocketChannel("ws:explicit-public");
+    },
+  };
+  await manager.registerPlugin(publicPlugin);
+  assert.equal(manager.isPublicChannel("ws:public"), true);
+  assert.equal(manager.isPublicChannel("ws:explicit-public"), true);
+  assert.equal(manager.isPublicChannel("ws:other"), false);
+
+  await manager.unregisterPlugin("public-ws-plugin");
+  assert.equal(manager.isPublicChannel("ws:public"), false);
+  assert.equal(manager.isPublicChannel("ws:explicit-public"), false);
+
   // Missing capability fails closed at registration.
   const bad: ServerPlugin = {
     metadata: {

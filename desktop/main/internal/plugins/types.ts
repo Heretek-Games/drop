@@ -91,7 +91,9 @@ export interface ScopedGameFs {
 export interface AntiCheatReport {
   detected: boolean;
   reason?: string;
+  provider?: string;
   binaries?: string[];
+  files?: string[];
 }
 
 export interface ScopedGameScanner {

@@ -20,6 +20,27 @@ import type {
   UISlotRegistration,
 } from "./types";
 
+export function isTauri(): boolean {
+  return (
+    typeof window !== "undefined" &&
+    ("__TAURI_INTERNALS__" in window || "__TAURI__" in window)
+  );
+}
+
+async function safeInvoke<T>(
+  cmd: string,
+  args?: Record<string, unknown>,
+  fallback?: T,
+): Promise<T> {
+  if (!isTauri()) {
+    console.debug(
+      `[ClientPluginManager] Browser mode: invoke('${cmd}') bypassed`,
+    );
+    return fallback !== undefined ? fallback : (null as unknown as T);
+  }
+  return await invoke<T>(cmd, args);
+}
+
 class BrowserLocalStorage implements ClientPluginStorage {
   constructor(private readonly pluginId: string) {}
 
@@ -59,10 +80,11 @@ class BrowserLocalStorage implements ClientPluginStorage {
 
 class TauriScopedGameFs implements ScopedGameFs {
   async readFile(gameId: string, relativePath: string): Promise<Uint8Array> {
-    const res = await invoke<number[]>("plugin_game_fs_read", {
-      gameId,
-      relativePath,
-    });
+    const res = await safeInvoke<number[]>(
+      "plugin_game_fs_read",
+      { gameId, relativePath },
+      [],
+    );
     return new Uint8Array(res);
   }
 
@@ -75,7 +97,7 @@ class TauriScopedGameFs implements ScopedGameFs {
       typeof data === "string"
         ? Array.from(new TextEncoder().encode(data))
         : Array.from(data);
-    await invoke("plugin_game_fs_write", {
+    await safeInvoke("plugin_game_fs_write", {
       gameId,
       relativePath,
       data: bytes,
@@ -83,28 +105,33 @@ class TauriScopedGameFs implements ScopedGameFs {
   }
 
   async backupFile(gameId: string, relativePath: string): Promise<string> {
-    return await invoke<string>("plugin_game_fs_backup", {
-      gameId,
-      relativePath,
-    });
+    return (
+      (await safeInvoke<string>("plugin_game_fs_backup", {
+        gameId,
+        relativePath,
+      })) || ""
+    );
   }
 
   async restoreFile(gameId: string, relativePath: string): Promise<void> {
-    await invoke("plugin_game_fs_restore", {
+    await safeInvoke("plugin_game_fs_restore", {
       gameId,
       relativePath,
     });
   }
 
   async fileExists(gameId: string, relativePath: string): Promise<boolean> {
-    return await invoke<boolean>("plugin_game_fs_exists", {
-      gameId,
-      relativePath,
-    });
+    return (
+      (await safeInvoke<boolean>(
+        "plugin_game_fs_exists",
+        { gameId, relativePath },
+        false,
+      )) ?? false
+    );
   }
 
   async deleteFile(gameId: string, relativePath: string): Promise<void> {
-    await invoke("plugin_game_fs_delete", {
+    await safeInvoke("plugin_game_fs_delete", {
       gameId,
       relativePath,
     });
@@ -115,28 +142,35 @@ class TauriScopedGameScanner implements ScopedGameScanner {
   async scanExecutables(
     gameId: string,
   ): Promise<Array<{ relativePath: string; sha256: string; size: number }>> {
-    return await invoke<
-      Array<{ relativePath: string; sha256: string; size: number }>
-    >("plugin_game_scan_executables", { gameId });
+    return (
+      (await safeInvoke<
+        Array<{ relativePath: string; sha256: string; size: number }>
+      >("plugin_game_scan_executables", { gameId }, [])) || []
+    );
   }
 
   async checkAntiCheat(gameId: string): Promise<AntiCheatReport> {
-    return await invoke<AntiCheatReport>("plugin_game_check_anticheat", {
-      gameId,
-    });
+    return (
+      (await safeInvoke<AntiCheatReport>(
+        "plugin_game_check_anticheat",
+        { gameId },
+        { detected: false, files: [] },
+      )) || { detected: false, files: [] }
+    );
   }
 }
 
 class TauriPluginWebSocket implements ClientPluginWebSocket {
   async send(channel: string, data: unknown): Promise<unknown> {
-    return await invoke("plugin_request_ws", { channel, data });
+    return await safeInvoke("plugin_request_ws", { channel, data });
   }
 
   subscribe(channel: string, listener: (data: unknown) => void): () => void {
-    // Invoke Tauri plugin_subscribe
-    invoke("plugin_subscribe", { channel }).catch((err) => {
-      console.error(`Failed to subscribe to plugin channel ${channel}:`, err);
-    });
+    if (isTauri()) {
+      safeInvoke("plugin_subscribe", { channel }).catch((err) => {
+        console.error(`Failed to subscribe to plugin channel ${channel}:`, err);
+      });
+    }
 
     const handler = (event: Event) => {
       const custom = event as CustomEvent<{ channel?: string; data?: unknown }>;
@@ -190,7 +224,7 @@ export class ClientPluginManager {
     // works. Enforcement lives in the Tauri command layer, not here, so a
     // plugin cannot bypass it by calling invoke directly.
     try {
-      await invoke("plugin_register_commands", { pluginId, commands });
+      await safeInvoke("plugin_register_commands", { pluginId, commands });
     } catch (err) {
       console.warn(
         `Failed to register command allowlist for ${pluginId}:`,
@@ -267,16 +301,24 @@ export class ClientPluginManager {
           args?: string[],
           options?: { cwd?: string; timeoutMs?: number },
         ) =>
-          invoke<CommandResult>("plugin_system_run", {
-            pluginId,
-            bin,
-            args,
-            cwd: options?.cwd,
-            timeoutMs: options?.timeoutMs,
-          }),
+          safeInvoke<CommandResult>(
+            "plugin_system_run",
+            {
+              pluginId,
+              bin,
+              args,
+              cwd: options?.cwd,
+              timeoutMs: options?.timeoutMs,
+            },
+            {
+              code: 1,
+              stdout: "",
+              stderr: "Host native execution not available in browser mode",
+            },
+          ),
       },
       serverRequest: <T>(method: HttpMethod, path = "", body?: unknown) =>
-        invoke<T>("plugin_request", {
+        safeInvoke<T>("plugin_request", {
           pluginId,
           method,
           path,
@@ -307,7 +349,7 @@ export class ClientPluginManager {
     }
 
     // Drop the native command allowlist for this plugin.
-    await invoke("plugin_register_commands", {
+    await safeInvoke("plugin_register_commands", {
       pluginId,
       commands: [],
     }).catch(() => {

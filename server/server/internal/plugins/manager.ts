@@ -30,6 +30,7 @@ import type {
   SubscriptionContext,
   WebSocketContext,
   WebSocketHandler,
+  WebSocketOptions,
 } from "./types";
 
 /** Resolved caller identity passed to route handlers. */
@@ -150,6 +151,7 @@ export class PluginManager {
     string,
     { pluginId: string; handler: WebSocketHandler }
   >();
+  private readonly publicChannels = new Map<string, string>(); // channel -> pluginId
   private readonly subscriptionAuthorizers = new Map<
     string,
     SubscriptionAuthorizerEntry[]
@@ -331,7 +333,11 @@ export class PluginManager {
         this.pluginEventSubscriptions.set(id, subscriptions);
         return off;
       },
-      registerWebSocket: (channel: string, handler: WebSocketHandler) => {
+      registerWebSocket: (
+        channel: string,
+        handler: WebSocketHandler,
+        options?: WebSocketOptions,
+      ) => {
         if (!this.hasCapability(capabilities, "websocket")) {
           throw new PluginCapabilityError(
             id,
@@ -346,6 +352,19 @@ export class PluginManager {
           );
         }
         this.webSockets.set(channel, { pluginId: id, handler });
+        if (options?.public) {
+          this.publicChannels.set(channel, id);
+        }
+      },
+      registerPublicWebSocketChannel: (channel: string) => {
+        if (!this.hasCapability(capabilities, "websocket")) {
+          throw new PluginCapabilityError(
+            id,
+            "websocket",
+            `registerPublicWebSocketChannel(${channel})`,
+          );
+        }
+        this.publicChannels.set(channel, id);
       },
       registerSubscriptionAuthorizer: (
         matches: (channel: string) => boolean,
@@ -769,6 +788,11 @@ export class PluginManager {
         this.webSockets.delete(channel);
       }
     }
+    for (const [channel, pluginId] of this.publicChannels) {
+      if (pluginId === id) {
+        this.publicChannels.delete(channel);
+      }
+    }
     this.subscriptionAuthorizers.delete(id);
     const subscriptions = this.pluginEventSubscriptions.get(id) ?? [];
     for (const off of subscriptions) {
@@ -1152,6 +1176,14 @@ export class PluginManager {
 
   webSocketChannels(): string[] {
     return Array.from(this.webSockets.keys());
+  }
+
+  isPublicChannel(channel: string): boolean {
+    return this.publicChannels.has(channel);
+  }
+
+  publicWebSocketChannels(): string[] {
+    return Array.from(this.publicChannels.keys());
   }
 
   private async resolveAuth(event: H3Event): Promise<PluginAuthContext> {

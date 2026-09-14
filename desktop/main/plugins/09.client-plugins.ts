@@ -1,5 +1,16 @@
+import * as Vue from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { clientPluginManager } from "~/internal/plugins/ClientPluginManager";
+
+declare global {
+  interface Window {
+    Vue?: unknown;
+  }
+}
+
+if (typeof window !== "undefined") {
+  window.Vue = Vue;
+}
 
 interface RemotePluginInfo {
   id: string;
