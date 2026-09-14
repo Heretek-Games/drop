@@ -1,0 +1,20 @@
+// Community hubs: verified playtime reviews (#20).
+
+model GameReview {
+  id String @id @default(uuid())
+
+  gameId String
+  game   Game   @relation(fields: [gameId], references: [id], onDelete: Cascade)
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  rating Int
+  body   String
+  // True when the author passed the verified-playtime threshold.
+  verified Boolean @default(false)
+
+  createdAt DateTime @default(now())
+
+  @@unique([gameId, userId])
+  @@index([gameId])
+}

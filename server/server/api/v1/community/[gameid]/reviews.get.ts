@@ -1,0 +1,9 @@
+import reviewManager from "~/server/internal/community";
+
+export default defineEventHandler(async (h3) => {
+  const gameId = getRouterParam(h3, "gameid");
+  if (!gameId)
+    throw createError({ statusCode: 400, statusMessage: "No gameID in route" });
+
+  return await reviewManager.listForGame(gameId);
+});

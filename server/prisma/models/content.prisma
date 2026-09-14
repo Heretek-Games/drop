@@ -58,6 +58,7 @@ model Game {
 
   achievements AchievementDefinition[]
   leaderboards Leaderboard[]
+  reviews      GameReview[]
 
   developers             Company[]               @relation(name: "developers")
   publishers             Company[]               @relation(name: "publishers")
