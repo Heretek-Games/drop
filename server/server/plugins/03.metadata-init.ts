@@ -3,12 +3,13 @@ import type { MetadataProvider } from "../internal/metadata";
 import metadataHandler from "../internal/metadata";
 import { IGDBProvider } from "../internal/metadata/igdb";
 import { ManualMetadataProvider } from "../internal/metadata/manual";
-import { PCGamingWikiProvider } from "../internal/metadata/pcgamingwiki";
 import { SteamProvider } from "../internal/metadata/steam";
 import { logger } from "~/server/internal/logging";
 
 export default defineNitroPlugin(async (_nitro) => {
-  const metadataProviders = [SteamProvider, PCGamingWikiProvider, IGDBProvider];
+  // PCGamingWiki and the other community sources are external plugins now; they
+  // are registered through the MetadataProvider SPI in 08.plugin-system.ts.
+  const metadataProviders = [SteamProvider, IGDBProvider];
 
   const providers = new Map<string, MetadataProvider>();
 
