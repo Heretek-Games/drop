@@ -369,7 +369,7 @@ mod tests {
             platform: Platform::Linux,
         };
 
-        let uninstallers = vec![win_uninstaller.clone(), linux_uninstaller.clone()];
+        let uninstallers = [win_uninstaller.clone(), linux_uninstaller.clone()];
 
         // Match behavior used in process_manager::run_uninstaller
         let resolved_win = uninstallers

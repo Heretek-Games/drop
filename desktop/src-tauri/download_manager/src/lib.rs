@@ -1,6 +1,4 @@
 #![feature(duration_millis_float)]
-#![feature(nonpoison_mutex)]
-#![feature(sync_nonpoison)]
 
 use std::{ops::Deref, sync::OnceLock};
 

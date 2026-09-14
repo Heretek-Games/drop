@@ -188,7 +188,7 @@ pub fn uninstall_game_logic(meta: DownloadableMetadata, app_handle: &AppHandle) 
                 GameStatusManager::fetch_state(&meta.id, &db_handle),
             );
 
-            debug!("uninstalled game id {}", &meta.id);
+            debug!("uninstalled game id {}", meta.id);
             app_emit!(&app_handle, "update_library", ());
         });
     } else {

@@ -11,7 +11,7 @@ pub static COMPAT_INFO: LazyLock<Option<CompatInfo>> = LazyLock::new(create_new_
 
 pub static UMU_LAUNCHER_EXECUTABLE: LazyLock<Option<PathBuf>> = LazyLock::new(|| {
     let x = get_umu_executable();
-    info!("{:?}", &x);
+    info!("{:?}", x);
     x
 });
 
