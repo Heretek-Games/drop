@@ -13,6 +13,7 @@ members = [
   "database",
   "download_manager",
   "games",
+  "input",
   "process",
   "remote",
   "utils",
