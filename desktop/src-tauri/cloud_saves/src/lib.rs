@@ -6,6 +6,7 @@ pub mod metadata;
 pub mod normalise;
 pub mod path;
 pub mod placeholder;
+pub mod provision;
 pub mod resolver;
 pub mod sync;
 pub mod transport;

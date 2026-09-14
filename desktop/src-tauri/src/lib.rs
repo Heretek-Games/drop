@@ -288,6 +288,7 @@ pub fn run() {
             // Cloud saves
             fetch_cloud_save_slots,
             download_cloud_save_object,
+            provision_ludusavi,
             // Community
             fetch_game_reviews,
             // Processes
@@ -329,6 +330,15 @@ pub fn run() {
                     let mut app_handle_lock = DROP_APP_HANDLE.lock().await;
                     app_handle_lock.replace(global_app_handle);
                 };
+
+                // Provision the managed Ludusavi tool on first launch (best
+                // effort; cloud saves simply stay local when it is unavailable).
+                tauri::async_runtime::spawn(async move {
+                    match provision_ludusavi().await {
+                        Ok(path) => debug!("managed Ludusavi available at {path}"),
+                        Err(err) => debug!("Ludusavi provisioning skipped: {err}"),
+                    }
+                });
 
                 {
                     use tauri_plugin_deep_link::DeepLinkExt;

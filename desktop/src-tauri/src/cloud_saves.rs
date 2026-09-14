@@ -99,3 +99,59 @@ pub async fn download_cloud_save_object(object_id: String) -> Result<String, Str
     std::fs::write(&path, bytes).map_err(|e| e.to_string())?;
     Ok(path.to_string_lossy().to_string())
 }
+
+/// Ensures the managed Ludusavi binary exists under `<data>/tools/ludusavi/`,
+/// downloading the release for this platform on first use. Returns its path.
+#[tauri::command]
+pub async fn provision_ludusavi() -> Result<String, String> {
+    if let Some(client) = cloud_saves::LudusaviClient::discover() {
+        return Ok(client.executable_path.to_string_lossy().to_string());
+    }
+
+    let release_url =
+        "https://api.github.com/repos/mtkennerly/ludusavi/releases/latest";
+    let release_response = DROP_CLIENT_ASYNC
+        .get(release_url)
+        .header("User-Agent", "Drop Desktop Client")
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    if !release_response.status().is_success() {
+        return Err(format!(
+            "failed to query Ludusavi releases: {}",
+            release_response.status()
+        ));
+    }
+    let release_body = release_response.text().await.map_err(|e| e.to_string())?;
+    let tag = cloud_saves::provision::parse_latest_tag(&release_body)
+        .map_err(|e| e.to_string())?;
+
+    let asset = cloud_saves::provision::asset_for(
+        &tag,
+        std::env::consts::OS,
+        std::env::consts::ARCH,
+    )
+    .ok_or_else(|| "unsupported platform for Ludusavi".to_string())?;
+
+    let asset_response = DROP_CLIENT_ASYNC
+        .get(&asset.url)
+        .header("User-Agent", "Drop Desktop Client")
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    if !asset_response.status().is_success() {
+        return Err(format!(
+            "failed to download Ludusavi: {}",
+            asset_response.status()
+        ));
+    }
+    let bytes = asset_response.bytes().await.map_err(|e| e.to_string())?;
+
+    let path = cloud_saves::provision::install_archive(
+        &asset.file_name,
+        &bytes,
+        &cloud_saves::provision::tools_dir(),
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(path.to_string_lossy().to_string())
+}
