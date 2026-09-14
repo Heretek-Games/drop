@@ -1412,6 +1412,7 @@ dependencies = [
  "filetime",
  "futures-core",
  "futures-lite",
+ "futures-util",
  "games",
  "gethostname",
  "hex 0.4.3",
@@ -1442,6 +1443,7 @@ dependencies = [
  "serde_json",
  "serde_with",
  "sha1",
+ "sha2 0.10.9",
  "shared_child",
  "slice-deque",
  "sysinfo 0.36.1",
@@ -4614,6 +4616,7 @@ dependencies = [
  "shell-words",
  "tauri",
  "tauri-plugin-opener",
+ "tempfile",
  "utils",
 ]
 
