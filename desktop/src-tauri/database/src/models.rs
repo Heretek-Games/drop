@@ -14,6 +14,7 @@ pub mod data {
     pub type GameDownloadStatus = v1::GameDownloadStatus;
     pub type InstalledGameType = v1::InstalledGameType;
     pub type ApplicationTransientStatus = v1::ApplicationTransientStatus;
+    pub type SetupConfiguration = v1::SetupConfiguration;
     /**
      * Need to be universally accessible by the ID, and the version is just a couple sprinkles on top
      */
