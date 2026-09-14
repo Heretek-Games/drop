@@ -64,19 +64,36 @@ Set `DROP_PLUGIN_REQUIRE_SIGNATURE=true` on the server to refuse unsigned bundle
 
 ---
 
-## Registry (Allow-list & Pinning)
+## Registry (Allow-list, Pinning & Remote Index)
 
-Set `DROP_PLUGIN_REGISTRY` to a JSON file to require that external plugins are listed, optionally pinning the version and entry checksum:
+Set `DROP_PLUGIN_REGISTRY` to a JSON file path or a remote HTTP/HTTPS URL (`https://.../registry.json`) to enforce an allow-list, pin exact versions, and verify aggregate bundle checksums:
 
 ```json
 {
   "plugins": [
-    { "checksum": "<sha256>", "id": "sample-plugin", "version": "1.0.0" }
+    {
+      "checksum": "<sha256>",
+      "downloadUrl": "https://plugins.example.com/sample-plugin.dropplugin",
+      "id": "sample-plugin",
+      "name": "Sample Plugin",
+      "version": "1.0.0"
+    }
   ]
 }
 ```
 
-When the registry is non-empty, an unlisted plugin (or a version/checksum mismatch) is rejected at install time and load time.
+- **Fail-Closed Default**: When configured, any unlisted plugin or any version/checksum mismatch is rejected at install time and load time.
+- **Remote Fetching**: The server fetches remote registries with an automatic timeout and verifies response status; unreachable registries fail closed to protect integrity.
+
+---
+
+## Signing Key Distribution & Trust Guidance
+
+By default, plugins run trusted in-process. To enforce cryptographic integrity and supply chain provenance:
+
+1. **Require Signatures**: Set `DROP_PLUGIN_REQUIRE_SIGNATURE=true` on the server. Any bundle without a cryptographic `signature` is refused immediately.
+2. **Key Distribution**: Set `DROP_PLUGIN_SIGNING_KEY="<hmac-secret>"` across build pipelines and the Drop server instance. The CLI `drop-plugin sign` signs the aggregate digest across all bundle files.
+3. **Registry Pinning**: Combine with a pinned registry index to enforce dual verification: exact SHA-256 code digest plus cryptographic HMAC signature.
 
 ---
 
@@ -84,11 +101,20 @@ When the registry is non-empty, an unlisted plugin (or a version/checksum mismat
 
 ### 1. Via Desktop Client Settings
 
-Navigate to **Settings → Plugins & Extensions** and click **Upload .dropplugin / JSON** to select a `.dropplugin` package, or paste the bundle JSON directly.
+Navigate to **Settings → Plugins & Extensions** and click **Upload .dropplugin / JSON** to select a `.dropplugin` package, or paste the bundle JSON directly. A capability consent dialog prompts the administrator to authorize declared permissions before installation.
 
-### 2. Via Admin API
+### 2. Via Admin API (Install-by-URL or Multi-file Package)
 
 Install via `POST /api/v1/plugins/install` with an admin token:
+
+#### Install by URL:
+
+```sh
+curl -X POST "$DROP_URL/api/v1/plugins/install" \
+  -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{ "url": "https://plugins.example.com/my-plugin.dropplugin" }'
+```
 
 #### Multi-file Package / `.dropplugin` Payload:
 
@@ -128,6 +154,7 @@ curl -X POST "$DROP_URL/api/v1/plugins/reload" -H "Authorization: Bearer $ADMIN_
 ## Management API
 
 - `GET /api/v1/plugins` — list registered plugins and lifecycle status.
+- `GET /api/v1/plugins/updates` — check installed plugins against the active registry for available version updates.
 - `PATCH /api/v1/plugins/<id>/state` `{ "enabled": true|false }` — toggle plugin active state.
 - `DELETE /api/v1/plugins/<id>/bundle` — remove an external plugin bundle from disk.
 - `POST /api/v1/plugins/reload` — reload all external bundles from disk.

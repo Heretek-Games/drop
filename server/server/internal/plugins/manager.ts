@@ -929,6 +929,98 @@ export class PluginManager {
     }
   }
 
+  /**
+   * Download, verify and install a plugin bundle from a remote URL.
+   */
+  async installFromUrl(url: string): Promise<void> {
+    if (!url || typeof url !== "string") {
+      throw new Error("Invalid plugin download URL");
+    }
+    const parsed = new URL(url);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      throw new Error(
+        `Unsupported protocol in URL '${url}': only http and https are allowed`,
+      );
+    }
+
+    const res = await fetch(url, {
+      signal: AbortSignal.timeout(15000),
+      headers: { "User-Agent": "Drop-Plugin-Installer/1.0" },
+    });
+    if (!res.ok) {
+      throw new Error(
+        `Failed to download plugin from '${url}': HTTP ${res.status} ${res.statusText}`,
+      );
+    }
+
+    const text = await res.text();
+    let bundle: {
+      manifest?: PluginManifest;
+      entry?: string;
+      files?: Record<string, string>;
+      format?: string;
+    };
+    try {
+      bundle = JSON.parse(text);
+    } catch (err) {
+      throw new Error(
+        `Downloaded bundle from '${url}' is not valid JSON: ${err}`,
+      );
+    }
+
+    if (!bundle?.manifest || (!bundle.entry && !bundle.files)) {
+      throw new Error(
+        `Downloaded bundle from '${url}' missing required manifest or file payload`,
+      );
+    }
+
+    const payload = bundle.files ?? bundle.entry!;
+    await this.installBundle(bundle.manifest, payload);
+  }
+
+  /**
+   * Check installed plugins against configured registry for available updates.
+   */
+  async checkForUpdates(): Promise<
+    Array<{
+      id: string;
+      currentVersion: string;
+      latestVersion: string;
+      hasUpdate: boolean;
+      downloadUrl?: string;
+    }>
+  > {
+    const registry = await this.getRegistry();
+    if (!registry.enabled) {
+      return [];
+    }
+
+    const results: Array<{
+      id: string;
+      currentVersion: string;
+      latestVersion: string;
+      hasUpdate: boolean;
+      downloadUrl?: string;
+    }> = [];
+
+    for (const plugin of this.listPlugins()) {
+      if (plugin.builtin) continue;
+      const entry = registry.getEntry(plugin.id);
+      if (!entry || !entry.version) continue;
+
+      const hasUpdate = entry.version !== plugin.version;
+      results.push({
+        id: plugin.id,
+        currentVersion: plugin.version,
+        latestVersion: entry.version,
+        hasUpdate,
+        downloadUrl: entry.downloadUrl ?? entry.url,
+      });
+    }
+
+    return results;
+  }
+
   /** Remove an external plugin bundle and unregister it. */
   async removeBundle(id: string): Promise<boolean> {
     if (!isValidPluginId(id)) {

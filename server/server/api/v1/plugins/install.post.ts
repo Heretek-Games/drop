@@ -5,7 +5,7 @@ import pluginManager from "~/server/internal/plugins";
 import type { PluginManifest } from "~/server/internal/plugins";
 
 const InstallBundle = type({
-  manifest: {
+  "manifest?": {
     id: "string>0",
     name: "string>0",
     version: "string>0",
@@ -22,6 +22,7 @@ const InstallBundle = type({
   "entry?": "string",
   "files?": "Record<string, string>",
   "format?": "string",
+  "url?": "string>0",
 }).configure(throwingArktype);
 
 export default defineEventHandler(async (h3) => {
@@ -35,13 +36,20 @@ export default defineEventHandler(async (h3) => {
 
   const body = await readDropValidatedBody(h3, InstallBundle);
   try {
-    const payload = body.files ?? body.entry;
-    if (!payload) {
-      throw new Error(
-        "Plugin bundle must provide either 'files' map or 'entry' base64",
+    if (body.url) {
+      await pluginManager.installFromUrl(body.url);
+    } else {
+      const payload = body.files ?? body.entry;
+      if (!payload || !body.manifest) {
+        throw new Error(
+          "Plugin bundle must provide either 'url', or 'manifest' with 'files'/'entry'",
+        );
+      }
+      await pluginManager.installBundle(
+        body.manifest as PluginManifest,
+        payload,
       );
     }
-    await pluginManager.installBundle(body.manifest as PluginManifest, payload);
   } catch (err) {
     throw createError({ statusCode: 400, statusMessage: String(err) });
   }

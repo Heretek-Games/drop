@@ -397,10 +397,23 @@ async function handleRemovePlugin(id: string) {
   }
 }
 
+interface InstallPayload {
+  manifest?: {
+    id?: string;
+    name?: string;
+    version?: string;
+    capabilities?: string[];
+  };
+  entry?: string;
+  files?: Record<string, string>;
+  format?: string;
+  signature?: string;
+}
+
 const installJson = ref("");
 const installReady = computed(() => installJson.value.trim().length > 0);
 const showConsentModal = ref(false);
-const pendingInstall = ref<any | null>(null);
+const pendingInstall = ref<InstallPayload | null>(null);
 
 const CAPABILITY_DESCRIPTIONS: Record<string, string> = {
   "game:fs":
@@ -438,17 +451,7 @@ function handleFileUpload(event: Event) {
 function handleInstallBundle() {
   error.value = null;
   try {
-    const parsed = JSON.parse(installJson.value) as {
-      manifest?: {
-        id?: string;
-        name?: string;
-        version?: string;
-        capabilities?: string[];
-      };
-      entry?: string;
-      files?: Record<string, string>;
-      format?: string;
-    };
+    const parsed = JSON.parse(installJson.value) as InstallPayload;
     if (!parsed?.manifest || (!parsed.entry && !parsed.files)) {
       throw new Error(
         'Bundle must contain a "manifest" and either an "entry" or "files" map',
@@ -467,7 +470,7 @@ function handleInstallBundle() {
   }
 }
 
-async function confirmInstall(payload: any) {
+async function confirmInstall(payload: InstallPayload) {
   isLoading.value = true;
   error.value = null;
   showConsentModal.value = false;

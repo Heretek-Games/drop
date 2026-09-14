@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import fs from "node:fs/promises";
+import http from "node:http";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -639,6 +640,164 @@ test("PluginRegistry enforces the allow-list and version pinning", async () => {
       ),
     /version/,
   );
+});
+
+test("PluginRegistry supports remote HTTP registry with pinning, install-by-URL and updates", async () => {
+  const entry =
+    "export default { metadata: { id: 'remote-demo', name: 'Remote'," +
+    " version: '2.0.0', apiVersion: 1, capabilities: ['routes'] }," +
+    " init(ctx) { ctx.registerRoute('GET', '/r', () => ({ r: 1 })); } };\n";
+  const entryBase64 = Buffer.from(entry).toString("base64");
+  const checksum = createHash("sha256").update(entry).digest("hex");
+
+  let serverPort = 0;
+  const server = http.createServer((req, res) => {
+    if (req.url === "/registry.json") {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(
+        JSON.stringify({
+          plugins: [
+            {
+              id: "remote-demo",
+              version: "2.0.0",
+              checksum,
+              downloadUrl: `http://127.0.0.1:${serverPort}/bundle.json`,
+            },
+          ],
+        }),
+      );
+    } else if (req.url === "/bundle.json") {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(
+        JSON.stringify({
+          manifest: {
+            id: "remote-demo",
+            name: "Remote",
+            version: "2.0.0",
+            apiVersion: PLUGIN_API_VERSION,
+            capabilities: ["routes"],
+            entry: "index.js",
+            checksum,
+          },
+          entry: entryBase64,
+        }),
+      );
+    } else {
+      res.writeHead(404);
+      res.end("Not Found");
+    }
+  });
+
+  await new Promise<void>((resolve) => {
+    server.listen(0, "127.0.0.1", () => {
+      const addr = server.address();
+      if (addr && typeof addr === "object") {
+        serverPort = addr.port;
+      }
+      resolve();
+    });
+  });
+
+  try {
+    const registryUrl = `http://127.0.0.1:${serverPort}/registry.json`;
+    const dataDir = tmpDataDir();
+    const manager = new PluginManager({
+      dataDir,
+      registryPath: registryUrl,
+      storageFactory: () => new MemoryStorage(),
+      authResolver: async () => ({}),
+    });
+
+    // 1. Install by URL
+    await manager.installFromUrl(`http://127.0.0.1:${serverPort}/bundle.json`);
+    const installed = manager.listPlugins().find((p) => p.id === "remote-demo");
+    assert.equal(installed?.status, "active");
+    assert.equal(installed?.version, "2.0.0");
+
+    // 2. Unlisted or mismatched plugin rejected by remote registry
+    await assert.rejects(
+      () =>
+        manager.installBundle(
+          {
+            id: "unlisted-plugin",
+            name: "Unlisted",
+            version: "1.0.0",
+            apiVersion: PLUGIN_API_VERSION,
+            capabilities: ["routes"],
+            entry: "index.js",
+          },
+          entryBase64,
+        ),
+      /not in the registry/,
+    );
+
+    // 3. Update checking
+    const updates = await manager.checkForUpdates();
+    assert.equal(updates.length, 1);
+    assert.equal(updates[0].hasUpdate, false);
+
+    // 4. Fail closed on 404 remote registry
+    await assert.rejects(
+      () =>
+        new PluginManager({
+          dataDir: tmpDataDir(),
+          registryPath: `http://127.0.0.1:${serverPort}/nonexistent.json`,
+          storageFactory: () => new MemoryStorage(),
+          authResolver: async () => ({}),
+        }).installBundle(
+          {
+            id: "remote-demo",
+            name: "Remote",
+            version: "2.0.0",
+            apiVersion: PLUGIN_API_VERSION,
+            capabilities: ["routes"],
+            entry: "index.js",
+            checksum,
+          },
+          entryBase64,
+        ),
+      /failed to fetch remote plugin registry/,
+    );
+  } finally {
+    server.close();
+  }
+});
+
+test("PluginManager strictly refuses unsigned bundles when DROP_PLUGIN_REQUIRE_SIGNATURE=true", async () => {
+  const orig = process.env.DROP_PLUGIN_REQUIRE_SIGNATURE;
+  process.env.DROP_PLUGIN_REQUIRE_SIGNATURE = "true";
+  try {
+    const manager = createTestManager();
+    const entry =
+      "export default { metadata: { id: 'unsigned-demo', name: 'Unsigned'," +
+      " version: '1.0.0', apiVersion: 1, capabilities: ['routes'] }," +
+      " init() {} };\n";
+    const entryBase64 = Buffer.from(entry).toString("base64");
+    const checksum = createHash("sha256").update(entry).digest("hex");
+
+    await assert.rejects(
+      () =>
+        manager.installBundle(
+          {
+            id: "unsigned-demo",
+            name: "Unsigned",
+            version: "1.0.0",
+            apiVersion: PLUGIN_API_VERSION,
+            capabilities: ["routes"],
+            entry: "index.js",
+            checksum,
+          },
+          entryBase64,
+        ),
+      /bundle unsigned-demo is unsigned/,
+    );
+  } finally {
+    if (orig !== undefined) {
+      process.env.DROP_PLUGIN_REQUIRE_SIGNATURE = orig;
+    } else {
+      delete process.env.DROP_PLUGIN_REQUIRE_SIGNATURE;
+    }
+  }
 });
 
 test("PluginManager installs and removes external bundles", async () => {
