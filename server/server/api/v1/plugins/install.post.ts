@@ -9,14 +9,19 @@ const InstallBundle = type({
     id: "string>0",
     name: "string>0",
     version: "string>0",
-    apiVersion: "number",
+    "apiVersion?": "number",
     "entry?": "string",
+    "clientEntry?": "string",
     "capabilities?": "string[]",
     "checksum?": "string",
     "files?": "Record<string, string>",
     "signature?": "string",
+    "server?": "object",
+    "client?": "object",
   },
-  entry: "string>0",
+  "entry?": "string",
+  "files?": "Record<string, string>",
+  "format?": "string",
 }).configure(throwingArktype);
 
 export default defineEventHandler(async (h3) => {
@@ -30,10 +35,13 @@ export default defineEventHandler(async (h3) => {
 
   const body = await readDropValidatedBody(h3, InstallBundle);
   try {
-    await pluginManager.installBundle(
-      body.manifest as PluginManifest,
-      body.entry,
-    );
+    const payload = body.files ?? body.entry;
+    if (!payload) {
+      throw new Error(
+        "Plugin bundle must provide either 'files' map or 'entry' base64",
+      );
+    }
+    await pluginManager.installBundle(body.manifest as PluginManifest, payload);
   } catch (err) {
     throw createError({ statusCode: 400, statusMessage: String(err) });
   }

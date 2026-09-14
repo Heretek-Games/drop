@@ -2,43 +2,71 @@
 title: Plugins
 ---
 
-Drop supports server-side plugins. A plugin can register HTTP routes under
-`/api/v1/plugins/<id>/...`, subscribe/broadcast events, use namespaced storage,
-and handle WebSocket messages. Plugins run **in-process**, so only install code
-you trust.
+Drop supports an extensible plugin runtime across both the server and desktop client.
+A server plugin can register HTTP routes under `/api/v1/plugins/<id>/...`, subscribe/broadcast events, use namespaced storage, and handle WebSocket messages. Desktop client plugins can contribute UI panels, status badges, Play Actions, and game launch hooks. Plugins run **in-process**, so only install code you trust.
 
-## Bundle format
+---
+
+## Architecture & Toolchain
+
+The developer toolchain and runtime contracts are maintained in [`@droposs/plugin-sdk`](https://github.com/Heretek-Games/drop-plugin-sdk):
+
+- **SDK (`@droposs/plugin-sdk`)**: Public TypeScript contracts, JSON Schema, and mock harnesses (`MockPluginContext`, `MockClientPluginContext`).
+- **CLI (`@droposs/plugin-cli`)**: Developer CLI (`drop-plugin`) providing `init`, `build`, `test`, `validate`, `sign`, and `pack`.
+
+---
+
+## Bundle Format
 
 A plugin lives in `<dataDir>/plugins/<id>/` and contains:
 
-| File                    | Purpose                                                           |
-| ----------------------- | ----------------------------------------------------------------- |
-| `drop-plugin.json`      | Manifest: `id`, `name`, `version`, `apiVersion`, `capabilities` … |
-| `index.js` (or `entry`) | The plugin module (default export with `init(ctx)`).              |
+| File                            | Purpose                                                                                          |
+| :------------------------------ | :----------------------------------------------------------------------------------------------- |
+| `drop-plugin.json`              | Manifest: `id`, `name`, `version`, `apiVersion`, `targets`, `capabilities`, `server`, `client` … |
+| `index.js` (or `server.entry`)  | Server plugin module (default export with `init(ctx)`).                                          |
+| `client.js` (or `client.entry`) | Optional client plugin module (default export with `init(ctx)`).                                 |
 
-`drop-plugin.json` fields:
+### `drop-plugin.json` Fields
 
 - `id`, `name`, `version` — required.
-- `apiVersion` — the plugin API version the plugin targets (currently `1`).
-- `capabilities` — any of `routes`, `storage`, `events`, `network`, `websocket`.
-- `entry` — entry filename relative to the bundle (default `index.js`).
-- `checksum` — SHA-256 of the entry file (recommended).
-- `signature` — HMAC-SHA256 of `checksum` under `DROP_PLUGIN_SIGNING_KEY`.
+- `apiVersion` — plugin API version (currently `2`; Drop maintains backwards compatibility with `1`).
+- `targets` — `["server"]`, `["client"]`, or `["server", "client"]`.
+- `capabilities` — explicitly declared permissions:
+  - **Server**: `routes`, `storage`, `events`, `network`, `websocket`.
+  - **Client**: `ui:slot`, `ui:play-action`, `ui:context-menu`, `ui:sidebar`, `ui:topbar`, `game:launch-hook`, `game:fs`, `game:scan`, `client:storage`, `client:ws`.
+- `entry` — relative path to primary entry point (default `index.js`).
+- `checksum` — SHA-256 hex digest of the primary entry file.
+- `files` — mapping of relative bundle file paths to their individual SHA-256 digests. Required for multi-file bundles.
+- `signature` — HMAC-SHA256 covering the aggregate bundle digest (or `checksum` for single-file bundles) under `DROP_PLUGIN_SIGNING_KEY`.
 
-## Signing a bundle
+---
+
+## Building, Signing & Packaging
+
+Using the Drop Plugin CLI (`@droposs/plugin-cli`):
 
 ```sh
-# From server/
-node dev-tools/sign-plugin.mjs path/to/my-plugin
+# Bundle TypeScript server and client sources into ESM dist/
+npx @droposs/plugin-cli build .
+
+# Validate manifest against schema
+npx @droposs/plugin-cli validate .
+
+# Sign drop-plugin.json with SHA-256 digests and HMAC signature
+export DROP_PLUGIN_SIGNING_KEY="secret-key"
+npx @droposs/plugin-cli sign .
+
+# Package into a .dropplugin distribution archive
+npx @droposs/plugin-cli pack . ./dist-package
 ```
 
-Set `DROP_PLUGIN_SIGNING_KEY` to also write a signature. Set
-`DROP_PLUGIN_REQUIRE_SIGNATURE=true` on the server to refuse unsigned bundles.
+Set `DROP_PLUGIN_REQUIRE_SIGNATURE=true` on the server to refuse unsigned bundles.
 
-## Registry (allow-list / pinning)
+---
 
-Set `DROP_PLUGIN_REGISTRY` to a JSON file to require that external plugins are
-listed, optionally pinning the version and entry checksum:
+## Registry (Allow-list & Pinning)
+
+Set `DROP_PLUGIN_REGISTRY` to a JSON file to require that external plugins are listed, optionally pinning the version and entry checksum:
 
 ```json
 {
@@ -48,46 +76,60 @@ listed, optionally pinning the version and entry checksum:
 }
 ```
 
-When the registry is non-empty, an unlisted plugin (or a version/checksum
-mismatch) is rejected at install time and at load time.
+When the registry is non-empty, an unlisted plugin (or a version/checksum mismatch) is rejected at install time and load time.
 
-## Installing
+---
 
-Install from the admin API (requires an admin token):
+## Installing Bundles
+
+### 1. Via Desktop Client Settings
+
+Navigate to **Settings → Plugins & Extensions** and click **Upload .dropplugin / JSON** to select a `.dropplugin` package, or paste the bundle JSON directly.
+
+### 2. Via Admin API
+
+Install via `POST /api/v1/plugins/install` with an admin token:
+
+#### Multi-file Package / `.dropplugin` Payload:
 
 ```sh
 curl -X POST "$DROP_URL/api/v1/plugins/install" \
   -H "Authorization: Bearer $ADMIN_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
-    "manifest": { "id": "my-plugin", "name": "My Plugin", "version": "1.0.0",
-                  "apiVersion": 1, "capabilities": ["routes"],
-                  "checksum": "<sha256>" },
-    "entry": "<base64 of index.js>"
+    "manifest": {
+      "id": "my-plugin",
+      "name": "My Plugin",
+      "version": "1.0.0",
+      "apiVersion": 2,
+      "targets": ["server"],
+      "capabilities": ["routes"],
+      "entry": "dist/index.js",
+      "files": {
+        "dist/index.js": "<sha256>"
+      }
+    },
+    "files": {
+      "dist/index.js": "<base64>"
+    }
   }'
 ```
 
-Or copy a signed bundle into `<dataDir>/plugins/<id>/` and reload:
+#### Filesystem Copy:
+
+Copy a bundle into `<dataDir>/plugins/<id>/` and reload:
 
 ```sh
 curl -X POST "$DROP_URL/api/v1/plugins/reload" -H "Authorization: Bearer $ADMIN_TOKEN"
 ```
 
-## Managing
+---
 
-- `GET /api/v1/plugins` — list plugins and status.
-- `PATCH /api/v1/plugins/<id>/state` `{ "enabled": true|false }` — enable/disable.
-- `DELETE /api/v1/plugins/<id>/bundle` — remove an external plugin.
-- `POST /api/v1/plugins/reload` — reload external bundles from disk.
+## Management API
+
+- `GET /api/v1/plugins` — list registered plugins and lifecycle status.
+- `PATCH /api/v1/plugins/<id>/state` `{ "enabled": true|false }` — toggle plugin active state.
+- `DELETE /api/v1/plugins/<id>/bundle` — remove an external plugin bundle from disk.
+- `POST /api/v1/plugins/reload` — reload all external bundles from disk.
 
 Built-in plugins cannot be removed.
-
-## The `drop-gse` plugin
-
-`drop-gse` is a built-in plugin that adds peer-to-peer multiplayer rooms (Steam
-emulator patching plus a per-room mesh network). It is optional and configured
-entirely by environment variables.
-
-See [**Multiplayer (drop-gse)**](/docs/admin/multiplayer/) for prerequisites,
-the full configuration reference, ZTNET / ZeroTier / Tailscale setup, and how
-players host and join rooms.

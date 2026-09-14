@@ -859,12 +859,12 @@ export class PluginManager {
   }
 
   /**
-   * Install (or update) a signed plugin bundle from its manifest and entry
-   * source, verifying the checksum/signature before writing or loading.
+   * Install (or update) a signed plugin bundle from its manifest and entry source
+   * or multi-file payload, verifying checksums and signatures before loading.
    */
   async installBundle(
     manifest: PluginManifest,
-    entryBase64: string,
+    entryOrFiles: string | Record<string, string>,
   ): Promise<void> {
     if (!manifest.id || !manifest.name || !manifest.version) {
       throw new Error("manifest requires id, name and version");
@@ -873,34 +873,60 @@ export class PluginManager {
       throw new Error("invalid plugin id");
     }
 
-    const bytes = Buffer.from(entryBase64, "base64");
-    const digest = this.verifyBundleBytes(bytes, manifest);
-    (await this.getRegistry()).check(manifest, digest);
-
     const pluginsDir = await this.getPluginsDirectory();
     const bundleDir = path.join(pluginsDir, manifest.id);
-    const entryRel = manifest.entry || "index.js";
-    const entryPath = path.resolve(bundleDir, entryRel);
-    if (
-      path.isAbsolute(entryRel) ||
-      !isInsideDirectory(path.resolve(bundleDir), entryPath)
-    ) {
-      throw new Error("invalid entry path");
-    }
-
     await fs.mkdir(bundleDir, { recursive: true });
 
-    const storedManifest: PluginManifest = {
-      ...manifest,
-      checksum: manifest.checksum ?? digest,
-    };
-    await fs.writeFile(
-      path.join(bundleDir, "drop-plugin.json"),
-      JSON.stringify(storedManifest, null, 2),
-    );
-    await fs.writeFile(entryPath, bytes);
+    if (typeof entryOrFiles === "string") {
+      const bytes = Buffer.from(entryOrFiles, "base64");
+      const digest = this.verifyBundleBytes(bytes, manifest);
+      (await this.getRegistry()).check(manifest, digest);
 
-    await this.loadExternalPluginFromDir(bundleDir, storedManifest);
+      const entryRel = manifest.entry || "index.js";
+      const entryPath = path.resolve(bundleDir, entryRel);
+      if (
+        path.isAbsolute(entryRel) ||
+        !isInsideDirectory(path.resolve(bundleDir), entryPath)
+      ) {
+        throw new Error("invalid entry path");
+      }
+
+      await fs.mkdir(path.dirname(entryPath), { recursive: true });
+      const storedManifest: PluginManifest = {
+        ...manifest,
+        checksum: manifest.checksum ?? digest,
+      };
+      await fs.writeFile(
+        path.join(bundleDir, "drop-plugin.json"),
+        JSON.stringify(storedManifest, null, 2),
+      );
+      await fs.writeFile(entryPath, bytes);
+
+      await this.loadExternalPluginFromDir(bundleDir, storedManifest);
+    } else if (typeof entryOrFiles === "object" && entryOrFiles !== null) {
+      for (const [rel, base64] of Object.entries(entryOrFiles)) {
+        const resolved = path.resolve(bundleDir, rel);
+        if (
+          path.isAbsolute(rel) ||
+          !isInsideDirectory(path.resolve(bundleDir), resolved)
+        ) {
+          throw new Error(`invalid bundle file path '${rel}'`);
+        }
+        await fs.mkdir(path.dirname(resolved), { recursive: true });
+        await fs.writeFile(resolved, Buffer.from(base64, "base64"));
+      }
+
+      await fs.writeFile(
+        path.join(bundleDir, "drop-plugin.json"),
+        JSON.stringify(manifest, null, 2),
+      );
+
+      await this.loadExternalPluginFromDir(bundleDir, manifest);
+    } else {
+      throw new Error(
+        "invalid bundle payload: expected base64 entry or files map",
+      );
+    }
   }
 
   /** Remove an external plugin bundle and unregister it. */
