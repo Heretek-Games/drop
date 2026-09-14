@@ -10,6 +10,10 @@ function createHarness(overrides: Partial<DropworksDeps> = {}) {
       appId === "game-1" || appId === "12345" ? "game-id-1" : undefined,
     unlockAchievement: async () => ({ alreadyUnlocked: false }),
     submitScore: async () => ({ improved: true }),
+    setPresence: async (_userId, status, gameId) => ({
+      status,
+      gameId: gameId ?? null,
+    }),
     ...overrides,
   };
   return new DropworksManager(deps);
@@ -128,4 +132,45 @@ test("submitScore authenticates and rejects userId spoofing", async () => {
     () => manager.submitScore("valid", "game-1", "high-score", Number.NaN),
     /finite/,
   );
+});
+
+test("setPresence resolves the app and forwards the user's status", async () => {
+  let seen: {
+    userId: string;
+    status: string;
+    gameId?: string | null;
+  } | null = null;
+  const manager = createHarness({
+    setPresence: async (userId, status, gameId) => {
+      seen = { userId, status, gameId };
+      return { status, gameId: gameId ?? null };
+    },
+  });
+
+  const result = await manager.setPresence("valid", "game-1", "in-game");
+  assert.deepEqual(result, { status: "in-game", gameId: "game-id-1" });
+  assert.deepEqual(seen, {
+    userId: "user-1",
+    status: "in-game",
+    gameId: "game-id-1",
+  });
+
+  const override = await manager.setPresence(
+    "valid",
+    "game-1",
+    "in-game",
+    "other-game",
+  );
+  assert.equal(override.gameId, "other-game");
+
+  await assert.rejects(
+    () =>
+      manager.setPresence("valid", "game-1", "in-game", undefined, "attacker"),
+    /does not match/,
+  );
+  await assert.rejects(
+    () => manager.setPresence("nope", "game-1", "in-game"),
+    /Invalid Dropworks auth token/,
+  );
+  await assert.rejects(() => manager.setPresence("valid", "", ""), /required/);
 });

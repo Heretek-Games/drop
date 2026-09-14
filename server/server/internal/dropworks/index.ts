@@ -1,5 +1,6 @@
 import prisma from "../db/database";
 import achievementManager from "../achievements";
+import presenceManager from "../presence";
 import { APITokenMode } from "~/prisma/client/enums";
 import { DropworksManager, type DropworksDeps } from "./manager";
 
@@ -31,6 +32,8 @@ const deps: DropworksDeps = {
     });
     return { improved };
   },
+  setPresence: (userId, status, gameId) =>
+    presenceManager.setStatus(userId, status, gameId),
 };
 
 export const dropworksManager = new DropworksManager(deps);

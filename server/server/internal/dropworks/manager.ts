@@ -45,6 +45,12 @@ export interface DropworksDeps {
     key: string,
     score: number,
   ): Promise<{ improved: boolean }>;
+  /** Set local presence for the authenticated user. */
+  setPresence(
+    userId: string,
+    status: string,
+    gameId?: string | null,
+  ): Promise<{ status: string; gameId?: string | null }>;
 }
 
 export class DropworksManager {
@@ -158,5 +164,48 @@ export class DropworksManager {
       throw createError({ statusCode: 404, statusMessage: "Unknown appId" });
     }
     return this.deps.submitScore(userId, gameId, key, score);
+  }
+
+  /**
+   * Set the authenticated user's presence to the game session's state.
+   * `gameId` defaults to the resolved app id. `claimUserId`, when provided,
+   * must match the authenticated user.
+   */
+  async setPresence(
+    token: string,
+    appId: string,
+    status: string,
+    gameId?: string | null,
+    claimUserId?: string,
+  ): Promise<{ status: string; gameId: string | null }> {
+    if (!appId || !status) {
+      throw createError({
+        statusCode: 400,
+        statusMessage: "appId and status are required",
+      });
+    }
+    const userId = await this.deps.resolveUserByToken(token);
+    if (!userId) {
+      throw createError({
+        statusCode: 401,
+        statusMessage: "Invalid Dropworks auth token",
+      });
+    }
+    if (claimUserId && claimUserId !== userId) {
+      throw createError({
+        statusCode: 403,
+        statusMessage: "userId does not match the authenticated session",
+      });
+    }
+    const resolvedGameId = await this.deps.findGameId(appId);
+    if (!resolvedGameId) {
+      throw createError({ statusCode: 404, statusMessage: "Unknown appId" });
+    }
+    const record = await this.deps.setPresence(
+      userId,
+      status,
+      gameId ?? resolvedGameId,
+    );
+    return { status: record.status, gameId: record.gameId ?? null };
   }
 }
