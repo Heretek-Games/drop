@@ -44,6 +44,50 @@ pub struct CommandOutput {
     pub stderr: String,
 }
 
+const BLOCKED_COMMANDS: &[&str] = &[
+    // Shells
+    "sh", "bash", "dash", "ash", "zsh", "csh", "tcsh", "fish", "ksh",
+    "cmd", "cmd.exe", "powershell", "powershell.exe", "pwsh", "pwsh.exe",
+    "wscript", "wscript.exe", "cscript", "cscript.exe",
+    // Interpreters & runtimes
+    "python", "python3", "python.exe", "python3.exe", "py", "py.exe",
+    "node", "node.exe", "deno", "deno.exe", "bun", "bun.exe",
+    "perl", "perl.exe", "ruby", "ruby.exe", "php", "php.exe", "lua", "lua.exe",
+    // Network transfer / remote shells
+    "curl", "curl.exe", "wget", "wget.exe",
+    "nc", "ncat", "netcat", "socat", "telnet", "ssh", "scp", "sftp", "ftp",
+    // Privilege escalation / execution
+    "sudo", "su", "doas", "pkexec", "runas", "runas.exe",
+    // Destructive filesystem / partition / system tools
+    "rm", "rmdir", "del", "erase", "dd", "format", "mkfs", "fdisk", "parted",
+    "reg", "reg.exe", "regedit", "regedit.exe", "certutil", "certutil.exe",
+    "bitsadmin", "bitsadmin.exe", "mshta", "mshta.exe", "rundll32", "rundll32.exe",
+];
+
+fn validate_command_name(command: &str) -> Result<(), String> {
+    if command.is_empty() || command.len() > 64 {
+        return Err(format!("invalid command length: '{command}'"));
+    }
+    if command.starts_with('.') || command.starts_with('-') {
+        return Err(format!("command cannot start with '.' or '-': '{command}'"));
+    }
+    if !command
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-' || c == '.')
+    {
+        return Err(format!(
+            "command contains disallowed characters (only alphanumeric, _, -, . allowed): '{command}'"
+        ));
+    }
+    let lower = command.to_ascii_lowercase();
+    if BLOCKED_COMMANDS.contains(&lower.as_str()) {
+        return Err(format!(
+            "command '{command}' is blocked for security reasons"
+        ));
+    }
+    Ok(())
+}
+
 /// Register (replace) the allowlisted commands for a plugin.
 #[tauri::command]
 pub fn plugin_register_commands(
@@ -69,6 +113,7 @@ pub fn plugin_register_commands(
                 "allowlisted command must be a bare executable name: {command}"
             ));
         }
+        validate_command_name(command)?;
         entry.insert(command.to_string());
     }
     Ok(())
@@ -85,6 +130,7 @@ pub async fn plugin_system_run(
     timeout_ms: Option<u64>,
     state: State<'_, PluginCommandAllowlist>,
 ) -> Result<CommandOutput, String> {
+    validate_command_name(&bin)?;
     {
         let registry = state
             .0

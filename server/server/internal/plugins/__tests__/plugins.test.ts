@@ -1238,3 +1238,97 @@ test("PluginManager supports manifest v2, client targets, and getClientAssetPath
   );
   assert.equal(escaped, null);
 });
+
+test("signed bundle with FilePluginStorage survives storage mutations and reload", async () => {
+  const dataDir = tmpDataDir();
+  const pluginDir = path.join(dataDir, "plugins", "storage-sign-demo");
+  await fs.mkdir(pluginDir, { recursive: true });
+
+  const entry =
+    "export default { metadata: { id: 'storage-sign-demo', name: 'Storage Sign'," +
+    " version: '1.0.0', apiVersion: 2, capabilities: ['routes', 'storage'] }," +
+    " async init(ctx) { await ctx.storage.set('counter', 42); } };\n";
+  await fs.writeFile(path.join(pluginDir, "index.mjs"), entry);
+  await fs.writeFile(
+    path.join(pluginDir, "drop-plugin.json"),
+    JSON.stringify({
+      id: "storage-sign-demo",
+      name: "Storage Sign",
+      version: "1.0.0",
+      apiVersion: PLUGIN_API_VERSION,
+      capabilities: ["routes", "storage"],
+      entry: "index.mjs",
+    }),
+  );
+
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  const signer = path.resolve(here, "../../../../dev-tools/sign-plugin.mjs");
+  const signingKey = "test-storage-signing-key";
+  const signed = spawnSync(
+    process.execPath,
+    [signer, "plugins/storage-sign-demo"],
+    {
+      cwd: dataDir,
+      env: { ...process.env, DROP_PLUGIN_SIGNING_KEY: signingKey },
+      encoding: "utf8",
+    },
+  );
+  assert.equal(signed.status, 0, signed.stderr);
+
+  const previousKey = process.env.DROP_PLUGIN_SIGNING_KEY;
+  const previousRequire = process.env.DROP_PLUGIN_REQUIRE_SIGNATURE;
+  process.env.DROP_PLUGIN_SIGNING_KEY = signingKey;
+  process.env.DROP_PLUGIN_REQUIRE_SIGNATURE = "true";
+
+  try {
+    // 1. Initial load & execute init() which writes to storage
+    const manager1 = new PluginManager({
+      dataDir,
+      authResolver: async () => ({}),
+    });
+    await manager1.discoverAndLoadExternalPlugins();
+    assert.equal(
+      manager1.listPlugins().find((p) => p.id === "storage-sign-demo")?.status,
+      "active",
+      "signed bundle must initialize cleanly on first load",
+    );
+
+    // Verify storage file was written outside plugins bundle directory (in plugin-data)
+    const storageFile = path.join(
+      dataDir,
+      "plugin-data",
+      "storage-sign-demo",
+      "state.json",
+    );
+    assert.ok(
+      await fs
+        .access(storageFile)
+        .then(() => true)
+        .catch(() => false),
+      "storage file must be in plugin-data",
+    );
+
+    // 2. Simulate server restart: new manager, reload plugins
+    const manager2 = new PluginManager({
+      dataDir,
+      authResolver: async () => ({}),
+    });
+    await manager2.discoverAndLoadExternalPlugins();
+    assert.equal(
+      manager2.listPlugins().find((p) => p.id === "storage-sign-demo")?.status,
+      "active",
+      "signed bundle must remain active on reload after writing to storage",
+    );
+  } finally {
+    if (previousKey === undefined) {
+      delete process.env.DROP_PLUGIN_SIGNING_KEY;
+    } else {
+      process.env.DROP_PLUGIN_SIGNING_KEY = previousKey;
+    }
+    if (previousRequire === undefined) {
+      delete process.env.DROP_PLUGIN_REQUIRE_SIGNATURE;
+    } else {
+      process.env.DROP_PLUGIN_REQUIRE_SIGNATURE = previousRequire;
+    }
+  }
+});

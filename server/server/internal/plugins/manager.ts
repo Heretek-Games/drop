@@ -134,6 +134,15 @@ interface LoadedPlugin {
   error?: Error;
 }
 
+function isIgnoredBundleFile(prefix: string, name: string): boolean {
+  if (prefix) return false;
+  return (
+    name === "drop-plugin.json" ||
+    name === "state.json" ||
+    name === "schema.json"
+  );
+}
+
 export class PluginManager {
   private readonly plugins = new Map<string, LoadedPlugin>();
   private readonly routes = new Map<string, RegisteredRoute[]>();
@@ -481,20 +490,18 @@ export class PluginManager {
     return hasher.digest("hex");
   }
 
-  /** Recursively list bundle files, ignoring installed dependencies. */
+  /** Recursively list bundle files, ignoring installed dependencies and manifest/storage files. */
   private async listBundleFiles(root: string, prefix = ""): Promise<string[]> {
     const results: string[] = [];
     const entries = await fs.readdir(path.join(root, prefix), {
       withFileTypes: true,
     });
     for (const entry of entries) {
-      const rel = prefix ? `${prefix}/${entry.name}` : entry.name;
-      if (entry.isDirectory()) {
-        if (entry.name === "node_modules") continue;
-        results.push(...(await this.listBundleFiles(root, rel)));
-      } else if (entry.isFile()) {
-        // The manifest cannot checksum itself; the signer excludes it too.
-        if (!prefix && entry.name === "drop-plugin.json") continue;
+      if (entry.isDirectory() && entry.name !== "node_modules") {
+        const subPrefix = prefix ? `${prefix}/${entry.name}` : entry.name;
+        results.push(...(await this.listBundleFiles(root, subPrefix)));
+      } else if (entry.isFile() && !isIgnoredBundleFile(prefix, entry.name)) {
+        const rel = prefix ? `${prefix}/${entry.name}` : entry.name;
         results.push(rel);
       }
     }
