@@ -1,10 +1,16 @@
 # Upstream PR 2 — Generic Plugin Runtime SPI
 
 **Target:** `Drop-OSS/drop`
-**Source:** `Heretek-Games/drop` (`upstream/pr2-generic-plugin-spi`)
+**Open PR:** [#498](https://github.com/Drop-OSS/drop/pull/498)
+**Source:** `Heretek-Games/drop` (`upstream-pr/generic-plugin-spi`)
 **Goal:** land the generic, domain-agnostic plugin runtime so third parties can
 extend Drop without forking. Contains **zero** hardcoded piracy, emulation,
 VPN, or payment logic.
+
+> [!NOTE]
+> The `upstream/pr2-generic-plugin-spi` branch on `Heretek-Games/drop` is a
+> stale duplicate (commit `536e63ac`, no PR). The branch backing #498 is
+> `upstream-pr/generic-plugin-spi`.
 
 ## Scope
 

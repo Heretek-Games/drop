@@ -734,7 +734,9 @@ async fn execute_extract_rar(
         cancel_flag,
         parse_7z_progress,
     )
-    .await
+    .await?;
+
+    sweep_extraction_symlinks(install_dir, &output_dir)
 }
 
 async fn execute_extract_iso(
@@ -833,7 +835,7 @@ async fn execute_extract_iso(
         .await?;
     }
 
-    Ok(())
+    sweep_extraction_symlinks(install_dir, &output_dir)
 }
 
 async fn execute_extract_archive(
@@ -885,7 +887,9 @@ async fn execute_extract_archive(
         cancel_flag,
         parse_7z_progress,
     )
-    .await
+    .await?;
+
+    sweep_extraction_symlinks(install_dir, &output_dir)
 }
 
 async fn execute_innoextract(
@@ -934,7 +938,9 @@ async fn execute_innoextract(
         cancel_flag,
         parse_innoextract_progress,
     )
-    .await
+    .await?;
+
+    sweep_extraction_symlinks(install_dir, &output_dir)
 }
 
 async fn execute_apply_crack(
@@ -1050,6 +1056,30 @@ pub fn overlay_directory(src_dir: &Path, dest_dir: &Path) -> Result<(), String> 
         // Symlink entries (follow_links = false) are intentionally skipped.
     }
     Ok(())
+}
+
+/// Reject symlinks an external extractor materialized that resolve outside the
+/// install directory. Escaping links are unlinked before the error is returned
+/// so no dangerous path survives a failed step. See
+/// `docs/implementation/archive-symlink-policy.md`.
+fn sweep_extraction_symlinks(install_dir: &Path, output_dir: &Path) -> Result<(), String> {
+    let escaped = crate::path_guard::remove_escaping_symlinks(install_dir, output_dir)
+        .map_err(|e| format!("Failed to sweep extracted symlinks: {e}"))?;
+    if escaped.is_empty() {
+        return Ok(());
+    }
+
+    let list = escaped
+        .iter()
+        .map(|path| path.display().to_string())
+        .collect::<Vec<_>>()
+        .join(", ");
+    warn!("Removed escaping symlinks after extraction: {list}");
+    Err(format!(
+        "Extraction produced {} symlink(s) escaping the install directory; \
+         removed them: {list}",
+        escaped.len()
+    ))
 }
 
 /// Resolve `candidate` inside `install_dir` and return it only when it is an
@@ -1657,6 +1687,44 @@ mod tests {
 
         assert!(overlay_directory(&src, &dest).is_err());
         assert!(!outside.join("evil.dll").exists());
+    }
+
+    #[test]
+    fn test_sweep_extraction_symlinks_accepts_clean_directory() {
+        let temp = tempfile::tempdir().unwrap();
+        let install = temp.path().join("game");
+        fs::create_dir_all(install.join("sub")).unwrap();
+        fs::write(install.join("sub/game.exe"), b"x").unwrap();
+
+        assert!(sweep_extraction_symlinks(&install, &install).is_ok());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_sweep_extraction_symlinks_rejects_and_removes_escape() {
+        let temp = tempfile::tempdir().unwrap();
+        let install = temp.path().join("game");
+        let outside = temp.path().join("outside");
+        fs::create_dir_all(&install).unwrap();
+        fs::create_dir_all(&outside).unwrap();
+        let escape = install.join("escape");
+        std::os::unix::fs::symlink(outside.join("victim"), &escape).unwrap();
+
+        assert!(sweep_extraction_symlinks(&install, &install).is_err());
+        assert!(!crate::path_guard::is_symlink(&escape));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_sweep_extraction_symlinks_keeps_internal_links() {
+        let temp = tempfile::tempdir().unwrap();
+        let install = temp.path().join("game");
+        fs::create_dir_all(install.join("sub")).unwrap();
+        let internal = install.join("internal");
+        std::os::unix::fs::symlink(install.join("sub"), &internal).unwrap();
+
+        assert!(sweep_extraction_symlinks(&install, &install).is_ok());
+        assert!(crate::path_guard::is_symlink(&internal));
     }
 
     #[test]

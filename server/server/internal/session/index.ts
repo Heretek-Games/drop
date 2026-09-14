@@ -1,4 +1,5 @@
 import type { H3Event } from "h3";
+import { isEvent } from "h3";
 import type {
   OIDCData,
   Session,
@@ -130,7 +131,9 @@ export class SessionHandler {
     // if expired session
     if (new Date(session.expiresAt).getTime() < Date.now()) {
       await this.sessionProvider.removeSession(token);
-      // TODO: should probably call signout to clear the cookie
+      // Expired sessions must not leave a stale cookie behind. Only a real
+      // H3Event can write the response; headers-only callers cannot.
+      if (isEvent(request)) this.clearSessionCookie(request);
       // session expired
       return undefined;
     }
@@ -188,7 +191,7 @@ export class SessionHandler {
     const token = this.getSessionToken(h3);
     if (!token) return false;
     if (!(await this.signoutByToken(token))) return false;
-    deleteCookie(h3, dropTokenCookieName, { path: "/" });
+    this.clearSessionCookie(h3);
     return true;
   }
 
@@ -258,6 +261,23 @@ export class SessionHandler {
   }
 
   /**
+   * Attributes shared by setting and clearing the session cookie, so a cleared
+   * cookie always matches the one that was set.
+   */
+  private sessionCookieOptions() {
+    return {
+      path: "/",
+      httpOnly: true,
+      sameSite: "lax" as const,
+      secure: (process.env.EXTERNAL_URL ?? "").startsWith("https://"),
+    };
+  }
+
+  private clearSessionCookie(h3: H3Event) {
+    deleteCookie(h3, dropTokenCookieName, this.sessionCookieOptions());
+  }
+
+  /**
    * Creates cookie that represents user session
    * @param h3
    * @param extend
@@ -268,11 +288,8 @@ export class SessionHandler {
     // TODO: we should probably switch to jwts to minimize possibility of someone
     // trying to guess a session id (jwts let us sign + encrypt stuff in a std way)
     setCookie(h3, dropTokenCookieName, token, {
+      ...this.sessionCookieOptions(),
       expires: expiresAt,
-      path: "/",
-      httpOnly: true,
-      sameSite: "lax",
-      secure: (process.env.EXTERNAL_URL ?? "").startsWith("https://"),
     });
     return token;
   }

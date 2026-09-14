@@ -6,9 +6,22 @@ all-features = true
 
 [advisories]
 version = 2
+# Only flag unmaintained crates that a workspace directly depends on. The
+# transitive unmaintained stack (async-std, instant, unic-*, proc-macro-error,
+# GTK-era crates, ...) comes from Tauri/Linux bindings and can only be retired
+# upstream; `cargo audit` still reports it weekly in security.yml. Any
+# first-party dependency that goes unmaintained must be replaced rather than
+# ignored.
+unmaintained = "workspace"
 # Fail on known vulnerabilities. Add scoped ignores here with a comment and a
 # tracking issue if a transitive advisory cannot be resolved immediately.
-ignore = []
+ignore = [
+    # Unmaintained (not vulnerable) advisory for bincode 1.3.3/2.0.1, a direct
+    # dependency of the vendored `native_model` crate for its versioned
+    # serialization ABI. No safe upgrade exists and swapping the format would
+    # break stored/consumed models; revisit when `native_model` migrates.
+    { id = "RUSTSEC-2025-0141", reason = "bincode is a direct dependency of the vendored native_model crate" },
+]
 
 [licenses]
 version = 2

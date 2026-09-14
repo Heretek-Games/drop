@@ -68,6 +68,10 @@ export class FsObjectBackend extends ObjectBackend {
     await this.hashStore.delete(id);
 
     try {
+      // Replace, don't patch: a shorter payload must not leave trailing bytes
+      // of the previous object behind.
+      await handle.truncate(0);
+
       if (source instanceof Readable) {
         const outputStream = handle.createWriteStream({ autoClose: true });
         await Stream.promises.pipeline(source, outputStream);

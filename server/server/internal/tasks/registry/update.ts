@@ -1,6 +1,8 @@
 import { type } from "arktype";
+import type pino from "pino";
 import * as semver from "semver";
 import { defineDropTask } from "..";
+import cacheHandler from "../../cache";
 import { systemConfig } from "../../config/sys-conf";
 import notificationSystem from "../../notifications";
 
@@ -16,15 +18,91 @@ const latestRelease = type({
   published_at: "string",
 });
 
+const UPDATE_CHECK_URL =
+  "https://api.github.com/repos/Drop-OSS/drop/releases/latest";
+const UPDATE_CHECK_CACHE_KEY = "latest-release";
+type CachedRelease = { etag: string; release: Record<string, unknown> };
+const updateCheckCache = cacheHandler.createCache<CachedRelease>("UpdateCheck");
+
+function isRateLimited(response: Response) {
+  if (response.status === 429) return true;
+  if (response.status !== 403) return false;
+  return response.headers.get("x-ratelimit-remaining") === "0";
+}
+
+function githubHeaders(): Record<string, string> {
+  const headers: Record<string, string> = {
+    Accept: "application/vnd.github+json",
+    "X-GitHub-Api-Version": "2022-11-28",
+  };
+  // Authenticated requests get a much higher rate limit; the token is optional
+  // so self-hosted instances without one still work.
+  const token = process.env.GITHUB_TOKEN;
+  if (token) headers.Authorization = `Bearer ${token}`;
+  return headers;
+}
+
+type FetchReleaseResult =
+  | { status: "release"; release: unknown }
+  | { status: "rate-limited"; resetAt: string };
+
+async function fetchLatestRelease(
+  logger: pino.Logger,
+): Promise<FetchReleaseResult> {
+  const headers = githubHeaders();
+  const cached = await updateCheckCache.get(UPDATE_CHECK_CACHE_KEY);
+  if (cached?.etag) headers["If-None-Match"] = cached.etag;
+
+  const response = await fetch(UPDATE_CHECK_URL, { headers });
+
+  if (response.status === 304) {
+    // Conditional request: the release has not changed since the last check.
+    if (!cached?.release) {
+      throw new Error(
+        "GitHub returned 304 Not Modified but no cached release is available",
+      );
+    }
+    return { status: "release", release: cached.release };
+  }
+
+  if (response.ok) {
+    const release = await response.json();
+    const etag = response.headers.get("etag");
+    if (etag) {
+      await updateCheckCache.set(UPDATE_CHECK_CACHE_KEY, {
+        etag,
+        release: release as CachedRelease["release"],
+      });
+    }
+    return { status: "release", release };
+  }
+
+  if (isRateLimited(response)) {
+    // A crashloop or shared egress IP can exhaust the anonymous quota; this
+    // is transient, so callers log an actionable warning instead of failing.
+    const reset = response.headers.get("x-ratelimit-reset");
+    const resetAt = reset
+      ? new Date(Number.parseInt(reset, 10) * 1000).toISOString()
+      : "unknown";
+    return { status: "rate-limited", resetAt };
+  }
+
+  const errorBody = await response.text().catch(() => "");
+  logger.info(
+    { status: response.status, body: errorBody },
+    "Failed to check for update ",
+  );
+  throw new Error(
+    `Failed to check for update: ${response.status} ${errorBody}`,
+  );
+}
+
 export default defineDropTask({
   buildId: () => `check:update:${new Date().toISOString()}`,
   name: "Check for Update",
   acls: ["system:maintenance:read"],
   taskGroup: "check:update",
   async run({ progress, logger }) {
-    // TODO: maybe implement some sort of rate limit thing to prevent this from calling github api a bunch in the event of crashloop or whatever?
-    // probably will require custom task scheduler for object cleanup anyway, so something to thing about
-
     if (!systemConfig.shouldCheckForUpdates()) {
       logger.info("Update check is disabled by configuration");
       progress(100);
@@ -42,32 +120,25 @@ export default defineDropTask({
     }
     progress(30);
 
-    const response = await fetch(
-      "https://api.github.com/repos/Drop-OSS/drop/releases/latest",
-    );
+    const result = await fetchLatestRelease(logger);
     progress(50);
 
-    // if response failed somehow
-    if (!response.ok) {
-      logger.info(
-        {
-          status: response.status,
-          body: response.body,
-        },
-        "Failed to check for update ",
+    if (result.status === "rate-limited") {
+      logger.warn(
+        { resetAt: result.resetAt },
+        "GitHub API rate limit hit; set GITHUB_TOKEN to raise the limit",
       );
-
-      throw new Error(
-        `Failed to check for update: ${response.status} ${JSON.stringify(response.body)}`,
-      );
+      progress(100);
+      return;
     }
 
+    const releaseJson = result.release;
+
     // parse and validate response
-    const resJson = await response.json();
-    const body = latestRelease(resJson);
+    const body = latestRelease(releaseJson);
     if (body instanceof type.errors) {
       logger.info(body.summary);
-      logger.info("GitHub Api response" + JSON.stringify(resJson));
+      logger.info("GitHub Api response" + JSON.stringify(releaseJson));
       throw new Error(
         `GitHub Api response did not match expected schema: ${body.summary}`,
       );

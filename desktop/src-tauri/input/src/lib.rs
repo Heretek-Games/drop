@@ -1,9 +1,10 @@
 //! Drop Input — controller remapping and virtual gamepad abstraction (#18).
 //!
-//! The platform backends live behind [`InputBackend`]: `uinput`/`evdev` on
-//! Linux and `ViGEm` on Windows create the virtual device, while this crate
-//! owns the pure mapping logic (deadzones, gyro-to-mouse, button remaps) so it
-//! stays testable without touching `/dev/uinput` or a driver.
+//! This crate owns the pure mapping logic (deadzones, gyro-to-mouse, button
+//! remaps) so it stays testable without touching `/dev/uinput` or a driver.
+//! No native virtual-device backend exists yet: [`InputBackend`] is implemented
+//! only by [`MockBackend`] (tests/dry-runs) and [`NullBackend`] (explicit
+//! unavailability), and [`supported_backends`] therefore reports only `Null`.
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum GamepadButton {
@@ -71,8 +72,9 @@ impl Default for GamepadState {
     }
 }
 
-/// A virtual gamepad device. Real implementations wrap uinput (Linux) or ViGEm
-/// (Windows); [`MockBackend`] records states for tests.
+/// A virtual gamepad device. A future native implementation will wrap uinput
+/// (Linux) or ViGEm (Windows); today [`MockBackend`] records states for tests
+/// and [`NullBackend`] reports unavailability.
 pub trait InputBackend: Send + Sync {
     type Error;
 
@@ -111,11 +113,7 @@ pub fn map_gyro_to_mouse(gyro: &Gyro, sensitivity: f32, deadzone: f32) -> MouseD
 }
 
 fn deadzone_degrees(value: f32, deadzone: f32) -> f32 {
-    if value.abs() <= deadzone {
-        0.0
-    } else {
-        value
-    }
+    if value.abs() <= deadzone { 0.0 } else { value }
 }
 
 /// Applies a deadzone to both sticks of a state.
@@ -160,31 +158,26 @@ impl InputBackend for MockBackend {
 }
 
 /// Virtual gamepad backends Drop can target.
+///
+/// `Uinput` and `ViGEm` are reserved API surface: no `InputBackend`
+/// implementation exists for them yet, so advertising them would make callers
+/// believe a device can be created. They stay in the enum so native backends
+/// can be added later without breaking the public API.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BackendKind {
     /// Linux `uinput`/`evdev` virtual device (requires `/dev/uinput` access).
+    /// Not implemented yet.
     Uinput,
-    /// Windows ViGEm bus driver.
+    /// Windows ViGEm bus driver. Not implemented yet.
     ViGEm,
     /// Always-present fallback that reports unavailability.
     Null,
 }
 
-/// Backends available on the current platform, best first. `Null` is always
-/// last so callers can surface a precise "no virtual gamepad available" error.
-#[cfg(target_os = "linux")]
-#[must_use]
-pub fn supported_backends() -> &'static [BackendKind] {
-    &[BackendKind::Uinput, BackendKind::Null]
-}
-
-#[cfg(target_os = "windows")]
-#[must_use]
-pub fn supported_backends() -> &'static [BackendKind] {
-    &[BackendKind::ViGEm, BackendKind::Null]
-}
-
-#[cfg(not(any(target_os = "linux", target_os = "windows")))]
+/// Backends available on the current platform. Only [`BackendKind::Null`] is
+/// reported because no native `InputBackend` exists yet; the fallback surfaces
+/// a precise `BackendUnavailable` error instead of pretending a virtual device
+/// is available.
 #[must_use]
 pub fn supported_backends() -> &'static [BackendKind] {
     &[BackendKind::Null]
@@ -294,10 +287,7 @@ mod tests {
     }
 
     #[test]
-    fn supported_backends_always_includes_the_null_fallback() {
-        let backends = supported_backends();
-        assert!(backends.contains(&BackendKind::Null));
-        #[cfg(target_os = "linux")]
-        assert!(backends.contains(&BackendKind::Uinput));
+    fn supported_backends_reports_only_implemented_backends() {
+        assert_eq!(supported_backends(), &[BackendKind::Null]);
     }
 }
