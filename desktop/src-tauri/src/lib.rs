@@ -58,6 +58,7 @@ use tauri_plugin_dialog::DialogExt;
 use url::Url;
 use utils::app_emit;
 
+mod achievements;
 mod client;
 mod cloud_saves;
 mod collections;
@@ -73,6 +74,7 @@ mod settings;
 mod shaders;
 mod updates;
 
+use achievements::*;
 use client::*;
 use cloud_saves::*;
 use community::*;
@@ -293,6 +295,8 @@ pub fn run() {
             provision_ludusavi,
             // Community
             fetch_game_reviews,
+            // Achievements
+            unlock_achievements,
             // Shader caches
             list_shader_caches,
             export_shader_caches,
