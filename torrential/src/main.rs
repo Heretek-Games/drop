@@ -6,7 +6,7 @@ use std::{
 };
 
 use axum::{
-    Router,
+    Extension, Router,
     extract::Request,
     http::StatusCode,
     middleware::{self, Next},
@@ -18,6 +18,7 @@ use log::{info, warn};
 use simple_logger::SimpleLogger;
 use tokio::{runtime::Handle, spawn, time};
 use torrential::{
+    auth::DepotAuth,
     downloads::{cache::ChunkCache, handlers, serve},
     server::create_drop_server,
     state::AppState,
@@ -85,55 +86,70 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Gate the catalog and cache-invalidation routes behind a shared token.
+/// Gate the catalog and cache-invalidation routes behind the shared token.
 ///
 /// When `TORRENTIAL_HTTP_TOKEN` is unset the routes remain open (backwards
 /// compatible for single-tenant deployments); setting it requires callers to
 /// present it as `Authorization: Bearer <token>` or `x-torrential-token`.
-async fn require_depot_token(request: Request, next: Next) -> Result<Response, StatusCode> {
-    let Ok(expected) = std::env::var("TORRENTIAL_HTTP_TOKEN") else {
-        return Ok(next.run(request).await);
-    };
-    let expected = expected.trim();
-    if expected.is_empty() {
-        return Ok(next.run(request).await);
+async fn authorize_catalog(
+    Extension(auth): Extension<Arc<DepotAuth>>,
+    request: Request,
+    next: Next,
+) -> Result<Response, StatusCode> {
+    match auth.authorize_catalog(request.headers()) {
+        Ok(()) => Ok(next.run(request).await),
+        Err(error) => {
+            warn!("rejected depot catalog request: {error:?}");
+            Err(StatusCode::UNAUTHORIZED)
+        }
     }
+}
 
-    let presented = request
-        .headers()
-        .get(axum::http::header::AUTHORIZATION)
-        .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.strip_prefix("Bearer "))
-        .or_else(|| {
-            request
-                .headers()
-                .get("x-torrential-token")
-                .and_then(|value| value.to_str().ok())
-        });
-
-    if presented.is_some_and(|token| token == expected) {
-        Ok(next.run(request).await)
-    } else {
-        Err(StatusCode::UNAUTHORIZED)
+/// Gate chunk content behind the shared token when chunk auth is opted in.
+///
+/// Disabled by default (see [`DepotAuth`]); once
+/// `TORRENTIAL_REQUIRE_CHUNK_AUTH=true` is set, unauthenticated chunk requests
+/// are rejected and a missing token configuration fails closed.
+async fn authorize_chunk(
+    Extension(auth): Extension<Arc<DepotAuth>>,
+    request: Request,
+    next: Next,
+) -> Result<Response, StatusCode> {
+    match auth.authorize_chunk(request.headers()) {
+        Ok(()) => Ok(next.run(request).await),
+        Err(error) => {
+            warn!("rejected depot chunk request: {error:?}");
+            Err(StatusCode::UNAUTHORIZED)
+        }
     }
 }
 
 fn setup_app(shared_state: Arc<AppState>) -> Router {
+    let auth = Arc::new(DepotAuth::from_env());
+    if auth.requires_chunk_auth() {
+        info!("depot chunk authentication is enabled (TORRENTIAL_REQUIRE_CHUNK_AUTH)");
+    }
+
     // The manifest catalog and cache invalidation are not needed by anonymous
     // depot downloads, so they can require a token.
-    let protected = Router::new()
+    let catalog = Router::new()
         .route("/api/v1/depot/manifest.json", get(handlers::manifest))
         .route("/invalidate", post(handlers::invalidate))
-        .route_layer(middleware::from_fn(require_depot_token));
+        .route_layer(middleware::from_fn(authorize_catalog));
 
-    Router::new()
+    let content = Router::new()
         .route(
             "/api/v1/depot/content/{game_id}/{version_name}/{chunk_id}",
             get(serve::serve_file),
         )
+        .route_layer(middleware::from_fn(authorize_chunk));
+
+    Router::new()
         .route("/api/v1/depot/speedtest", get(handlers::speedtest))
         .route("/healthcheck", get(handlers::healthcheck))
-        .merge(protected)
+        .merge(content)
+        .merge(catalog)
+        .layer(Extension(auth))
         .with_state(shared_state)
 }
 

@@ -121,6 +121,10 @@ Source: `torrential/src/downloads/cache.rs` (wired in `serve.rs`, `state.rs`, `m
 - `/invalidate` and `/api/v1/depot/manifest.json` accept an optional
   `TORRENTIAL_HTTP_TOKEN` (`Authorization: Bearer <token>` or
   `x-torrential-token`); when unset those routes stay open for back-compat.
+  Chunk content (`/api/v1/depot/content/...`) can additionally require the same
+  token by setting `TORRENTIAL_REQUIRE_CHUNK_AUTH=true`; it is off by default so
+  anonymous local depots keep working, and enabling it without configuring
+  `TORRENTIAL_HTTP_TOKEN` fails closed (every chunk request is rejected).
 
 ### 2.5 Tauri high-DPI window architecture
 

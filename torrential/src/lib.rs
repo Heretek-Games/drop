@@ -1,4 +1,5 @@
 use tokio::sync::Semaphore;
+pub mod auth;
 pub mod conversions;
 pub mod downloads;
 pub mod droplet;
