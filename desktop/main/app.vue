@@ -3,6 +3,10 @@
   <NuxtLayout class="select-none w-full h-full min-h-screen overflow-hidden">
     <NuxtPage />
     <ModalStack />
+    <AchievementToast
+      :toasts="achievementToasts"
+      @dismiss="dismissAchievementToast"
+    />
   </NuxtLayout>
 </template>
 
@@ -15,8 +19,12 @@ import {
   initialNavigation,
   setupHooks,
 } from "./composables/state-navigation.js";
+import { useAchievementToasts } from "./composables/useAchievementToasts.js";
 import { listen } from "@tauri-apps/api/event";
 import type { AppState } from "./types.js";
+
+const { toasts: achievementToasts, dismiss: dismissAchievementToast } =
+  useAchievementToasts();
 
 const state = useAppState();
 

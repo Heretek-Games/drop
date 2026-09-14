@@ -17,28 +17,33 @@ const TOAST_TTL_MS = 6000;
 export function useAchievementToasts() {
   const toasts = ref<AchievementToast[]>([]);
 
-  const unsubscribe = clientPluginManager.serverWs.subscribe(
-    "drop:achievement:unlock",
-    (data) => {
-      const event = data as AchievementUnlockEvent;
-      if (!event || typeof event.key !== "string") return;
-      const now = Date.now();
-      toasts.value = enqueueToast(
-        expireToasts(toasts.value, now, TOAST_TTL_MS),
-        event,
-        now,
-      );
+  let unsubscribe: (() => void) | undefined;
+  try {
+    unsubscribe = clientPluginManager.serverWs.subscribe(
+      "drop:achievement:unlock",
+      (data) => {
+        const event = data as AchievementUnlockEvent;
+        if (!event || typeof event.key !== "string") return;
+        const now = Date.now();
+        toasts.value = enqueueToast(
+          expireToasts(toasts.value, now, TOAST_TTL_MS),
+          event,
+          now,
+        );
 
-      const id = toasts.value[toasts.value.length - 1]?.id;
-      if (id) {
-        setTimeout(() => {
-          toasts.value = dismissToast(toasts.value, id);
-        }, TOAST_TTL_MS);
-      }
-    },
-  );
+        const id = toasts.value[toasts.value.length - 1]?.id;
+        if (id) {
+          setTimeout(() => {
+            toasts.value = dismissToast(toasts.value, id);
+          }, TOAST_TTL_MS);
+        }
+      },
+    );
+  } catch (error) {
+    console.warn("Achievement toasts unavailable:", error);
+  }
 
-  onUnmounted(() => unsubscribe());
+  onUnmounted(() => unsubscribe?.());
 
   function dismiss(id: string) {
     toasts.value = dismissToast(toasts.value, id);
