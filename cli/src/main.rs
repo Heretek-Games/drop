@@ -28,7 +28,12 @@ async fn main() -> anyhow::Result<()> {
             let info = info.interactive_configure();
             upload::interface::upload(&info, config, &name).await?;
         }
-        Commands::Push { path, out } => {
+        Commands::Push {
+            path,
+            out,
+            upload,
+            prefix,
+        } => {
             let summary = crate::commands::push::run(
                 std::path::Path::new(&path),
                 std::path::Path::new(&out),
@@ -37,6 +42,17 @@ async fn main() -> anyhow::Result<()> {
                 "pushed {} file(s), {} chunk(s), {} -> {} bytes",
                 summary.files, summary.chunks, summary.bytes_in, summary.bytes_out
             );
+
+            if let Some(scheme) = upload {
+                let operator = crate::commands::push::build_operator(&scheme)?;
+                let uploaded = crate::commands::push::upload_dir(
+                    &operator,
+                    &prefix,
+                    std::path::Path::new(&out),
+                )
+                .await?;
+                println!("uploaded {uploaded} object(s) via '{scheme}'");
+            }
         }
     };
 

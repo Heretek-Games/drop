@@ -130,10 +130,102 @@ pub fn chunk_path(out: &Path, sha256: &str) -> PathBuf {
     out.join("chunks").join(sha256)
 }
 
+/// Builds an OpenDAL operator for a storage scheme. `memory` is used by tests;
+/// `s3` reads credentials from the standard environment variables.
+///
+/// # Errors
+/// Returns an error when the scheme is unsupported or the operator cannot be
+/// constructed.
+pub fn build_operator(scheme: &str) -> anyhow::Result<opendal::Operator> {
+    use anyhow::Context;
+
+    match scheme {
+        "memory" => Ok(opendal::Operator::new(opendal::services::Memory::default())
+            .context("creating memory operator")?),
+        "s3" => {
+            let bucket = std::env::var("DROP_S3_BUCKET")
+                .context("DROP_S3_BUCKET is required for the s3 scheme")?;
+            let mut builder = opendal::services::S3::default().bucket(&bucket);
+            if let Ok(region) = std::env::var("AWS_REGION") {
+                builder = builder.region(&region);
+            }
+            if let Ok(endpoint) = std::env::var("AWS_ENDPOINT") {
+                builder = builder.endpoint(&endpoint);
+            }
+            if let Ok(key) = std::env::var("AWS_ACCESS_KEY_ID") {
+                builder = builder.access_key_id(&key);
+            }
+            if let Ok(secret) = std::env::var("AWS_SECRET_ACCESS_KEY") {
+                builder = builder.secret_access_key(&secret);
+            }
+            Ok(opendal::Operator::new(builder).context("creating s3 operator")?)
+        }
+        other => anyhow::bail!("unsupported upload scheme '{other}'"),
+    }
+}
+
+/// Uploads `dir` (chunks + manifest) under `prefix` in `operator`.
+///
+/// # Errors
+/// Returns an error when a file cannot be read or written.
+pub async fn upload_dir(
+    operator: &opendal::Operator,
+    prefix: &str,
+    dir: &Path,
+) -> anyhow::Result<usize> {
+    let prefix = prefix.trim_matches('/');
+    let mut uploaded = 0;
+
+    for entry in WalkDir::new(dir).into_iter().filter_map(|e| e.ok()) {
+        if !entry.file_type().is_file() {
+            continue;
+        }
+        let relative = entry
+            .path()
+            .strip_prefix(dir)
+            .context("stripping upload root")?
+            .to_string_lossy()
+            .replace('\\', "/");
+        let key = if prefix.is_empty() {
+            relative
+        } else {
+            format!("{prefix}/{relative}")
+        };
+        let data = fs::read(entry.path())
+            .with_context(|| format!("reading {}", entry.path().display()))?;
+        operator
+            .write(&key, data)
+            .await
+            .with_context(|| format!("uploading {key}"))?;
+        uploaded += 1;
+    }
+
+    Ok(uploaded)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use tempfile::tempdir;
+
+    #[tokio::test]
+    async fn uploads_packaged_chunks_to_an_operator() {
+        let input = tempdir().unwrap();
+        let out = tempdir().unwrap();
+        fs::write(input.path().join("a.bin"), vec![3u8; 4096]).unwrap();
+
+        run(input.path(), out.path()).unwrap();
+        let operator = build_operator("memory").unwrap();
+        let uploaded = upload_dir(&operator, "depot", out.path()).await.unwrap();
+
+        assert!(uploaded >= 2, "expected chunks + manifest");
+        assert!(operator.read("depot/manifest.json").await.is_ok());
+    }
+
+    #[test]
+    fn rejects_unknown_upload_schemes() {
+        assert!(build_operator("ftp").is_err());
+    }
 
     #[test]
     fn push_writes_manifest_and_reassembles_chunks() {

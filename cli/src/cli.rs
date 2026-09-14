@@ -38,6 +38,12 @@ pub enum Commands {
         /// Output directory for chunks + manifest
         #[arg(short, long, default_value_t = String::from("dist"))]
         out: String,
+        /// Upload scheme (memory, s3); when set, chunks + manifest are uploaded
+        #[arg(short, long)]
+        upload: Option<String>,
+        /// Object-store key prefix for the upload
+        #[arg(long, default_value_t = String::new())]
+        prefix: String,
     },
 }
 
