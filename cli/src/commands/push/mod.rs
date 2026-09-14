@@ -125,6 +125,7 @@ pub fn run(path: &Path, out: &Path) -> Result<PushSummary> {
 }
 
 /// Returns the on-disk path of a content-addressed chunk.
+#[allow(dead_code)] // consumed by the S3/HTTP uploader that reuses this layout
 pub fn chunk_path(out: &Path, sha256: &str) -> PathBuf {
     out.join("chunks").join(sha256)
 }

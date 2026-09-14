@@ -39,6 +39,7 @@ pub struct LanPeerRegistry {
 }
 
 impl LanPeerRegistry {
+    #[must_use]
     pub fn new(ttl: Duration) -> Self {
         Self {
             ttl,
@@ -67,6 +68,7 @@ impl LanPeerRegistry {
             .retain(|tracked| now.duration_since(tracked.last_seen) <= self.ttl);
     }
 
+    #[must_use]
     pub fn live(&self, now: Instant) -> Vec<LanPeer> {
         self.peers
             .iter()
@@ -76,12 +78,14 @@ impl LanPeerRegistry {
     }
 
     /// Best peer by a weighted score of low latency and high throughput.
+    #[must_use]
     pub fn best(&self, now: Instant) -> Option<LanPeer> {
         self.live(now).into_iter().max_by_key(peer_score)
     }
 }
 
 /// Scores a peer; higher is better. Latency dominates, throughput breaks ties.
+#[must_use]
 pub fn peer_score(peer: &LanPeer) -> u64 {
     let latency = u64::from(10_000u32.saturating_sub(peer.rtt_ms.min(10_000)));
     let throughput = u64::from(peer.throughput_kibps).min(999_999);
@@ -91,12 +95,11 @@ pub fn peer_score(peer: &LanPeer) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::str::FromStr;
 
     fn peer(id: &str, rtt: u32, kibps: u32) -> LanPeer {
         LanPeer {
             peer_id: id.to_string(),
-            address: SocketAddr::from_str("127.0.0.1:9000").unwrap(),
+            address: SocketAddr::from(([127, 0, 0, 1], 9000)),
             rtt_ms: rtt,
             throughput_kibps: kibps,
         }
@@ -117,7 +120,7 @@ mod tests {
         registry.observe(peer("a", 5, 100), start);
 
         let later = start + Duration::from_secs(6);
-        assert!(registry.live(later).is_empty());
+        assert_eq!(registry.live(later).len(), 0);
         registry.evict_expired(later);
         assert!(registry.best(later).is_none());
     }
@@ -131,6 +134,9 @@ mod tests {
         registry.observe(peer("a", 3, 500), now);
 
         assert_eq!(registry.live(now).len(), 2);
-        assert_eq!(registry.best(now).unwrap().peer_id, "a");
+        assert_eq!(
+            registry.best(now).map(|best| best.peer_id),
+            Some("a".to_string())
+        );
     }
 }
