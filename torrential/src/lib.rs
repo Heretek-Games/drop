@@ -2,6 +2,7 @@ use tokio::sync::Semaphore;
 pub mod conversions;
 pub mod downloads;
 pub mod droplet;
+pub mod lan;
 pub mod proto;
 pub mod server;
 pub mod state;

@@ -30,6 +30,15 @@ pub enum Commands {
         /// Alias of a given connection
         name: Option<String>,
     },
+    /// Publishes a local depot directory as content-addressed chunks
+    Push {
+        /// Directory to publish
+        #[arg(short, long, default_value_t = String::from("."))]
+        path: String,
+        /// Output directory for chunks + manifest
+        #[arg(short, long, default_value_t = String::from("dist"))]
+        out: String,
+    },
 }
 
 #[derive(Args)]
