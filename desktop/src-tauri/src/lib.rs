@@ -61,6 +61,7 @@ use utils::app_emit;
 mod client;
 mod cloud_saves;
 mod collections;
+mod community;
 mod download_manager;
 mod downloads;
 mod games;
@@ -73,6 +74,7 @@ mod updates;
 
 use client::*;
 use cloud_saves::*;
+use community::*;
 use download_manager::*;
 use downloads::*;
 use games::*;
@@ -286,6 +288,8 @@ pub fn run() {
             // Cloud saves
             fetch_cloud_save_slots,
             download_cloud_save_object,
+            // Community
+            fetch_game_reviews,
             // Processes
             launch_game,
             kill_game,
