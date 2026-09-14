@@ -29,10 +29,10 @@ test("ClientPluginManager registers overlay slots without crashing", async () =>
   await manager.registerPlugin(overlayPlugin, "overlay-hud", [], ["ui:slot"]);
 
   assert.equal(manager.slots["overlay:panel"].length, 1);
-  assert.equal(manager.slots["overlay:panel"][0].pluginId, "overlay-hud");
+  assert.equal(manager.slots["overlay:panel"][0]?.pluginId, "overlay-hud");
   assert.equal(manager.slots["overlay:quick-access"].length, 1);
   assert.equal(
-    manager.slots["overlay:quick-access"][0].pluginId,
+    manager.slots["overlay:quick-access"][0]?.pluginId,
     "overlay-hud",
   );
 
@@ -110,18 +110,20 @@ test("ClientPluginManager registers StoreScanner and MetadataProvider SPIs", asy
   // Assert registered
   const scanners = manager.getStoreScanners();
   assert.equal(scanners.length, 1);
-  assert.equal(scanners[0].id, "gog");
-  const games = await scanners[0].scan();
+  const scanner = scanners[0];
+  assert.ok(scanner);
+  assert.equal(scanner.id, "gog");
+  const games = await scanner.scan();
   assert.equal(games.length, 1);
-  assert.equal(games[0].title, "Cyberpunk 2077");
+  assert.equal(games[0]?.title, "Cyberpunk 2077");
 
   const providers = manager.getMetadataProviders();
   assert.equal(providers.length, 1);
-  assert.equal(providers[0].id, "screenscraper");
+  assert.equal(providers[0]?.id, "screenscraper");
 
   const resolvers = manager.getCloudSaveResolvers();
   assert.equal(resolvers.length, 1);
-  assert.equal(resolvers[0].id, "ludusavi");
+  assert.equal(resolvers[0]?.id, "ludusavi");
 
   // Capability enforcement
   const restrictedPlugin: ClientPlugin = {
