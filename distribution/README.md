@@ -30,8 +30,8 @@ wraps the prebuilt `drop-app` binary from the CI `.deb` in a Debian source tree
 and signs the `.dsc`/`.changes`; `dput` then uploads them to Launchpad, which
 builds the actual binary packages.
 
-- Stable PPA: `ppa:heretek-games/drop`
-- Alpha PPA: `ppa:heretek-games/drop-alpha`
+- Stable PPA: `ppa:droposs/drop`
+- Alpha PPA: `ppa:droposs/drop-alpha`
 
 Launchpad requires a unique source version per series, so each upload is
 suffixed `~ubuntu22.04.1` / `~ubuntu24.04.1`. Alpha upstream versions use `~`
@@ -40,8 +40,8 @@ moves testers onto stable cleanly.
 
 ### One-time setup
 
-1. Create a Launchpad account and PPAs named `drop` and `drop-alpha` under the
-   `heretek-games` team (or your own user).
+1. Create a Launchpad account (or team) and PPAs named `drop` and `drop-alpha`
+   under it. The production namespace is `droposs` (<https://launchpad.net/droposs>).
 2. Create a dedicated GPG signing key and register its **public** key on
    Launchpad (Account → OpenPGP keys).
 3. Add repository secrets:
@@ -50,8 +50,8 @@ moves testers onto stable cleanly.
    - `PPA_GPG_KEY_ID` — full fingerprint or key ID
    - `PPA_GPG_PASSPHRASE` — key passphrase (omit for an unprotected key)
 4. Add repository variables:
-   - `PPA_STABLE` = `ppa:heretek-games/drop`
-   - `PPA_ALPHA` = `ppa:heretek-games/drop-alpha`
+   - `PPA_STABLE` = `ppa:droposs/drop`
+   - `PPA_ALPHA` = `ppa:droposs/drop-alpha`
 
 Uploads use Launchpad's anonymous FTP endpoint and are authenticated by the GPG
 signature on the `.changes` file. `scripts/distro/setup-gpg.sh` imports the key
@@ -64,8 +64,8 @@ and presets the passphrase for non-interactive `debsign`. Local dry runs can use
 `scripts/distro/build-rpm-srpm.sh` assembles the source tarball and builds an
 SRPM inside a Fedora container, then `copr-cli` submits it.
 
-- Stable project: `heretek-games/drop`
-- Alpha project: `heretek-games/drop-alpha`
+- Stable project: `heretek-ai/drop`
+- Alpha project: `heretek-ai/drop-alpha`
 - Chroots: `fedora-41-x86_64`, `fedora-42-x86_64`, `fedora-rawhide-x86_64`
 
 The channel is baked into the SRPM by flipping the spec's `%bcond_with alpha`
@@ -74,14 +74,16 @@ SRPM.
 
 ### One-time setup
 
-1. Create the COPR projects and enable the chroots above.
+1. Create the COPR projects under the `heretek-ai` owner
+   (<https://copr.fedorainfracloud.org/coprs/heretek-ai/drop/>) and enable the
+   chroots above.
 2. Generate an API token at <https://copr.fedorainfracloud.org/api/> and copy
    the resulting `~/.config/copr` contents.
 3. Add repository secret `COPR_API_TOKEN_CONFIG` — base64 of that file:
    `base64 -w0 ~/.config/copr`.
 4. Add repository variables:
-   - `COPR_STABLE` = `heretek-games/drop`
-   - `COPR_ALPHA` = `heretek-games/drop-alpha`
+   - `COPR_STABLE` = `heretek-ai/drop`
+   - `COPR_ALPHA` = `heretek-ai/drop-alpha`
 
 ## WinGet
 

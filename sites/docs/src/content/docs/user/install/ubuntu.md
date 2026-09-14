@@ -19,7 +19,7 @@ sudo apt install software-properties-common
 Stable channel:
 
 ```bash
-sudo add-apt-repository ppa:heretek-games/drop
+sudo add-apt-repository ppa:droposs/drop
 sudo apt update
 sudo apt install drop-desktop-client
 ```
@@ -27,7 +27,7 @@ sudo apt install drop-desktop-client
 Alpha channel (bleeding-edge builds from every commit):
 
 ```bash
-sudo add-apt-repository ppa:heretek-games/drop-alpha
+sudo add-apt-repository ppa:droposs/drop-alpha
 sudo apt update
 sudo apt install drop-desktop-client-alpha
 ```
