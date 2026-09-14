@@ -74,6 +74,7 @@ mod settings;
 mod presence;
 mod shaders;
 mod webrtc;
+mod workshop;
 mod updates;
 
 use achievements::*;
@@ -90,6 +91,7 @@ use settings::*;
 use presence::*;
 use shaders::*;
 use webrtc::*;
+use workshop::*;
 
 use crate::scheduler::scheduler_task;
 
@@ -307,6 +309,9 @@ pub fn run() {
             clear_presence,
             // WebRTC
             fetch_ice_config,
+            // Workshop
+            fetch_workshop_subscriptions,
+            fetch_workshop_mod,
             // Achievements
             unlock_achievements,
             // Shader caches
