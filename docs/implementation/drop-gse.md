@@ -32,9 +32,12 @@ tracks:
      define this privileged tier explicitly (M4 / P6).
 4. Server ships as an external plugin bundle; durable rooms use additive Prisma
    models.
-5. Mesh controller: **ZTNET-managed self-hosted ZeroTier is the default**
-   (`GSE_ZTNET_*`); raw ZeroTier controller is an advanced fallback; Tailscale
-   second.
+5. Mesh controller: owned by the canonical **`drop-zerotier`** provider
+   (`@heretek-games/zerotier-mesh`). ZTNET-managed self-hosted ZeroTier is the
+   default (configured on the provider with `ZTNET_*`); a raw ZeroTier
+   controller and Tailscale are advanced fallbacks. `drop-gse` announces
+   membership over the plugin event bus and consumes the provider's
+   network/member updates.
 6. License review required: GPL-3.0-or-later (drop-gse) + LGPL-3.0 (emulator
    binaries) combined into AGPL-3.0-or-later (Drop).
 
@@ -63,11 +66,11 @@ tracks:
   with `node dev-tools/sign-plugin.mjs <bundle-dir>`; see
   `dev-tools/sample-plugin/`. `DROP_PLUGIN_REQUIRE_SIGNATURE=true` refuses
   unsigned bundles.
-- **Desktop extension ABI (P6 decision)** — third-party plugins are
-  **server-side only** for now. Desktop integration is compiled in behind Cargo
-  features + runtime opt-in because GSE needs filesystem and VPN access that
-  cannot be safely sandboxed in-process; a WASM/sidecar plugin runtime is a
-  future option, not a v1 requirement.
+- **Desktop extension ABI (P6, updated)** — client plugins are supported via
+  `ClientPluginContext` (UI slots, launch hooks, scoped game FS/scanner, and an
+  allowlisted native-command capability, `system:command`). Plugins are
+  `trust: "trusted"` and run in-process; a WASM/sidecar sandbox remains a future
+  option.
 
 ## Frozen A↔B contract
 
@@ -169,7 +172,9 @@ blocked only when opted in; kill mid-patch restores on next startup.
 
 Owner: TBD · Depends on: M0, M2
 
-- [x] **B1** `MeshBackend` + `InMemoryMeshBackend` (`builtin/gse/mesh.ts`)
+- [x] **B1** `MeshBackend` + `InMemoryMeshBackend` now live in the canonical
+      provider package `@heretek-games/zerotier-mesh` (`drop-zerotier`).
+
 - [x] **B2** Durable rooms/memberships/credentials via additive Prisma models
       (`GseRoom`, `GseCredential`; migration `20260914000000_add_gse_rooms`),
       with a `StorageRoomPersistence` fallback for tests/dev; host lease
@@ -181,25 +186,23 @@ Owner: TBD · Depends on: M0, M2
       authenticated at the upgrade; `gse:credential` delivers the secret only to
       the authenticated requester (client `plugin_request_ws`, HTTP fallback).
       `credential_available` is broadcast without the secret.
-- [x] **B4** Default controller path is **ZTNET** (`ZtnetBackend` org REST API:
-      create + configure per-room /24 and routes, authorize members via
-      `ipAssignments`, revoke, delete), selected by `GSE_ZTNET_*` or
-      `GSE_MESH_BACKEND=ztnet`. Authorize/revoke resolve the network from the
-      persisted `room.mesh` and the member's stored node id, so they keep
-      working after a coordinator restart (the in-memory maps are empty).
-      Raw `ZeroTierBackend` remains as an advanced
-      fallback (now also revokes). `compose.ztnet.yaml` + `.env.ztnet.example`
-      ship with the deploy template; `dev-tools/gse-ztnet-check.ts` verifies a
-      live stack. ZTNET's update API does not expose `enableBroadcast` (unicast
+- [x] **B4** Mesh transport is delegated to the canonical **`drop-zerotier`**
+      provider (`@heretek-games/zerotier-mesh`): ZTNET org REST API (create +
+      configure per-room /24 and routes, authorize members via `ipAssignments`,
+      revoke, delete), a raw ZeroTier controller, and Tailscale, selected on the
+      provider with `MESH_BACKEND` / `ZTNET_*` / `ZEROTIER_*` / `TAILSCALE_*`.
+      `drop-gse` no longer provisions; it persists the provider-reported
+      `room.mesh` and member addresses, so state survives a coordinator restart.
+      ZTNET's update API does not expose `enableBroadcast` (unicast
       `custom_broadcasts.txt` covers discovery).
-- [x] **B6** Client requests its credential after host/join, joins the network
-      through `zerotier-cli` (`gse_mesh_join` returns the local 10-hex node id),
-      reports that node id to `POST /rooms/:id/member` so the controller
-      authorizes it and assigns a deterministic address, then refreshes the room
-      so assigned mesh addresses reach `custom_broadcasts.txt` via the A↔B
-      contract and tracks `selfAddress`/`meshReady`. Leaving calls
-      `gse_mesh_leave`; a missing ZeroTier install surfaces an actionable error.
-      OS-level VPN status checks remain a future enhancement.
+- [x] **B6** Client join is owned by the `drop-zerotier` client addon: on
+      `pre-launch:network` it looks up the user's active networks, runs
+      `zerotier-cli join <nwid>` through Drop's allowlisted `system:command`
+      capability, and reports its 10-hex node id so the provider authorizes it
+      and assigns a deterministic address. The address flows back to `drop-gse`
+      via the `mesh:member` event and into `custom_broadcasts.txt`. Leaving the
+      room revokes membership and the client leaves the network; a missing
+      ZeroTier install surfaces an actionable error.
 - [x] **B7** TTL sweeper (60s, unref'd), per-host + global caps, auth on room
       reads (member view vs discovery), credential/join/heartbeat auth
 
@@ -211,17 +214,16 @@ restart preserves rooms; host migration works; teardown leaves nothing behind.
 Owner: TBD · Depends on: M3
 
 - [x] **B5** `TailscaleBackend` + `TailscaleApiProvisioner` (one-off ephemeral
-      keys via the Tailscale API, revoked on teardown), selectable with
-      `GSE_MESH_BACKEND`; tested with a mock fetch. Uses one pre-declared tag
-      (BYO tailnet); the embedded client crate with isolated `--state=mem:`
-      remains a future enhancement.
+      keys via the Tailscale API, revoked on teardown) live in
+      `@heretek-games/zerotier-mesh`, selectable with `MESH_BACKEND`; tested with
+      a mock fetch. Uses one pre-declared tag (BYO tailnet).
 - [x] **B8** UI host/join/leave/teardown plus live updates: `plugin_subscribe`
       opens the plugin WS gateway from Rust and emits `plugin:event`; the modal
       subscribes to `gse:rooms` on open and refreshes on room events. Broadcast
       payloads for the public channel are sanitized with `toDiscoverable`.
-- [x] **P6** Desktop extension ABI decision recorded: third-party plugins are
-      server-side only; desktop work is a compiled-in first-party privileged
-      tier (WASM/sidecar runtime deferred)
+- [x] **P6** Desktop extension ABI: `ClientPluginContext` with UI slots, launch
+      hooks and a per-plugin native-command allowlist (`system:command`);
+      sandboxed runtime deferred
 - [x] Client-side WS consumption of `gse:rooms` (via the `plugin:event`
       Tauri channel)
 
@@ -261,10 +263,9 @@ The checklists above are authoritative. Summary:
   and verifies an emulator release into `<dataDir>/tools/gse/`.
 - **M2 complete** — opt-in room-gated interceptor, crash recovery, AppID
   pinning end-to-end, compat registry + consent UI.
-- **M3 complete** — durable Prisma store, host lease, credential issuance/
-  rotation + authenticated WS delivery, **ZTNET-backed** ZeroTier
-  provision/authorize/revoke/teardown (raw controller + Tailscale fallbacks),
-  client join/leave + `meshReady`, hardening.
+- **M3 complete** — durable Prisma store, host lease, credential issuance +
+  authenticated WS delivery. Mesh provision/authorize/revoke/teardown and the
+  client join/leave now live in the canonical `drop-zerotier` provider.
 - **M4 complete** — `TailscaleBackend` + `TailscaleApiProvisioner` selectable
   (both backends); live WS UI + client WS consumption; P6 ABI decision. The
   embedded `tailscale` crate with isolated state is a future enhancement.
@@ -274,11 +275,10 @@ The checklists above are authoritative. Summary:
 **Verification:** `pnpm --filter drop run test` (server tests), `cargo test -p
 gse-engine` (22), `cargo check -p process --tests` and `-p drop-app`, plus
 `nuxt typecheck` — all green. The Prisma room store was run against a live
-Postgres (`prisma migrate deploy` + `dev-tools/gse-prisma-check.ts`), and the
-ZTNET backend is exercised on every push to `develop` by the `ZTNET E2E`
-workflow (`dev-tools/ztnet-bootstrap.mjs` then `dev-tools/gse-ztnet-check.ts`
-→ provision/authorize/teardown OK, member assigned `10.242.x.x`). Desktop
-plugin calls authenticate with the client JWT (`internal/plugins/auth.ts`).
+Postgres (`prisma migrate deploy` + `dev-tools/gse-prisma-check.ts`). Mesh
+backends are unit-tested in `drop-zerotier` (`mesh-core` + plugin addons).
+Desktop plugin calls authenticate with the client JWT
+(`internal/plugins/auth.ts`).
 
 Known follow-ups: Tailscale member revocation is a no-op until keys expire and
 teardown after a coordinator restart relies on key TTLs; credential secrets are
