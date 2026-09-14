@@ -331,3 +331,60 @@ pub mod data {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::data::UninstallConfiguration;
+    use crate::platform::Platform;
+
+    #[test]
+    fn test_uninstall_configuration_serde_roundtrip() {
+        let json_input = r#"{
+            "command": "unins000.exe /VERYSILENT /NORESTART",
+            "platform": "Windows"
+        }"#;
+
+        let parsed: UninstallConfiguration =
+            serde_json::from_str(json_input).expect("Failed to deserialize UninstallConfiguration");
+
+        assert_eq!(parsed.command, "unins000.exe /VERYSILENT /NORESTART");
+        assert_eq!(parsed.platform, Platform::Windows);
+
+        let serialized =
+            serde_json::to_string(&parsed).expect("Failed to serialize UninstallConfiguration");
+        let roundtrip: UninstallConfiguration =
+            serde_json::from_str(&serialized).expect("Failed to re-parse serialized UninstallConfiguration");
+
+        assert_eq!(parsed, roundtrip);
+    }
+
+    #[test]
+    fn test_game_version_uninstaller_platform_filter() {
+        let win_uninstaller = UninstallConfiguration {
+            command: "C:\\game\\uninstall.exe".to_string(),
+            platform: Platform::Windows,
+        };
+        let linux_uninstaller = UninstallConfiguration {
+            command: "./uninstall.sh".to_string(),
+            platform: Platform::Linux,
+        };
+
+        let uninstallers = vec![win_uninstaller.clone(), linux_uninstaller.clone()];
+
+        // Match behavior used in process_manager::run_uninstaller
+        let resolved_win = uninstallers
+            .iter()
+            .find(|u| u.platform == Platform::Windows);
+        assert_eq!(resolved_win, Some(&win_uninstaller));
+
+        let resolved_linux = uninstallers
+            .iter()
+            .find(|u| u.platform == Platform::Linux);
+        assert_eq!(resolved_linux, Some(&linux_uninstaller));
+
+        let resolved_mac = uninstallers
+            .iter()
+            .find(|u| u.platform == Platform::macOS);
+        assert_eq!(resolved_mac, None);
+    }
+}

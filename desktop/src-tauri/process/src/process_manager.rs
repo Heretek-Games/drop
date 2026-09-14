@@ -154,6 +154,34 @@ impl ProcessManager<'_> {
         self.log_output_dir.join(game_id)
     }
 
+    /// Builds the cloud-save context for a launch, resolving the human-readable
+    /// title and the Drop-managed UMU/Proton prefix used by Windows titles on Linux.
+    fn cloud_save_context(
+        db: &Database,
+        game_id: &str,
+        install_dir: &Path,
+    ) -> cloud_saves::CloudSaveSyncContext {
+        let meta = db.applications.installed_game_version.get(game_id);
+
+        let title = meta
+            .and_then(|meta| db.applications.game_versions.get(&meta.version))
+            .and_then(|version| version.display_name.clone())
+            .filter(|name| !name.trim().is_empty())
+            .unwrap_or_else(|| game_id.to_string());
+
+        let mut context =
+            cloud_saves::CloudSaveSyncContext::new(game_id, title).with_install_dir(install_dir);
+
+        #[cfg(target_os = "linux")]
+        if matches!(meta.map(|meta| meta.target_platform), Some(Platform::Windows)) {
+            context = context.with_wine_prefix(
+                cloud_saves::CloudSaveSyncContext::default_wine_prefix(game_id),
+            );
+        }
+
+        context
+    }
+
     fn on_process_finish(
         &mut self,
         game_id: String,
@@ -189,6 +217,17 @@ impl ProcessManager<'_> {
                     e
                 );
             }
+        }
+
+        // Cloud saves post-exit hook: detect saves and stage/archive a backup.
+        // Build the context and drop the read guard before doing filesystem or
+        // external-tool work so the database lock is not held across it.
+        let cloud_context = {
+            let db_handle = borrow_db_checked();
+            Self::cloud_save_context(&db_handle, &game_id, &process.install_dir)
+        };
+        if let Err(e) = cloud_saves::CloudSaveSyncManager::new(cloud_context).sync_post_exit() {
+            warn!("Cloud save post-exit backup failed for {game_id}: {e:?}");
         }
 
         let mut db_handle = borrow_db_mut_checked();
@@ -690,6 +729,13 @@ impl ProcessManager<'_> {
 
         for interceptor in &self.interceptors {
             interceptor.pre_launch(&meta.id, &launch_parameters.1, &mut command)?;
+        }
+
+        // Cloud saves pre-launch hook: check and restore cloud saves if newer
+        let cloud_context =
+            Self::cloud_save_context(&db_lock, &meta.id, &launch_parameters.1);
+        if let Err(e) = cloud_saves::CloudSaveSyncManager::new(cloud_context).sync_pre_launch() {
+            warn!("Cloud save pre-launch sync warning for {}: {e:?}", meta.id);
         }
 
         let child = command.spawn()?;

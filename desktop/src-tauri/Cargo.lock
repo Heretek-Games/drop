@@ -750,6 +750,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_with",
+ "sha2",
  "tar",
  "tempfile",
  "uuid",
@@ -4179,6 +4180,7 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "client",
+ "cloud_saves",
  "database",
  "dynfmt",
  "games",

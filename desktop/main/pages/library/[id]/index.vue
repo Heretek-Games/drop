@@ -978,13 +978,18 @@ async function launchIndex(index: number, actionId?: string) {
     }
   } catch (e) {
     createModal(
-      ModalType.Notification,
+      ModalType.Confirmation,
       {
         title: `Couldn't run "${game.mName}"`,
-        description: `Drop failed to launch "${game.mName}": ${e}`,
-        buttonText: "Close",
+        description: `Drop failed to launch "${game.mName}": ${e}\n\nWould you like to open Game Options to change the launch method or configure a custom runner?`,
+        buttonText: "Change Launch Options",
       },
-      (e, c) => c(),
+      (event, close) => {
+        if (event === "confirm") {
+          configureModalOpen.value = true;
+        }
+        close();
+      },
     );
   }
 }
