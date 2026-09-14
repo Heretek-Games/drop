@@ -113,7 +113,12 @@ function createHarness() {
           return entry;
         },
         findMany: async ({ where }) =>
-          [...subs.values()].filter((s) => s.userId === where.userId),
+          [...subs.values()]
+            .filter((s) => s.userId === where.userId)
+            .map((s) => ({
+              ...s,
+              mod: [...mods.values()].find((m) => m.id === s.modId) ?? null,
+            })),
       },
     },
   };
@@ -231,6 +236,8 @@ test("subscriptions can be added, pinned, listed and removed", async () => {
 
   const list = await manager.listSubscriptions("user-1");
   assert.equal(list.length, 1);
+  assert.equal(list[0]?.mod?.key, "hi-res-textures");
+  assert.equal(list[0]?.mod?.gameId, "game-1");
 
   assert.equal(
     await manager.unsubscribe("user-1", "game-1", "hi-res-textures"),

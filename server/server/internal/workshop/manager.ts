@@ -28,6 +28,16 @@ export interface ModSubscriptionRecord {
   createdAt: Date;
 }
 
+/** A subscription joined with the mod it targets (for client load planning). */
+export interface ModSubscriptionView extends ModSubscriptionRecord {
+  mod?: {
+    id: string;
+    gameId: string;
+    key: string;
+    name: string;
+  } | null;
+}
+
 export interface PublishModInput {
   gameId: string;
   manifest: unknown;
@@ -95,7 +105,7 @@ export interface WorkshopDeps {
       }): Promise<ModSubscriptionRecord>;
       findMany(args: {
         where: { userId: string };
-      }): Promise<ModSubscriptionRecord[]>;
+      }): Promise<ModSubscriptionView[]>;
     };
   };
 }
@@ -307,7 +317,7 @@ export class WorkshopManager {
     return true;
   }
 
-  async listSubscriptions(userId: string): Promise<ModSubscriptionRecord[]> {
+  async listSubscriptions(userId: string): Promise<ModSubscriptionView[]> {
     return this.deps.prisma.modSubscription.findMany({ where: { userId } });
   }
 }
