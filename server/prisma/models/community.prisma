@@ -18,3 +18,42 @@ model GameReview {
   @@unique([gameId, userId])
   @@index([gameId])
 }
+
+// Per-game discussion forums (#20 community hubs).
+
+model ForumThread {
+  id String @id @default(uuid())
+
+  gameId String
+  game   Game   @relation(fields: [gameId], references: [id], onDelete: Cascade)
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  title  String
+  body   String
+  locked Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @default(now()) @updatedAt
+
+  posts ForumPost[]
+
+  @@index([gameId])
+  @@index([gameId, updatedAt])
+}
+
+model ForumPost {
+  id String @id @default(uuid())
+
+  threadId String
+  thread   ForumThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  userId   String
+  user     User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  body String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @default(now()) @updatedAt
+
+  @@index([threadId, createdAt])
+}

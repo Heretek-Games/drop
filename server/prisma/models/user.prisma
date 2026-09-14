@@ -27,6 +27,8 @@ model User {
     leaderboardEntries LeaderboardEntry[]
     reviews            GameReview[]
     modSubscriptions   ModSubscription[]
+    forumThreads       ForumThread[]
+    forumPosts         ForumPost[]
 
     groups UserGroup[]
 }

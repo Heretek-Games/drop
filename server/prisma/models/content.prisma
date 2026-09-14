@@ -64,6 +64,7 @@ model Game {
   leaderboards Leaderboard[]
   reviews      GameReview[]
   mods         Mod[]
+  forumThreads ForumThread[]
 
   developers             Company[]               @relation(name: "developers")
   publishers             Company[]               @relation(name: "publishers")
