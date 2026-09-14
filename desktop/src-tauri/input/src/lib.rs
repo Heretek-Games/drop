@@ -8,7 +8,13 @@
 #[cfg(target_os = "linux")]
 pub mod uinput;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub mod profile;
+
+pub use profile::{
+    ButtonRemap, ControllerProfile, ProfileError, apply_profile, remap_buttons, validate_profile,
+};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum GamepadButton {
     South,
     East,
