@@ -437,6 +437,8 @@ const CAPABILITY_DESCRIPTIONS: Record<string, string> = {
   network: "Make outbound network requests from the server.",
   websocket: "Expose real-time WebSocket communication channels.",
   "system:sidecar": "Execute background system sidecar processes.",
+  "system:command":
+    "Run allowlisted native commands (e.g. zerotier-cli) on this device.",
 };
 
 function handleFileUpload(event: Event) {

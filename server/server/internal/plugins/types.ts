@@ -34,7 +34,8 @@ export type ClientCapability =
   | "game:scan"
   | "client:storage"
   | "client:ws"
-  | "system:sidecar";
+  | "system:sidecar"
+  | "system:command";
 
 export type PluginCapability = ServerCapability | ClientCapability;
 
@@ -94,6 +95,11 @@ export interface PluginManifest extends PluginMetadata {
     css?: string;
     capabilities: ClientCapability[];
     slots?: Array<{ slot: string; component: string }>;
+    /**
+     * Bare executable names the client plugin may run via `ctx.system.run`
+     * (requires the `system:command` capability). Enforced by the desktop host.
+     */
+    commands?: string[];
   };
 }
 

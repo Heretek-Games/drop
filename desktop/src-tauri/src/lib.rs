@@ -229,6 +229,7 @@ pub fn run() {
 
     let app = builder
         .plugin(tauri_plugin_deep_link::init())
+        .manage(PluginCommandAllowlist::default())
         .invoke_handler(tauri::generate_handler![
             // Core utils
             fetch_state,
@@ -261,6 +262,8 @@ pub fn run() {
             plugin_game_fs_delete,
             plugin_game_scan_executables,
             plugin_game_check_anticheat,
+            plugin_register_commands,
+            plugin_system_run,
             // Library
             fetch_library,
             fetch_game,

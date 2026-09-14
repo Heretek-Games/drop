@@ -10,6 +10,7 @@ interface RemotePluginInfo {
   client?: {
     entry?: string;
     css?: string;
+    commands?: string[];
   };
 }
 
@@ -23,9 +24,17 @@ async function loadRemotePlugin(plugin: RemotePluginInfo): Promise<void> {
   const clientCssUrl = plugin.client?.css
     ? `/api/v1/plugins/${plugin.id}/client/${plugin.client.css}`
     : undefined;
+  const commands = Array.isArray(plugin.client?.commands)
+    ? plugin.client.commands
+    : [];
 
   try {
-    await clientPluginManager.loadFromUrl(plugin.id, clientJsUrl, clientCssUrl);
+    await clientPluginManager.loadFromUrl(
+      plugin.id,
+      clientJsUrl,
+      clientCssUrl,
+      commands,
+    );
   } catch (loadErr) {
     console.debug(
       `Plugin ${plugin.id} has no client bundle or failed to load:`,

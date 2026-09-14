@@ -6,6 +6,7 @@ import type {
   ClientPluginContext,
   ClientPluginStorage,
   ClientPluginWebSocket,
+  CommandResult,
   GameMenuItem,
   HttpMethod,
   LaunchContext,
@@ -175,10 +176,26 @@ export class ClientPluginManager {
   /**
    * Register and initialize a client plugin instance.
    */
-  async registerPlugin(plugin: ClientPlugin, id?: string): Promise<void> {
+  async registerPlugin(
+    plugin: ClientPlugin,
+    id?: string,
+    commands: string[] = [],
+  ): Promise<void> {
     const pluginId = id || plugin.metadata?.id || "anonymous-plugin";
     if (this.plugins.has(pluginId)) {
       await this.unregisterPlugin(pluginId);
+    }
+
+    // Register the native command allowlist before init so `ctx.system.run`
+    // works. Enforcement lives in the Tauri command layer, not here, so a
+    // plugin cannot bypass it by calling invoke directly.
+    try {
+      await invoke("plugin_register_commands", { pluginId, commands });
+    } catch (err) {
+      console.warn(
+        `Failed to register command allowlist for ${pluginId}:`,
+        err,
+      );
     }
 
     const context: ClientPluginContext = {
@@ -244,6 +261,20 @@ export class ClientPluginManager {
       gameFs: new TauriScopedGameFs(),
       gameScanner: new TauriScopedGameScanner(),
       serverWs: new TauriPluginWebSocket(),
+      system: {
+        run: (
+          bin: string,
+          args?: string[],
+          options?: { cwd?: string; timeoutMs?: number },
+        ) =>
+          invoke<CommandResult>("plugin_system_run", {
+            pluginId,
+            bin,
+            args,
+            cwd: options?.cwd,
+            timeoutMs: options?.timeoutMs,
+          }),
+      },
       serverRequest: <T>(method: HttpMethod, path = "", body?: unknown) =>
         invoke<T>("plugin_request", {
           pluginId,
@@ -275,6 +306,14 @@ export class ClientPluginManager {
       this.plugins.delete(pluginId);
     }
 
+    // Drop the native command allowlist for this plugin.
+    await invoke("plugin_register_commands", {
+      pluginId,
+      commands: [],
+    }).catch(() => {
+      // Best effort: the plugin may never have registered a allowlist.
+    });
+
     // Clean up UI slots registered by this plugin
     for (const slotName of Object.keys(this.slots) as UISlotName[]) {
       this.slots[slotName] = this.slots[slotName].filter(
@@ -290,6 +329,7 @@ export class ClientPluginManager {
     pluginId: string,
     bundleUrl: string,
     cssUrl?: string,
+    commands: string[] = [],
   ): Promise<void> {
     if (cssUrl) {
       const link = document.createElement("link");
@@ -312,7 +352,7 @@ export class ClientPluginManager {
       );
     }
 
-    await this.registerPlugin(pluginExport, pluginId);
+    await this.registerPlugin(pluginExport, pluginId, commands);
   }
 
   /**

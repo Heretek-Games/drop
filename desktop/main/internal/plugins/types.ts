@@ -113,6 +113,31 @@ export interface ClientPluginWebSocket {
   subscribe(channel: string, listener: (data: unknown) => void): () => void;
 }
 
+/** Result of a native command run through the client host. */
+export interface CommandResult {
+  code: number;
+  stdout: string;
+  stderr: string;
+}
+
+export interface CommandOptions {
+  cwd?: string;
+  timeoutMs?: number;
+}
+
+/**
+ * Native command execution for client plugins. The host runs the binary
+ * directly (no shell) and enforces the per-plugin allowlist registered from
+ * `manifest.client.commands`.
+ */
+export interface ClientPluginSystem {
+  run(
+    bin: string,
+    args?: string[],
+    options?: CommandOptions,
+  ): Promise<CommandResult>;
+}
+
 export interface ClientPluginContext {
   id: string;
   logger: {
@@ -137,6 +162,8 @@ export interface ClientPluginContext {
   gameFs: ScopedGameFs;
   gameScanner: ScopedGameScanner;
   serverWs: ClientPluginWebSocket;
+  /** Native command execution. Requires the `system:command` capability. */
+  system: ClientPluginSystem;
   /**
    * Call this plugin's own server-side REST routes through the desktop host.
    * The webview cannot reach the Drop server directly, so the host proxies the

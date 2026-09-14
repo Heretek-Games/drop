@@ -1,11 +1,16 @@
+use std::collections::{HashMap, HashSet};
 use std::fs::{self, File};
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
+use std::time::Duration;
 
 use database::borrow_db_checked;
 use process::path_guard;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use tauri::State;
+use tokio::process::Command as TokioCommand;
 use walkdir::WalkDir;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -22,6 +27,109 @@ pub struct AntiCheatReport {
     pub detected: bool,
     pub provider: Option<String>,
     pub files: Vec<String>,
+}
+
+/// Per-plugin allowlist of bare executable names a client plugin may run via
+/// `ctx.system.run`. Populated from `manifest.client.commands` by the host when
+/// a plugin is registered; the Tauri command layer is the enforcement point so
+/// a plugin cannot bypass it from the webview.
+#[derive(Default)]
+pub struct PluginCommandAllowlist(pub Mutex<HashMap<String, HashSet<String>>>);
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CommandOutput {
+    pub code: i32,
+    pub stdout: String,
+    pub stderr: String,
+}
+
+/// Register (replace) the allowlisted commands for a plugin.
+#[tauri::command]
+pub fn plugin_register_commands(
+    plugin_id: String,
+    commands: Vec<String>,
+    state: State<'_, PluginCommandAllowlist>,
+) -> Result<(), String> {
+    let mut registry = state
+        .0
+        .lock()
+        .map_err(|_| "plugin command registry poisoned".to_string())?;
+    let entry = registry.entry(plugin_id).or_default();
+    entry.clear();
+    for command in commands {
+        let command = command.trim();
+        if command.is_empty() {
+            continue;
+        }
+        // Only bare executable names are allowed; no paths, so an allowlist
+        // entry cannot be used to traverse to an arbitrary binary.
+        if command.contains('/') || command.contains('\\') {
+            return Err(format!(
+                "allowlisted command must be a bare executable name: {command}"
+            ));
+        }
+        entry.insert(command.to_string());
+    }
+    Ok(())
+}
+
+/// Run an allowlisted native command for a plugin. The binary is executed
+/// directly (no shell), so shell metacharacters are never interpreted.
+#[tauri::command]
+pub async fn plugin_system_run(
+    plugin_id: String,
+    bin: String,
+    args: Option<Vec<String>>,
+    cwd: Option<String>,
+    timeout_ms: Option<u64>,
+    state: State<'_, PluginCommandAllowlist>,
+) -> Result<CommandOutput, String> {
+    {
+        let registry = state
+            .0
+            .lock()
+            .map_err(|_| "plugin command registry poisoned".to_string())?;
+        let allowed = registry
+            .get(&plugin_id)
+            .map(|set| set.contains(&bin))
+            .unwrap_or(false);
+        if !allowed {
+            return Err(format!(
+                "command '{bin}' is not allowlisted for plugin '{plugin_id}'"
+            ));
+        }
+    }
+
+    let mut command = TokioCommand::new(&bin);
+    command
+        .args(args.unwrap_or_default())
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .kill_on_drop(true);
+    if let Some(dir) = cwd {
+        command.current_dir(dir);
+    }
+
+    // Clamp to [1ms, 120s] so a plugin cannot request an unbounded process.
+    let timeout = Duration::from_millis(timeout_ms.unwrap_or(15_000).clamp(1, 120_000));
+    let output = match tokio::time::timeout(timeout, command.output()).await {
+        Ok(Ok(output)) => output,
+        Ok(Err(err)) => return Err(format!("failed to run '{bin}': {err}")),
+        Err(_) => {
+            return Err(format!(
+                "'{bin}' timed out after {}ms",
+                timeout.as_millis()
+            ))
+        }
+    };
+
+    Ok(CommandOutput {
+        code: output.status.code().unwrap_or(-1),
+        stdout: String::from_utf8_lossy(&output.stdout).to_string(),
+        stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+    })
 }
 
 fn get_game_install_dir(game_id: &str) -> Result<PathBuf, String> {
@@ -192,18 +300,18 @@ pub async fn plugin_game_scan_executables(
                 .unwrap_or(false)
         };
 
-        if is_exec {
-            if let Ok(rel_path) = path.strip_prefix(&install_dir) {
-                let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
-                let sha256 = compute_file_sha256(path)
-                    .unwrap_or_else(|_| String::from("unknown-sha256"));
+        if is_exec
+            && let Ok(rel_path) = path.strip_prefix(&install_dir)
+        {
+            let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
+            let sha256 = compute_file_sha256(path)
+                .unwrap_or_else(|_| String::from("unknown-sha256"));
 
-                executables.push(ScannedExecutable {
-                    relative_path: rel_path.to_string_lossy().to_string(),
-                    sha256,
-                    size,
-                });
-            }
+            executables.push(ScannedExecutable {
+                relative_path: rel_path.to_string_lossy().to_string(),
+                sha256,
+                size,
+            });
         }
     }
 
@@ -241,12 +349,12 @@ pub async fn plugin_game_check_anticheat(game_id: String) -> Result<AntiCheatRep
             None
         };
 
-        if let Some(p) = provider {
-            if let Ok(rel) = path.strip_prefix(&install_dir) {
-                detected_files.push(rel.to_string_lossy().to_string());
-                if detected_provider.is_none() {
-                    detected_provider = Some(p.to_string());
-                }
+        if let Some(p) = provider
+            && let Ok(rel) = path.strip_prefix(&install_dir)
+        {
+            detected_files.push(rel.to_string_lossy().to_string());
+            if detected_provider.is_none() {
+                detected_provider = Some(p.to_string());
             }
         }
     }

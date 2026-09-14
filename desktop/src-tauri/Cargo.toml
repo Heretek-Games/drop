@@ -124,7 +124,7 @@ features = ["protocol-asset", "tray-icon", "unstable"]
 
 [dependencies.tokio]
 version = "1.40.0"
-features = ["rt", "signal", "tokio-macros"]
+features = ["rt", "signal", "tokio-macros", "process", "io-util", "time"]
 
 [dependencies.uuid]
 version = "1.10.0"
