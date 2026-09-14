@@ -11,7 +11,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use walkdir::WalkDir;
 
@@ -26,39 +26,84 @@ fn hex_digest(bytes: &[u8]) -> String {
     out
 }
 
+#[derive(Debug, Default, Clone)]
+pub struct PushOptions {
+    /// Release branch the artifacts belong to (e.g. `main`, `beta`).
+    pub branch: Option<String>,
+    /// Multi-platform depot the artifacts belong to (e.g. `windows`, `assets`).
+    pub depot: Option<String>,
+    /// Previous manifest to diff against; chunks already present there are
+    /// reused instead of being written and re-uploaded.
+    pub base_manifest: Option<PathBuf>,
+}
+
 #[derive(Debug, Serialize)]
 pub struct PushSummary {
     pub files: usize,
     pub chunks: usize,
     pub bytes_in: u64,
     pub bytes_out: u64,
+    /// Chunks whose digest was already present in `base_manifest`.
+    pub reused_chunks: usize,
+    /// Chunks newly written (and therefore uploaded).
+    pub new_chunks: usize,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 struct ChunkRef {
     sha256: String,
     original_len: usize,
     compressed_len: usize,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 struct ManifestEntry {
     path: String,
     chunks: Vec<ChunkRef>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 struct PushManifest {
     version: u32,
-    chunker: &'static str,
+    chunker: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    branch: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    depot: Option<String>,
     entries: Vec<ManifestEntry>,
 }
 
+/// Read the set of chunk digests already published by a previous manifest.
+fn read_base_chunks(manifest_path: &Path) -> Result<std::collections::HashSet<String>> {
+    let bytes = fs::read(manifest_path)
+        .with_context(|| format!("reading base manifest {}", manifest_path.display()))?;
+    let manifest: PushManifest = serde_json::from_slice(&bytes).context("parsing base manifest")?;
+    let mut digests = std::collections::HashSet::new();
+    for entry in manifest.entries {
+        for chunk in entry.chunks {
+            digests.insert(chunk.sha256);
+        }
+    }
+    Ok(digests)
+}
+
 /// Chunks `path` into `out/chunks` and writes `out/manifest.json`.
+#[cfg(test)]
 pub fn run(path: &Path, out: &Path) -> Result<PushSummary> {
+    run_with_options(path, out, &PushOptions::default())
+}
+
+/// Chunks `path` and writes a manifest, reusing chunks from an optional base
+/// manifest so only changed content is emitted (and later uploaded).
+pub fn run_with_options(path: &Path, out: &Path, options: &PushOptions) -> Result<PushSummary> {
     let chunker = Chunker::default();
     let chunk_dir = out.join("chunks");
     fs::create_dir_all(&chunk_dir).context("creating chunk output directory")?;
+
+    let base_chunks = match &options.base_manifest {
+        Some(base) => read_base_chunks(base)?,
+        None => std::collections::HashSet::new(),
+    };
 
     let mut entries = Vec::new();
     let mut summary = PushSummary {
@@ -66,6 +111,8 @@ pub fn run(path: &Path, out: &Path) -> Result<PushSummary> {
         chunks: 0,
         bytes_in: 0,
         bytes_out: 0,
+        reused_chunks: 0,
+        new_chunks: 0,
     };
     let mut written: std::collections::HashSet<String> = std::collections::HashSet::new();
 
@@ -87,13 +134,20 @@ pub fn run(path: &Path, out: &Path) -> Result<PushSummary> {
 
         let mut chunks = Vec::new();
         for chunk in chunker.split(&data) {
-            let compressed = zstd::bulk::compress(chunk, 3).context("compressing chunk")?;
             let digest = hex_digest(chunk);
-            let chunk_path = chunk_dir.join(&digest);
-            if !written.contains(&digest) {
+            let already_published = base_chunks.contains(&digest);
+            let compressed = zstd::bulk::compress(chunk, 3).context("compressing chunk")?;
+
+            if already_published {
+                summary.reused_chunks += 1;
+            } else if !written.contains(&digest) {
+                let chunk_path = chunk_dir.join(&digest);
                 fs::write(&chunk_path, &compressed).context("writing chunk")?;
                 written.insert(digest.clone());
+                summary.new_chunks += 1;
                 summary.bytes_out += compressed.len() as u64;
+            } else {
+                summary.reused_chunks += 1;
             }
             summary.chunks += 1;
             chunks.push(ChunkRef {
@@ -111,7 +165,9 @@ pub fn run(path: &Path, out: &Path) -> Result<PushSummary> {
 
     let manifest = PushManifest {
         version: 1,
-        chunker: "buzhash-cdc-v1",
+        chunker: "buzhash-cdc-v1".to_string(),
+        branch: options.branch.clone(),
+        depot: options.depot.clone(),
         entries,
     };
     let manifest_path = out.join("manifest.json");
@@ -262,5 +318,73 @@ mod tests {
             rebuilt.extend_from_slice(&decompressed);
         }
         assert_eq!(rebuilt, payload_a);
+    }
+
+    #[test]
+    fn push_reuses_chunks_from_a_base_manifest() {
+        let input = tempdir().unwrap();
+        let base = tempdir().unwrap();
+        let out = tempdir().unwrap();
+
+        let original = vec![11u8; 200_000];
+        fs::write(input.path().join("data.bin"), &original).unwrap();
+        let first = run(input.path(), base.path()).unwrap();
+        assert!(first.new_chunks >= 1);
+
+        // Unchanged content: every chunk should be reused, nothing rewritten.
+        let unchanged = run_with_options(
+            input.path(),
+            out.path(),
+            &PushOptions {
+                base_manifest: Some(base.path().join("manifest.json")),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(unchanged.new_chunks, 0);
+        assert!(unchanged.reused_chunks >= 1);
+        assert_eq!(unchanged.bytes_out, 0);
+
+        // Appended content: the unchanged prefix is reused, the tail is new.
+        let mut modified = original.clone();
+        modified.extend_from_slice(&[99u8; 5_000]);
+        fs::write(input.path().join("data.bin"), &modified).unwrap();
+        let delta = run_with_options(
+            input.path(),
+            out.path(),
+            &PushOptions {
+                base_manifest: Some(base.path().join("manifest.json")),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert!(
+            delta.reused_chunks >= 1,
+            "unchanged prefix should be reused"
+        );
+        assert!(delta.new_chunks >= 1, "appended content should be new");
+    }
+
+    #[test]
+    fn push_records_branch_and_depot_in_the_manifest() {
+        let input = tempdir().unwrap();
+        let out = tempdir().unwrap();
+        fs::write(input.path().join("a.bin"), vec![1u8; 100]).unwrap();
+
+        run_with_options(
+            input.path(),
+            out.path(),
+            &PushOptions {
+                branch: Some("beta".to_string()),
+                depot: Some("windows".to_string()),
+                base_manifest: None,
+            },
+        )
+        .unwrap();
+
+        let manifest: serde_json::Value =
+            serde_json::from_slice(&fs::read(out.path().join("manifest.json")).unwrap()).unwrap();
+        assert_eq!(manifest["branch"], "beta");
+        assert_eq!(manifest["depot"], "windows");
     }
 }

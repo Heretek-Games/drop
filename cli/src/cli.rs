@@ -44,6 +44,15 @@ pub enum Commands {
         /// Object-store key prefix for the upload
         #[arg(long, default_value_t = String::new())]
         prefix: String,
+        /// Release branch (main, beta, nightly); recorded in the manifest
+        #[arg(long)]
+        branch: Option<String>,
+        /// Multi-platform depot (windows, linux, assets); recorded in the manifest
+        #[arg(long)]
+        depot: Option<String>,
+        /// Previous manifest to diff against for a binary delta
+        #[arg(long)]
+        base: Option<String>,
     },
 }
 

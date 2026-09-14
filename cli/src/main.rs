@@ -33,14 +33,28 @@ async fn main() -> anyhow::Result<()> {
             out,
             upload,
             prefix,
+            branch,
+            depot,
+            base,
         } => {
-            let summary = crate::commands::push::run(
+            let options = crate::commands::push::PushOptions {
+                branch,
+                depot,
+                base_manifest: base.map(std::path::PathBuf::from),
+            };
+            let summary = crate::commands::push::run_with_options(
                 std::path::Path::new(&path),
                 std::path::Path::new(&out),
+                &options,
             )?;
             println!(
-                "pushed {} file(s), {} chunk(s), {} -> {} bytes",
-                summary.files, summary.chunks, summary.bytes_in, summary.bytes_out
+                "pushed {} file(s), {} chunk(s) ({} new, {} reused), {} -> {} bytes",
+                summary.files,
+                summary.chunks,
+                summary.new_chunks,
+                summary.reused_chunks,
+                summary.bytes_in,
+                summary.bytes_out
             );
 
             if let Some(scheme) = upload {
