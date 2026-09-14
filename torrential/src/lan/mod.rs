@@ -94,9 +94,88 @@ pub fn peer_score(peer: &LanPeer) -> u64 {
     latency * 1_000_000 + throughput
 }
 
+/// Fetches a chunk from a LAN peer (HTTP/QUIC transport is injected).
+pub trait ChunkFetcher: Send + Sync {
+    /// Returns the raw chunk bytes, or an error string on failure.
+    ///
+    /// # Errors
+    /// Transport-specific failure described as a string.
+    fn fetch(&self, peer: &LanPeer, content_id: &str, chunk_index: u64) -> Result<Vec<u8>, String>;
+}
+
+/// Selects the best live peer and fetches a chunk through `fetcher`. Returns
+/// `None` when no live peer is available.
+pub fn fetch_from_best_peer<F: ChunkFetcher>(
+    registry: &LanPeerRegistry,
+    now: Instant,
+    fetcher: &F,
+    content_id: &str,
+    chunk_index: u64,
+) -> Option<Result<Vec<u8>, String>> {
+    let peer = registry.best(now)?;
+    Some(fetcher.fetch(&peer, content_id, chunk_index))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fetches_a_chunk_from_the_best_peer() {
+        struct RecordingFetcher {
+            seen: std::sync::Mutex<Vec<String>>,
+        }
+        impl ChunkFetcher for RecordingFetcher {
+            fn fetch(
+                &self,
+                peer: &LanPeer,
+                content_id: &str,
+                chunk_index: u64,
+            ) -> Result<Vec<u8>, String> {
+                if let Ok(mut seen) = self.seen.lock() {
+                    seen.push(peer.peer_id.clone());
+                }
+                Ok(format!("{content_id}:{chunk_index}").into_bytes())
+            }
+        }
+
+        let mut registry = LanPeerRegistry::new(Duration::from_secs(30));
+        let now = Instant::now();
+        registry.observe(peer("slow", 50, 100), now);
+        registry.observe(peer("fast", 2, 100), now);
+
+        let fetcher = RecordingFetcher {
+            seen: std::sync::Mutex::new(Vec::new()),
+        };
+        let result = fetch_from_best_peer(&registry, now, &fetcher, "depot", 3);
+        let Some(Ok(bytes)) = result else {
+            panic!("expected a successful fetch");
+        };
+        assert_eq!(bytes, b"depot:3");
+        assert_eq!(
+            fetcher.seen.lock().map(|seen| seen.clone()).ok(),
+            Some(vec!["fast".to_string()])
+        );
+    }
+
+    #[test]
+    fn no_live_peer_yields_none() {
+        struct NeverFetcher;
+        impl ChunkFetcher for NeverFetcher {
+            fn fetch(
+                &self,
+                _peer: &LanPeer,
+                _content_id: &str,
+                _chunk_index: u64,
+            ) -> Result<Vec<u8>, String> {
+                Err("should not be called".to_string())
+            }
+        }
+        let registry = LanPeerRegistry::new(Duration::from_secs(1));
+        assert!(
+            fetch_from_best_peer(&registry, Instant::now(), &NeverFetcher, "depot", 0).is_none()
+        );
+    }
 
     fn peer(id: &str, rtt: u32, kibps: u32) -> LanPeer {
         LanPeer {
