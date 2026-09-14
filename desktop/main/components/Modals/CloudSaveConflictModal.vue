@@ -24,8 +24,9 @@
 
       <div class="mt-5 grid grid-cols-2 gap-4">
         <!-- Local Save Card -->
-        <div
-          class="rounded-xl bg-zinc-800/60 p-4 ring-1 ring-white/5 hover:ring-blue-500/50 transition cursor-pointer"
+        <button
+          type="button"
+          class="w-full rounded-xl bg-zinc-800/60 p-4 text-left ring-1 ring-white/5 hover:ring-blue-500/50 transition cursor-pointer"
           :class="{ 'ring-2 ring-blue-500 bg-blue-950/20': choice === 'local' }"
           @click="choice = 'local'"
         >
@@ -43,11 +44,12 @@
           <p class="mt-3 text-[11px] text-zinc-400">
             Keep your locally played save files and overwrite the cloud copy.
           </p>
-        </div>
+        </button>
 
         <!-- Cloud Save Card -->
-        <div
-          class="rounded-xl bg-zinc-800/60 p-4 ring-1 ring-white/5 hover:ring-blue-500/50 transition cursor-pointer"
+        <button
+          type="button"
+          class="w-full rounded-xl bg-zinc-800/60 p-4 text-left ring-1 ring-white/5 hover:ring-blue-500/50 transition cursor-pointer"
           :class="{ 'ring-2 ring-blue-500 bg-blue-950/20': choice === 'cloud' }"
           @click="choice = 'cloud'"
         >
@@ -65,7 +67,7 @@
           <p class="mt-3 text-[11px] text-zinc-400">
             Download latest server snapshot and overwrite local files.
           </p>
-        </div>
+        </button>
       </div>
 
       <div class="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
