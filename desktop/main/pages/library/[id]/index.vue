@@ -101,6 +101,21 @@
 
           <!-- Plugin Slot: Game Detail Actions (e.g. Multiplayer Button, Mod Manager) -->
           <PluginSlot name="game-detail:actions" :context="{ game, status }" />
+
+          <!--
+            Generic extension hint: an installed game with no plugin-provided
+            actions advertises that extra capabilities (multiplayer, mods, ...)
+            require installing an extension.
+          -->
+          <button
+            v-if="status.type === 'Installed' && !hasPluginActions"
+            type="button"
+            class="transition-transform duration-300 hover:scale-105 active:scale-95 inline-flex items-center gap-x-2 rounded-md bg-zinc-800/50 px-6 font-semibold text-white shadow-xl backdrop-blur-sm hover:bg-zinc-800/80 uppercase font-display"
+            @click="extensionsPromptOpen = true"
+          >
+            <UserGroupIcon class="size-5" aria-hidden="true" />
+            Multiplayer
+          </button>
         </div>
       </div>
 
@@ -683,6 +698,45 @@
     v-if="dependencyRequiredModal"
     v-model="dependencyRequiredModal"
   />
+
+  <ModalTemplate v-model="extensionsPromptOpen">
+    <template #default>
+      <div class="sm:flex sm:items-start">
+        <div class="mt-3 text-center sm:mt-0 sm:text-left">
+          <h3 class="text-base font-semibold text-zinc-100">
+            Extend {{ game.mName }}
+          </h3>
+          <div class="mt-2 space-y-2">
+            <p class="text-sm text-zinc-400">
+              This game has no extensions installed. Optional features such as
+              multiplayer are provided by Drop plugins.
+            </p>
+            <p class="text-sm text-zinc-400">
+              Open the Plugin Manager to browse the registry or install a
+              <code class="font-mono">.dropplugin</code> bundle.
+            </p>
+          </div>
+        </div>
+      </div>
+    </template>
+    <template #buttons>
+      <NuxtLink
+        to="/settings/plugins"
+        class="ml-2 inline-flex w-full justify-center rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-700 sm:w-auto"
+        @click="extensionsPromptOpen = false"
+      >
+        Open Plugin Manager
+      </NuxtLink>
+      <button
+        ref="cancelButtonRef"
+        type="button"
+        class="mt-3 inline-flex w-full justify-center rounded-md bg-zinc-800 px-3 py-2 text-sm font-semibold text-zinc-100 shadow-sm ring-1 ring-inset ring-zinc-700 hover:bg-zinc-900 sm:mt-0 sm:w-auto"
+        @click="extensionsPromptOpen = false"
+      >
+        Close
+      </button>
+    </template>
+  </ModalTemplate>
 </template>
 
 <script setup lang="ts">
@@ -704,7 +758,10 @@ import {
   PlayIcon,
   InformationCircleIcon,
 } from "@heroicons/vue/20/solid";
-import { BuildingStorefrontIcon } from "@heroicons/vue/24/outline";
+import {
+  BuildingStorefrontIcon,
+  UserGroupIcon,
+} from "@heroicons/vue/24/outline";
 import {
   ArrowDownTrayIcon,
   CheckCircleIcon,
@@ -715,7 +772,7 @@ import {
 import { invoke } from "@tauri-apps/api/core";
 import { micromark } from "micromark";
 import { InstalledType } from "~/types";
-import { usePlayActions } from "~/composables/usePlugins";
+import { usePlayActions, usePluginSlots } from "~/composables/usePlugins";
 import { clientPluginManager } from "~/internal/plugins/ClientPluginManager";
 import type { PlayAction } from "~/internal/plugins/types";
 
@@ -724,6 +781,12 @@ const router = useRouter();
 const id = route.params.id?.toString() ?? "";
 
 const { actions: pluginPlayActions } = usePlayActions(() => id);
+const pluginSlotActions = usePluginSlots("game-detail:actions");
+const hasPluginActions = computed(
+  () =>
+    pluginPlayActions.value.length > 0 || pluginSlotActions.value.length > 0,
+);
+const extensionsPromptOpen = ref(false);
 
 const { game, status, version } = await useGame(id);
 const installedData = computed(() =>

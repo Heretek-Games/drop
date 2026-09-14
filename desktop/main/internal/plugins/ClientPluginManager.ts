@@ -7,6 +7,7 @@ import type {
   ClientPluginStorage,
   ClientPluginWebSocket,
   GameMenuItem,
+  HttpMethod,
   LaunchContext,
   LaunchHook,
   PlayAction,
@@ -243,6 +244,13 @@ export class ClientPluginManager {
       gameFs: new TauriScopedGameFs(),
       gameScanner: new TauriScopedGameScanner(),
       serverWs: new TauriPluginWebSocket(),
+      serverRequest: <T>(method: HttpMethod, path = "", body?: unknown) =>
+        invoke<T>("plugin_request", {
+          pluginId,
+          method,
+          path,
+          body,
+        }),
     };
 
     try {

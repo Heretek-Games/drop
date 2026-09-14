@@ -6,6 +6,8 @@ export type UISlotName =
   | "topbar:status"
   | "sidebar:nav";
 
+export type HttpMethod = "GET" | "POST" | "PUT" | "DELETE" | "PATCH" | "ALL";
+
 export interface UISlotRegistration {
   id: string;
   pluginId: string;
@@ -135,6 +137,16 @@ export interface ClientPluginContext {
   gameFs: ScopedGameFs;
   gameScanner: ScopedGameScanner;
   serverWs: ClientPluginWebSocket;
+  /**
+   * Call this plugin's own server-side REST routes through the desktop host.
+   * The webview cannot reach the Drop server directly, so the host proxies the
+   * request. `path` is relative to `/api/v1/plugins/<pluginId>`.
+   */
+  serverRequest<T = unknown>(
+    method: HttpMethod,
+    path?: string,
+    body?: unknown,
+  ): Promise<T>;
 }
 
 export interface ClientPlugin {

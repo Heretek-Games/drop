@@ -241,17 +241,19 @@
       </div>
       <p class="text-xs text-zinc-400">
         <strong class="text-zinc-200">{{
-          pendingInstall.manifest.name
+          pendingInstall.manifest?.name ||
+          pendingInstall.entry ||
+          "Unknown Plugin"
         }}</strong>
-        (<code>{{ pendingInstall.manifest.id }}</code> v{{
-          pendingInstall.manifest.version
+        (<code>{{ pendingInstall.manifest?.id || "unknown" }}</code> v{{
+          pendingInstall.manifest?.version || "0.0.0"
         }}) requests the following capabilities:
       </p>
       <div
         class="max-h-60 overflow-y-auto space-y-2 rounded-lg bg-zinc-950 p-3 border border-zinc-800"
       >
         <div
-          v-for="cap in pendingInstall.manifest.capabilities || []"
+          v-for="cap in pendingInstall.manifest?.capabilities || []"
           :key="cap"
           class="flex flex-col text-xs"
         >
