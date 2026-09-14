@@ -30,6 +30,7 @@ model User {
     forumThreads       ForumThread[]
     forumPosts         ForumPost[]
     purchaseOrders     PurchaseOrder[]
+    crashReports       CrashReport[]
 
     groups UserGroup[]
 }

@@ -1,0 +1,21 @@
+// Developer portal: crash telemetry (#21).
+
+model CrashReport {
+  id String @id @default(uuid())
+
+  gameId String
+  game   Game   @relation(fields: [gameId], references: [id], onDelete: Cascade)
+
+  // Nullable: a crash can be reported before sign-in or anonymously.
+  userId String?
+  user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  versionName String?
+  platform    String?
+  message     String
+  stack       String?
+
+  createdAt DateTime @default(now())
+
+  @@index([gameId, createdAt])
+}

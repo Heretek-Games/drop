@@ -67,6 +67,7 @@ model Game {
   forumThreads ForumThread[]
   purchaseOrders PurchaseOrder[]
   prices       GamePrice[]
+  crashReports CrashReport[]
 
   developers             Company[]               @relation(name: "developers")
   publishers             Company[]               @relation(name: "publishers")
