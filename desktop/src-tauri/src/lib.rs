@@ -59,6 +59,7 @@ use url::Url;
 use utils::app_emit;
 
 mod client;
+mod cloud_saves;
 mod collections;
 mod download_manager;
 mod downloads;
@@ -71,6 +72,7 @@ mod settings;
 mod updates;
 
 use client::*;
+use cloud_saves::*;
 use download_manager::*;
 use downloads::*;
 use games::*;
@@ -281,6 +283,9 @@ pub fn run() {
             resume_downloads,
             cancel_game,
             uninstall_game,
+            // Cloud saves
+            fetch_cloud_save_slots,
+            download_cloud_save_object,
             // Processes
             launch_game,
             kill_game,

@@ -124,6 +124,9 @@
         <!-- Plugin Slot: Game Detail Panels -->
         <PluginSlot name="game-detail:panels" :context="{ game, status }" />
 
+        <!-- Cloud saves -->
+        <SaveSlotManager v-if="installedData" :game-id="game.id" class="mb-8" />
+
         <div class="grid grid-cols-[2fr,1fr] gap-8">
           <div class="space-y-6">
             <div class="bg-zinc-800/50 rounded-xl p-6 backdrop-blur-sm">

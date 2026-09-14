@@ -42,7 +42,7 @@ export interface SaveManagerDeps {
     deleteAsSystem(id: string): Promise<boolean>;
   };
   settings: {
-    get(key: "saveSlotHistoryLimit"): Promise<number>;
+    get(key: "saveSlotHistoryLimit" | "saveSlotSizeLimit"): Promise<number>;
   };
 }
 
@@ -87,7 +87,9 @@ export class SaveManager {
     const newSaveStream = await this.deps.objectHandler.createWithStream(
       newSaveObjectId,
       { saveSlot: JSON.stringify({ userId, gameId, index }) },
-      [],
+      // System-tracked object: grant the owner read access (same convention as
+      // screenshots) so the desktop client can pull the archive back down.
+      [`${userId}:read`],
     );
     if (!newSaveStream)
       throw createError({
@@ -96,9 +98,22 @@ export class SaveManager {
       });
 
     const hashStream = createHash("sha256");
-    stream.on("data", (chunk: Buffer) => hashStream.update(chunk));
+    let totalBytes = 0;
+    stream.on("data", (chunk: Buffer) => {
+      hashStream.update(chunk);
+      totalBytes += chunk.length;
+    });
 
     await Stream.promises.pipeline(stream, newSaveStream);
+
+    const sizeLimitMb = await this.deps.settings.get("saveSlotSizeLimit");
+    if (totalBytes > sizeLimitMb * 1024 * 1024) {
+      await this.deps.objectHandler.deleteAsSystem(newSaveObjectId);
+      throw createError({
+        statusCode: 413,
+        statusMessage: "Save exceeds saveSlotSizeLimit",
+      });
+    }
 
     const hash = hashStream.digest("hex");
 

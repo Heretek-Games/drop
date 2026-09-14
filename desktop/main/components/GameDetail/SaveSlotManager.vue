@@ -14,7 +14,7 @@
             Cloud Save Synchronization
           </h3>
           <p class="text-xs text-zinc-400">
-            Powered by Ludusavi discovery & snapshot versioning
+            Powered by Ludusavi discovery &amp; snapshot versioning
           </p>
         </div>
       </div>
@@ -30,11 +30,15 @@
           type="button"
           :disabled="isSyncing"
           class="rounded-md bg-white/5 px-3 py-1.5 text-xs font-medium text-white hover:bg-white/10 disabled:opacity-50 transition"
-          @click="syncNow"
+          @click="refresh"
         >
-          {{ isSyncing ? "Syncing..." : "Sync Now" }}
+          {{ isSyncing ? "Syncing..." : "Refresh" }}
         </button>
       </div>
+    </div>
+
+    <div v-if="errorMessage" class="mt-4 text-xs text-red-400">
+      {{ errorMessage }}
     </div>
 
     <!-- Slots List -->
@@ -63,17 +67,17 @@
               </span>
             </div>
             <div class="flex items-center gap-3 text-xs text-zinc-400 mt-0.5">
-              <span>Size: {{ formatBytes(slot.sizeBytes) }}</span>
+              <span>{{ slot.historyCount }} snapshot(s)</span>
               <span>•</span>
               <span>
                 {{
-                  slot.lastSynced
-                    ? `Synced ${new Date(slot.lastSynced).toLocaleTimeString()}`
+                  slot.createdAt
+                    ? `Created ${new Date(slot.createdAt).toLocaleString()}`
                     : "Not yet synced"
                 }}
               </span>
-              <span v-if="slot.clientHostname"
-                >• Host: {{ slot.clientHostname }}</span
+              <span v-if="slot.lastUsedClientId"
+                >• Client: {{ slot.lastUsedClientId }}</span
               >
             </div>
           </div>
@@ -81,44 +85,39 @@
 
         <div class="flex items-center gap-2">
           <button
+            v-if="slot.latestObjectId"
             type="button"
             class="rounded bg-zinc-700/50 px-2.5 py-1 text-xs font-medium text-zinc-200 hover:bg-zinc-700 transition"
-            @click="downloadArchive(slot.index)"
+            @click="downloadArchive(slot.latestObjectId)"
           >
-            Download Zip
-          </button>
-          <button
-            v-if="slot.historyCount && slot.historyCount > 1"
-            type="button"
-            class="rounded bg-amber-500/10 px-2.5 py-1 text-xs font-medium text-amber-300 hover:bg-amber-500/20 ring-1 ring-amber-500/20 transition"
-            @click="rollbackSlot(slot.index)"
-          >
-            Rollback ({{ slot.historyCount }} versions)
+            Download Snapshot
           </button>
         </div>
       </div>
 
       <div
-        v-if="slots.length === 0"
+        v-if="slots.length === 0 && !isSyncing && !errorMessage"
         class="rounded-lg border border-dashed border-white/10 p-6 text-center text-xs text-zinc-400"
       >
-        No cloud saves recorded for this title. Saves will automatically be
-        detected and uploaded on game exit.
+        No cloud saves recorded for this title. Saves are detected and uploaded
+        automatically when the game exits.
       </div>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from "vue";
+import { ref, computed, onMounted } from "vue";
+import { invoke } from "@tauri-apps/api/core";
 import { CloudArrowUpIcon } from "@heroicons/vue/20/solid";
 
 export interface SaveSlotView {
   index: number;
-  sizeBytes: number;
-  lastSynced?: string | Date;
-  clientHostname?: string;
-  historyCount?: number;
+  historyCount: number;
+  latestObjectId?: string;
+  latestChecksum?: string;
+  lastUsedClientId?: string;
+  createdAt?: string;
 }
 
 const props = defineProps<{
@@ -128,21 +127,13 @@ const props = defineProps<{
 const isSyncing = ref(false);
 const syncStatus = ref<"in_sync" | "uploading" | "conflict">("in_sync");
 const activeSlotIndex = ref(1);
-
-const slots = ref<SaveSlotView[]>([
-  {
-    index: 1,
-    sizeBytes: 1048576,
-    lastSynced: new Date().toISOString(),
-    clientHostname: "SteamDeck-OLED",
-    historyCount: 3,
-  },
-]);
+const slots = ref<SaveSlotView[]>([]);
+const errorMessage = ref<string>();
 
 const statusLabel = computed(() => {
   switch (syncStatus.value) {
     case "uploading":
-      return "Uploading...";
+      return "Syncing...";
     case "conflict":
       return "Conflict Detected";
     case "in_sync":
@@ -175,29 +166,31 @@ const statusDotClasses = computed(() => {
   }
 });
 
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  const kb = bytes / 1024;
-  if (kb < 1024) return `${kb.toFixed(1)} KB`;
-  return `${(kb / 1024).toFixed(1)} MB`;
-}
-
-async function syncNow() {
+async function refresh() {
   isSyncing.value = true;
   syncStatus.value = "uploading";
-  setTimeout(() => {
-    isSyncing.value = false;
+  errorMessage.value = undefined;
+  try {
+    slots.value = await invoke<SaveSlotView[]>("fetch_cloud_save_slots", {
+      gameId: props.gameId,
+    });
     syncStatus.value = "in_sync";
-  }, 1000);
+  } catch (e) {
+    console.warn("Failed to load cloud save slots:", e);
+    errorMessage.value = "Could not load cloud saves.";
+  } finally {
+    isSyncing.value = false;
+  }
 }
 
-function downloadArchive(slotIndex: number) {
-  // Download archive endpoint: /api/v1/client/saves/:gameId/:slotIndex
-  window.open(`/api/v1/client/saves/${props.gameId}/${slotIndex}`, "_blank");
+async function downloadArchive(objectId: string) {
+  try {
+    await invoke<string>("download_cloud_save_object", { objectId });
+  } catch (e) {
+    console.warn("Failed to download cloud save snapshot:", e);
+    errorMessage.value = "Could not download the snapshot.";
+  }
 }
 
-function rollbackSlot(slotIndex: number) {
-  // Trigger rollback to previous snapshot
-  console.log(`Rollback requested for slot ${slotIndex} on ${props.gameId}`);
-}
+onMounted(refresh);
 </script>

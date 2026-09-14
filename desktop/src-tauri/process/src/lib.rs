@@ -16,6 +16,7 @@ pub static PROCESS_MANAGER: ProcessManagerWrapper = ProcessManagerWrapper::new()
 
 #[cfg(target_os = "linux")]
 pub mod compat;
+pub mod cloud_save_transport;
 pub mod error;
 pub mod format;
 pub mod interceptor;

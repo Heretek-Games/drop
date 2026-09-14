@@ -222,11 +222,29 @@ impl ProcessManager<'_> {
         // Cloud saves post-exit hook: detect saves and stage/archive a backup.
         // Build the context and drop the read guard before doing filesystem or
         // external-tool work so the database lock is not held across it.
-        let cloud_context = {
+        let (cloud_context, authenticated) = {
             let db_handle = borrow_db_checked();
-            Self::cloud_save_context(&db_handle, &game_id, &process.install_dir)
+            (
+                Self::cloud_save_context(&db_handle, &game_id, &process.install_dir),
+                db_handle.auth.is_some(),
+            )
         };
-        if let Err(e) = cloud_saves::CloudSaveSyncManager::new(cloud_context).sync_post_exit() {
+        let post_exit_result = if authenticated {
+            cloud_saves::sync_post_exit_with(
+                &crate::cloud_save_transport::DropServerTransport,
+                &cloud_context,
+                cloud_saves::DEFAULT_SLOT,
+            )
+        } else {
+            cloud_saves::sync_post_exit(&cloud_context).map(|did| {
+                if did {
+                    cloud_saves::SyncAction::Pushed
+                } else {
+                    cloud_saves::SyncAction::NoOp
+                }
+            })
+        };
+        if let Err(e) = post_exit_result {
             warn!("Cloud save post-exit backup failed for {game_id}: {e:?}");
         }
 
@@ -731,10 +749,26 @@ impl ProcessManager<'_> {
             interceptor.pre_launch(&meta.id, &launch_parameters.1, &mut command)?;
         }
 
-        // Cloud saves pre-launch hook: check and restore cloud saves if newer
+        // Cloud saves pre-launch hook: pull and restore the newest snapshot when
+        // remote sync is available, otherwise restore the local cache.
         let cloud_context =
             Self::cloud_save_context(&db_lock, &meta.id, &launch_parameters.1);
-        if let Err(e) = cloud_saves::CloudSaveSyncManager::new(cloud_context).sync_pre_launch() {
+        let pre_launch_result = if db_lock.auth.is_some() {
+            cloud_saves::sync_pre_launch_with(
+                &crate::cloud_save_transport::DropServerTransport,
+                &cloud_context,
+                cloud_saves::DEFAULT_SLOT,
+            )
+        } else {
+            cloud_saves::sync_pre_launch(&cloud_context).map(|did| {
+                if did {
+                    cloud_saves::SyncAction::Pulled
+                } else {
+                    cloud_saves::SyncAction::NoOp
+                }
+            })
+        };
+        if let Err(e) = pre_launch_result {
             warn!("Cloud save pre-launch sync warning for {}: {e:?}", meta.id);
         }
 

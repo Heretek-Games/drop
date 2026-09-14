@@ -334,7 +334,71 @@ pub fn unpack_save_archive(
     Ok(())
 }
 
-/// Pre-launch hook: checks for newer remote cloud save snapshot and restores it.
+/// Path to the locally cached archive for a game.
+pub fn cache_archive_path(game_id: &str) -> PathBuf {
+    DATA_ROOT_DIR
+        .join("saves")
+        .join("cache")
+        .join(format!("{game_id}.tar.zst"))
+}
+
+/// SHA-256 of a file's contents, used to verify archives in transit.
+pub fn sha256_file(path: &Path) -> Result<String, BackupError> {
+    let mut file = File::open(path)?;
+    let mut hasher = Sha256::new();
+    let mut buffer = [0u8; 8192];
+    loop {
+        let read = file.read(&mut buffer)?;
+        if read == 0 {
+            break;
+        }
+        hasher.update(&buffer[..read]);
+    }
+    Ok(format!("{:x}", hasher.finalize()))
+}
+
+/// Runs Ludusavi discovery and packs the found saves into the cache archive.
+/// Returns `(bytes, checksum)`, or `None` when Ludusavi is unavailable or the
+/// game has no detectable saves.
+pub fn backup_saves_to_cache(
+    context: &CloudSaveSyncContext,
+) -> Result<Option<(u64, String)>, BackupError> {
+    let client = match LudusaviClient::discover() {
+        Some(c) => c,
+        None => {
+            debug!("Ludusavi binary not found; skipping cloud save backup");
+            return Ok(None);
+        }
+    };
+
+    let staging_dir = DATA_ROOT_DIR
+        .join("saves")
+        .join("staging")
+        .join(&context.game_id);
+    if staging_dir.exists() {
+        let _ = fs::remove_dir_all(&staging_dir);
+    }
+    fs::create_dir_all(&staging_dir)?;
+
+    let backup_resp = client.backup_game(
+        &context.game_title,
+        &staging_dir,
+        context.wine_prefix.as_deref(),
+    )?;
+    if backup_resp.overall.total_games == 0 && backup_resp.overall.total_bytes == 0 {
+        debug!(
+            "No save files found by Ludusavi for game {}",
+            context.game_title
+        );
+        return Ok(None);
+    }
+
+    let archive_path = cache_archive_path(&context.game_id);
+    let (bytes, checksum) = pack_save_archive(&staging_dir, &archive_path)?;
+    Ok(Some((bytes, checksum)))
+}
+
+/// Pre-launch hook: restores the locally cached cloud save snapshot, if present.
 pub fn sync_pre_launch(context: &CloudSaveSyncContext) -> Result<bool, BackupError> {
     let game_id = context.game_id.as_str();
     let game_title = context.game_title.as_str();
@@ -353,10 +417,7 @@ pub fn sync_pre_launch(context: &CloudSaveSyncContext) -> Result<bool, BackupErr
 
     // Staging directory for pulling cloud saves
     let staging_dir = DATA_ROOT_DIR.join("saves").join("staging").join(game_id);
-    let archive_path = DATA_ROOT_DIR
-        .join("saves")
-        .join("cache")
-        .join(format!("{game_id}.tar.zst"));
+    let archive_path = cache_archive_path(game_id);
 
     if archive_path.is_file() {
         if staging_dir.exists() {
@@ -377,45 +438,21 @@ pub fn sync_pre_launch(context: &CloudSaveSyncContext) -> Result<bool, BackupErr
 
 /// Post-exit hook: discovers save changes with Ludusavi, bundles them, and archives snapshot.
 pub fn sync_post_exit(context: &CloudSaveSyncContext) -> Result<bool, BackupError> {
-    let game_id = context.game_id.as_str();
-    let game_title = context.game_title.as_str();
     info!(
         "Cloud save post-exit backup for game '{}' ({})",
-        game_title, game_id
+        context.game_title, context.game_id
     );
 
-    let client = match LudusaviClient::discover() {
-        Some(c) => c,
-        None => {
-            debug!("Ludusavi binary not found; skipping cloud save post-exit hook");
-            return Ok(false);
+    match backup_saves_to_cache(context)? {
+        Some((bytes, checksum)) => {
+            info!(
+                "Packaged cloud save archive for {} ({} bytes, sha256: {})",
+                context.game_title, bytes, checksum
+            );
+            Ok(true)
         }
-    };
-
-    let staging_dir = DATA_ROOT_DIR.join("saves").join("staging").join(game_id);
-    if staging_dir.exists() {
-        let _ = fs::remove_dir_all(&staging_dir);
+        None => Ok(false),
     }
-    fs::create_dir_all(&staging_dir)?;
-
-    let backup_resp =
-        client.backup_game(game_title, &staging_dir, context.wine_prefix.as_deref())?;
-    if backup_resp.overall.total_games == 0 && backup_resp.overall.total_bytes == 0 {
-        debug!("No save files found by Ludusavi for game {}", game_title);
-        return Ok(false);
-    }
-
-    let cache_dir = DATA_ROOT_DIR.join("saves").join("cache");
-    fs::create_dir_all(&cache_dir)?;
-    let archive_path = cache_dir.join(format!("{game_id}.tar.zst"));
-
-    let (bytes, checksum) = pack_save_archive(&staging_dir, &archive_path)?;
-    info!(
-        "Packaged cloud save archive for {} ({} bytes, sha256: {})",
-        game_title, bytes, checksum
-    );
-
-    Ok(true)
 }
 
 #[cfg(test)]

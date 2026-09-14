@@ -20,6 +20,7 @@ const slots = new Map<string, SlotState>();
 const objects = new Map<string, Buffer>();
 const deleted: string[] = [];
 let historyLimit = 3;
+let sizeLimitMb = 10;
 
 const prisma: SaveManagerDeps["prisma"] = {
   saveSlot: {
@@ -82,7 +83,8 @@ const objectHandler: SaveManagerDeps["objectHandler"] = {
 };
 
 const settings: SaveManagerDeps["settings"] = {
-  get: async () => historyLimit,
+  get: async (key) =>
+    key === "saveSlotSizeLimit" ? sizeLimitMb : historyLimit,
 };
 
 const saveManager = new SaveManager({ prisma, objectHandler, settings });
@@ -164,4 +166,35 @@ test("SaveManager.pushSave rejects an unknown save slot", async () => {
       ),
     /Save not found/,
   );
+});
+
+test("SaveManager.pushSave rejects payloads over saveSlotSizeLimit and cleans up", async () => {
+  slots.clear();
+  objects.clear();
+  deleted.length = 0;
+  historyLimit = 3;
+  sizeLimitMb = 0.000001;
+
+  const userId = "user-1";
+  const gameId = "game-too-big";
+  const index = 1;
+  slots.set(keyOf({ userId, gameId, index }), {
+    historyObjectIds: [],
+    historyChecksums: [],
+  });
+
+  await assert.rejects(
+    () =>
+      saveManager.pushSave(
+        gameId,
+        userId,
+        index,
+        Readable.from(Buffer.from("too big to fit")),
+      ),
+    /saveSlotSizeLimit/,
+  );
+
+  assert.equal(deleted.length, 1);
+  const record = slots.get(keyOf({ userId, gameId, index }));
+  assert.equal(record?.historyObjectIds.length, 0);
 });
