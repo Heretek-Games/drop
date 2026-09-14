@@ -9,6 +9,7 @@ function createHarness(overrides: Partial<DropworksDeps> = {}) {
     findGameId: async (appId) =>
       appId === "game-1" || appId === "12345" ? "game-id-1" : undefined,
     unlockAchievement: async () => ({ alreadyUnlocked: false }),
+    submitScore: async () => ({ improved: true }),
     ...overrides,
   };
   return new DropworksManager(deps);
@@ -79,5 +80,52 @@ test("unlockAchievement authenticates and rejects userId spoofing", async () => 
   await assert.rejects(
     () => manager.unlockAchievement("valid", "", ""),
     /appId and achievementId/,
+  );
+});
+
+test("submitScore authenticates and rejects userId spoofing", async () => {
+  let seen: {
+    userId: string;
+    gameId: string;
+    key: string;
+    score: number;
+  } | null = null;
+  const manager = createHarness({
+    submitScore: async (userId, gameId, key, score) => {
+      seen = { userId, gameId, key, score };
+      return { improved: true };
+    },
+  });
+
+  const result = await manager.submitScore(
+    "valid",
+    "game-1",
+    "high-score",
+    100,
+    "user-1",
+  );
+  assert.deepEqual(result, { improved: true });
+  assert.deepEqual(seen, {
+    userId: "user-1",
+    gameId: "game-id-1",
+    key: "high-score",
+    score: 100,
+  });
+
+  await assert.rejects(
+    () => manager.submitScore("valid", "game-1", "high-score", 1, "attacker"),
+    /does not match/,
+  );
+  await assert.rejects(
+    () => manager.submitScore("nope", "game-1", "high-score", 1),
+    /Invalid Dropworks auth token/,
+  );
+  await assert.rejects(
+    () => manager.submitScore("valid", "", "", 1),
+    /required/,
+  );
+  await assert.rejects(
+    () => manager.submitScore("valid", "game-1", "high-score", Number.NaN),
+    /finite/,
   );
 });

@@ -22,6 +22,15 @@ const deps: DropworksDeps = {
   },
   unlockAchievement: (userId, gameId, key) =>
     achievementManager.unlock(userId, gameId, key),
+  submitScore: async (userId, gameId, key, score) => {
+    const { improved } = await achievementManager.submitScore(userId, {
+      gameId,
+      key,
+      name: key,
+      score,
+    });
+    return { improved };
+  },
 };
 
 export const dropworksManager = new DropworksManager(deps);

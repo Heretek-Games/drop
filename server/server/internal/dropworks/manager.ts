@@ -38,6 +38,13 @@ export interface DropworksDeps {
     gameId: string,
     key: string,
   ): Promise<{ alreadyUnlocked: boolean }>;
+  /** Record a leaderboard score, keeping the user's best result. */
+  submitScore(
+    userId: string,
+    gameId: string,
+    key: string,
+    score: number,
+  ): Promise<{ improved: boolean }>;
 }
 
 export class DropworksManager {
@@ -108,5 +115,48 @@ export class DropworksManager {
       achievementId,
     );
     return { unlocked: true, alreadyUnlocked };
+  }
+
+  /**
+   * Submit a global leaderboard score for the authenticated user. `claimUserId`,
+   * when provided, must match the authenticated user.
+   */
+  async submitScore(
+    token: string,
+    appId: string,
+    key: string,
+    score: number,
+    claimUserId?: string,
+  ): Promise<{ improved: boolean }> {
+    if (!appId || !key) {
+      throw createError({
+        statusCode: 400,
+        statusMessage: "appId and leaderboard key are required",
+      });
+    }
+    if (typeof score !== "number" || !Number.isFinite(score)) {
+      throw createError({
+        statusCode: 400,
+        statusMessage: "score must be a finite number",
+      });
+    }
+    const userId = await this.deps.resolveUserByToken(token);
+    if (!userId) {
+      throw createError({
+        statusCode: 401,
+        statusMessage: "Invalid Dropworks auth token",
+      });
+    }
+    if (claimUserId && claimUserId !== userId) {
+      throw createError({
+        statusCode: 403,
+        statusMessage: "userId does not match the authenticated session",
+      });
+    }
+    const gameId = await this.deps.findGameId(appId);
+    if (!gameId) {
+      throw createError({ statusCode: 404, statusMessage: "Unknown appId" });
+    }
+    return this.deps.submitScore(userId, gameId, key, score);
   }
 }
