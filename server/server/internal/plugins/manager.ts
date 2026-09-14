@@ -16,6 +16,8 @@ import {
 import { PluginRegistry } from "./registry";
 import type {
   HttpMethod,
+  MetadataProvider,
+  PaymentGateway,
   PluginCapability,
   PluginContext,
   PluginManifest,
@@ -160,6 +162,14 @@ export class PluginManager {
   private readonly pluginEventSubscriptions = new Map<
     string,
     Array<() => void>
+  >();
+  private readonly metadataProviders = new Map<
+    string,
+    { pluginId: string; provider: MetadataProvider }
+  >();
+  private readonly paymentGateways = new Map<
+    string,
+    { pluginId: string; gateway: PaymentGateway }
   >();
   private readonly log: Logger = logger.child({ name: "plugin-manager" });
 
@@ -386,6 +396,28 @@ export class PluginManager {
           throw new PluginCapabilityError(id, "network", "fetch");
         }
         return fetch(input, init);
+      },
+      registerMetadataProvider: (provider: MetadataProvider) => {
+        if (!this.hasCapability(capabilities, "metadata:provider")) {
+          throw new PluginCapabilityError(
+            id,
+            "metadata:provider",
+            `registerMetadataProvider(${provider.id})`,
+          );
+        }
+        this.metadataProviders.set(provider.id, { pluginId: id, provider });
+        pluginLogger.debug(`Registered metadata provider: ${provider.id}`);
+      },
+      registerPaymentGateway: (gateway: PaymentGateway) => {
+        if (!this.hasCapability(capabilities, "commerce:payment")) {
+          throw new PluginCapabilityError(
+            id,
+            "commerce:payment",
+            `registerPaymentGateway(${gateway.id})`,
+          );
+        }
+        this.paymentGateways.set(gateway.id, { pluginId: id, gateway });
+        pluginLogger.debug(`Registered payment gateway: ${gateway.id}`);
       },
     };
   }
@@ -793,6 +825,16 @@ export class PluginManager {
         this.publicChannels.delete(channel);
       }
     }
+    for (const [providerId, entry] of this.metadataProviders) {
+      if (entry.pluginId === id) {
+        this.metadataProviders.delete(providerId);
+      }
+    }
+    for (const [gatewayId, entry] of this.paymentGateways) {
+      if (entry.pluginId === id) {
+        this.paymentGateways.delete(gatewayId);
+      }
+    }
     this.subscriptionAuthorizers.delete(id);
     const subscriptions = this.pluginEventSubscriptions.get(id) ?? [];
     for (const off of subscriptions) {
@@ -1184,6 +1226,22 @@ export class PluginManager {
 
   publicWebSocketChannels(): string[] {
     return Array.from(this.publicChannels.keys());
+  }
+
+  getMetadataProviders(): MetadataProvider[] {
+    return Array.from(this.metadataProviders.values()).map((e) => e.provider);
+  }
+
+  getMetadataProvider(id: string): MetadataProvider | undefined {
+    return this.metadataProviders.get(id)?.provider;
+  }
+
+  getPaymentGateways(): PaymentGateway[] {
+    return Array.from(this.paymentGateways.values()).map((e) => e.gateway);
+  }
+
+  getPaymentGateway(id: string): PaymentGateway | undefined {
+    return this.paymentGateways.get(id)?.gateway;
   }
 
   private async resolveAuth(event: H3Event): Promise<PluginAuthContext> {

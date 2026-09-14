@@ -1356,3 +1356,103 @@ test("signed bundle with FilePluginStorage survives storage mutations and reload
     }
   }
 });
+
+test("PluginManager registers and gates MetadataProvider and PaymentGateway SPIs", async () => {
+  const manager = createTestManager();
+
+  const metadataPlugin: ServerPlugin = {
+    metadata: {
+      id: "steamgriddb-provider",
+      name: "SteamGridDB",
+      version: "1.0.0",
+      apiVersion: PLUGIN_API_VERSION,
+      capabilities: ["metadata:provider"],
+    },
+    init: (ctx: PluginContext) => {
+      ctx.registerMetadataProvider({
+        id: "steamgriddb",
+        name: "SteamGridDB",
+        search: async (query) => [
+          { id: "sgdb-1", title: query, provider: "steamgriddb" },
+        ],
+        getDetails: async (id) => ({
+          id,
+          title: "Sample Game",
+          provider: "steamgriddb",
+        }),
+      });
+    },
+  };
+
+  const paymentPlugin: ServerPlugin = {
+    metadata: {
+      id: "stripe-gateway",
+      name: "Stripe Gateway",
+      version: "1.0.0",
+      apiVersion: PLUGIN_API_VERSION,
+      capabilities: ["commerce:payment"],
+    },
+    init: (ctx: PluginContext) => {
+      ctx.registerPaymentGateway({
+        id: "stripe",
+        name: "Stripe",
+        createPaymentIntent: async () => ({
+          intentId: "pi_test_123",
+          status: "pending",
+        }),
+        handleWebhook: async () => ({
+          orderId: "ord_1",
+          status: "succeeded",
+          transactionId: "txn_1",
+        }),
+      });
+    },
+  };
+
+  await manager.registerPlugin(metadataPlugin);
+  await manager.registerPlugin(paymentPlugin);
+
+  // Assert registered
+  const providers = manager.getMetadataProviders();
+  assert.equal(providers.length, 1);
+  assert.equal(providers[0].id, "steamgriddb");
+  assert.equal(manager.getMetadataProvider("steamgriddb")?.name, "SteamGridDB");
+
+  const gateways = manager.getPaymentGateways();
+  assert.equal(gateways.length, 1);
+  assert.equal(gateways[0].id, "stripe");
+  assert.equal(manager.getPaymentGateway("stripe")?.name, "Stripe");
+
+  // Capability violation throws
+  const deniedPlugin: ServerPlugin = {
+    metadata: {
+      id: "denied-spi",
+      name: "Denied SPI",
+      version: "1.0.0",
+      apiVersion: PLUGIN_API_VERSION,
+      capabilities: ["routes"],
+    },
+    init: (ctx: PluginContext) => {
+      ctx.registerMetadataProvider({
+        id: "denied",
+        name: "Denied",
+        search: async () => [],
+        getDetails: async () => null,
+      });
+    },
+  };
+
+  await assert.rejects(
+    () => manager.registerPlugin(deniedPlugin),
+    /attempted 'registerMetadataProvider\(denied\)' without the 'metadata:provider' capability/,
+  );
+
+  // Unregister cleans up SPI entries
+  await manager.unregisterPlugin("steamgriddb-provider");
+  assert.equal(manager.getMetadataProviders().length, 0);
+  assert.equal(manager.getMetadataProvider("steamgriddb"), undefined);
+
+  await manager.unregisterPlugin("stripe-gateway");
+  assert.equal(manager.getPaymentGateways().length, 0);
+  assert.equal(manager.getPaymentGateway("stripe"), undefined);
+});

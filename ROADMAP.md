@@ -98,6 +98,8 @@ epics (#17–#21).
 
 The common thread: all six are developed and maintained in **dedicated sister repositories** as external plugins and modular extensions, keeping the core Drop distribution lean and directly compatible with upstream `Drop-OSS/drop`.
 
+For the comprehensive issue-by-issue categorization of all tracker items into Core vs. Plugins, see [`docs/implementation/plugin-boundary-plan.md`](./docs/implementation/plugin-boundary-plan.md).
+
 ---
 
 ## 4. Contributing

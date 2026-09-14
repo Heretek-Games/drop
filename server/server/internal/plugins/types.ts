@@ -21,7 +21,13 @@ export type PluginTarget = "server" | "client";
 export type PluginCategory = "generic" | "metadata" | "storage" | "multiplayer";
 
 export type ServerCapability =
-  "routes" | "storage" | "websocket" | "events" | "network";
+  | "routes"
+  | "storage"
+  | "websocket"
+  | "events"
+  | "network"
+  | "metadata:provider"
+  | "commerce:payment";
 
 export type ClientCapability =
   | "ui:slot"
@@ -35,7 +41,9 @@ export type ClientCapability =
   | "client:storage"
   | "client:ws"
   | "system:sidecar"
-  | "system:command";
+  | "system:command"
+  | "metadata:provider"
+  | "client:library-scan";
 
 export type PluginCapability = ServerCapability | ClientCapability;
 
@@ -203,6 +211,16 @@ export interface PluginContext {
   ): void;
   /** Network egress. Requires the `network` capability. */
   fetch(input: string | URL, init?: RequestInit): Promise<Response>;
+  /**
+   * Register a metadata provider SPI implementation.
+   * Requires the `metadata:provider` capability.
+   */
+  registerMetadataProvider(provider: MetadataProvider): void;
+  /**
+   * Register a payment gateway SPI implementation.
+   * Requires the `commerce:payment` capability.
+   */
+  registerPaymentGateway(gateway: PaymentGateway): void;
 }
 
 export interface ServerPlugin {
@@ -218,4 +236,92 @@ export interface ServerPlugin {
     to: number,
     storage: PluginStorage,
   ): Promise<void>;
+}
+
+// ==========================================
+// Metadata Provider SPI (#7, #206, #207, #477)
+// ==========================================
+
+export interface MetadataSearchResult {
+  id: string;
+  title: string;
+  releaseYear?: number;
+  coverUrl?: string;
+  bannerUrl?: string;
+  iconUrl?: string;
+  description?: string;
+  provider: string;
+}
+
+export interface MetadataDetails extends MetadataSearchResult {
+  genres?: string[];
+  developers?: string[];
+  publishers?: string[];
+  screenshots?: string[];
+  metadata?: Record<string, unknown>;
+}
+
+export interface MetadataProvider {
+  id: string;
+  name: string;
+  search(query: string): Promise<MetadataSearchResult[]>;
+  getDetails(id: string): Promise<MetadataDetails | null>;
+}
+
+// ==========================================
+// Store Scanner SPI (#21)
+// ==========================================
+
+export interface ScannedGame {
+  externalId: string;
+  store: "steam" | "gog" | "epic" | string;
+  title: string;
+  installPath: string;
+  executablePath?: string;
+  iconUrl?: string;
+  version?: string;
+}
+
+export interface StoreScanner {
+  id: string;
+  name: string;
+  store: string;
+  scan(): Promise<ScannedGame[]>;
+  launch?(externalId: string): Promise<void>;
+}
+
+// ==========================================
+// Payment Gateway SPI (#21)
+// ==========================================
+
+export interface PaymentIntentRequest {
+  orderId: string;
+  amount: number; // minor units (e.g. cents)
+  currency: string;
+  customerEmail?: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface PaymentIntentResult {
+  intentId: string;
+  clientSecret?: string;
+  checkoutUrl?: string;
+  status: "pending" | "succeeded" | "failed";
+}
+
+export interface PaymentWebhookResult {
+  orderId: string;
+  status: "succeeded" | "failed" | "refunded";
+  transactionId: string;
+  payload?: Record<string, unknown>;
+}
+
+export interface PaymentGateway {
+  id: string;
+  name: string;
+  createPaymentIntent(req: PaymentIntentRequest): Promise<PaymentIntentResult>;
+  handleWebhook(
+    payload: unknown,
+    headers: Record<string, string>,
+  ): Promise<PaymentWebhookResult>;
 }

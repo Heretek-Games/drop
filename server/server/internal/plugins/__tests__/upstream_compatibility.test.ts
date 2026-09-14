@@ -45,6 +45,16 @@ test("Upstream Invariant: Zero-plugin baseline leaves server in pure vanilla sta
     0,
     "No public channels should exist by default",
   );
+  assert.equal(
+    manager.getMetadataProviders().length,
+    0,
+    "No metadata providers should exist by default",
+  );
+  assert.equal(
+    manager.getPaymentGateways().length,
+    0,
+    "No payment gateways should exist by default",
+  );
 
   // 3. Dispatching to nonexistent plugin fails with 404
   await assert.rejects(
