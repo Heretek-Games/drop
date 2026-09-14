@@ -73,6 +73,7 @@ mod scheduler;
 mod settings;
 mod presence;
 mod shaders;
+mod webrtc;
 mod updates;
 
 use achievements::*;
@@ -88,6 +89,7 @@ use remote::*;
 use settings::*;
 use presence::*;
 use shaders::*;
+use webrtc::*;
 
 use crate::scheduler::scheduler_task;
 
@@ -303,6 +305,8 @@ pub fn run() {
             // Presence
             report_presence,
             clear_presence,
+            // WebRTC
+            fetch_ice_config,
             // Achievements
             unlock_achievements,
             // Shader caches
