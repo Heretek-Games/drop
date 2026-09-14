@@ -167,9 +167,7 @@ jobs:
           repository: ${{ env.PPA_ALPHA }}
           series: "jammy noble"
           revision: "0"
-          include_orig: auto
           debmake_arguments: "-y"
-          new_version_template: "{VERSION}-{REVISION}~ubuntu{SERIES_VERSION}.1"
           tarball: ${{ steps.ppa.outputs.tarball }}
           debian_dir: ${{ steps.ppa.outputs.debian_dir }}
           deb_email: contact@heretek.games

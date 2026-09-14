@@ -73,8 +73,11 @@ SRPM inside a Fedora container, then `copr-cli` submits it.
 - Chroots: `fedora-43-x86_64`, `fedora-44-x86_64`, `fedora-45-x86_64`
 
 The channel is baked into the SRPM by flipping the spec's `%bcond_with alpha`
-to `%bcond_without alpha`; command-line `--with` flags are not persisted in an
-SRPM.
+to `%bcond_without alpha`, and the resolved upstream version/release are written
+into the generated spec (`%global _pkg_version`/`_pkg_release`). Command-line
+`--with`/`--define` flags are not persisted in an SRPM, so relying on them made
+COPR re-expand `Source0` with the template default version and fail with a
+missing tarball.
 
 ### One-time setup
 
@@ -121,3 +124,25 @@ Permission notes (review before submitting to Flathub):
 For a stricter build, replace the host mount with explicit game directories
 and drop the `org.freedesktop.Flatpak` talk-name (at the cost of launching
 host-installed games).
+
+## Container images (GHCR)
+
+`server-release.yml` publishes `ghcr.io/heretek-games/drop` with `nightly`,
+`branch-<name>`, and `sha-<short>` tags. The `latest` and semver (`vX.Y.Z`)
+tags are only produced for a **non-prerelease** GitHub release (or a run on a
+`v*` tag) — `latest` is explicitly gated on `prerelease == false`.
+
+Operators should be aware: while `v0.4.0` is marked pre-release there is no
+`latest`/`vX.Y.Z` image. Publishing a stable release (or broadening the gate in
+`server-release.yml`) is required for a `latest`/versioned manifest.
+
+## Known gaps / operator actions
+
+- **Launchpad PPA is empty** until `PPA_GPG_PASSPHRASE` is set on the
+  `Heretek-Games/drop` repository (the signing key must have a passphrase, or
+  the action must be given a non-empty value). `PPA_GPG_PRIVATE_KEY` is already
+  set. The pinned action inputs are limited to its `action.yml`; unsupported
+  inputs are ignored with a warning.
+- **GHCR has no `latest`/semver** while the latest release is a pre-release (see
+  above).
+- **COPR stable** (`heretek-ai/drop`) has no builds; only alpha is wired.
