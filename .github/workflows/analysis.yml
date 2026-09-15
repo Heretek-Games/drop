@@ -120,7 +120,7 @@ jobs:
         run: cargo machete
 
   desktop:
-    name: desktop frontend (typecheck + knip)
+    name: desktop frontend (typecheck + test + knip)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # actions/checkout@v7
@@ -137,6 +137,8 @@ jobs:
         run: pnpm -C desktop/main install --ignore-scripts
       - name: Typecheck desktop/main
         run: pnpm -C desktop/main run typecheck
+      - name: Test desktop/main
+        run: pnpm -C desktop/main run test
       - name: Knip report (desktop/main)
         if: always()
         run: pnpm exec knip --directory desktop/main --reporter json --no-exit-code > desktop-knip-report.json
