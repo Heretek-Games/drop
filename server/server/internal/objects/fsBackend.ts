@@ -1,10 +1,10 @@
 import type { ObjectMetadata, ObjectReference, Source } from "./objectHandler";
 import { ObjectBackend, objectMetadata } from "./objectHandler";
 
-import fs from "fs";
-import path from "path";
-import { Readable } from "stream";
-import { createHash } from "crypto";
+import fs from "node:fs";
+import path from "node:path";
+import Stream, { Readable } from "node:stream";
+import { createHash } from "node:crypto";
 import prisma from "../db/database";
 import cacheHandler from "../cache";
 import { systemConfig } from "../config/sys-conf";
@@ -32,37 +32,71 @@ export class FsObjectBackend extends ObjectBackend {
 
   async fetch(id: ObjectReference) {
     const objectPath = path.join(this.baseObjectPath, id);
-    if (!fs.existsSync(objectPath)) return undefined;
-    return fs.createReadStream(objectPath);
+    let handle: fs.promises.FileHandle;
+    try {
+      handle = await fs.promises.open(objectPath, "r");
+    } catch {
+      return undefined;
+    }
+    try {
+      const stat = await handle.stat();
+      if (!stat.isFile()) {
+        await handle.close();
+        return undefined;
+      }
+    } catch {
+      await handle.close();
+      return undefined;
+    }
+    // createReadStream on the handle keeps reads tied to the opened inode and closes the handle on completion.
+    return handle.createReadStream({ autoClose: true });
   }
+
   async write(id: ObjectReference, source: Source): Promise<boolean> {
     const objectPath = path.join(this.baseObjectPath, id);
-    if (!fs.existsSync(objectPath)) return false;
+    let handle: fs.promises.FileHandle;
+    try {
+      handle = await fs.promises.open(objectPath, "r+");
+    } catch {
+      return false;
+    }
 
     // remove item from cache
     await this.hashStore.delete(id);
 
-    if (source instanceof Readable) {
-      const outputStream = fs.createWriteStream(objectPath);
-      source.pipe(outputStream, { end: true });
-      await new Promise((r, _j) => source.on("end", r));
-      return true;
-    }
+    try {
+      if (source instanceof Readable) {
+        // Truncate first so overwriting a longer object doesn't leave stale bytes
+        await handle.truncate(0);
+        const outputStream = handle.createWriteStream({ autoClose: true });
+        await Stream.promises.pipeline(source, outputStream);
+        return true;
+      }
 
-    if (source instanceof Buffer) {
-      fs.writeFileSync(objectPath, source);
-      return true;
-    }
+      if (source instanceof Buffer) {
+        await handle.truncate(0);
+        await handle.writeFile(source);
+        return true;
+      }
 
-    return false;
+      return false;
+    } finally {
+      await handle.close().catch(() => {});
+    }
   }
+
   async startWriteStream(id: ObjectReference) {
     const objectPath = path.join(this.baseObjectPath, id);
-    if (!fs.existsSync(objectPath)) return undefined;
-    // remove item from cache
-    await this.hashStore.delete(id);
-    return fs.createWriteStream(objectPath);
+    try {
+      const handle = await fs.promises.open(objectPath, "r+");
+      // remove item from cache
+      await this.hashStore.delete(id);
+      return handle.createWriteStream({ autoClose: true });
+    } catch {
+      return undefined;
+    }
   }
+
   async create(
     id: string,
     source: Source,
@@ -80,10 +114,11 @@ export class FsObjectBackend extends ObjectBackend {
     fs.writeFileSync(objectPath, "");
 
     // Call write
-    this.write(id, source);
+    await this.write(id, source);
 
     return id;
   }
+
   async createWithWriteStream(id: string, metadata: ObjectMetadata) {
     const objectPath = path.join(this.baseObjectPath, id);
     const metadataPath = path.join(this.baseMetadataPath, `${id}.json`);
@@ -100,6 +135,7 @@ export class FsObjectBackend extends ObjectBackend {
     if (!stream) throw new Error("Could not create write stream");
     return stream;
   }
+
   async delete(id: ObjectReference): Promise<boolean> {
     const objectPath = path.join(this.baseObjectPath, id);
     if (!fs.existsSync(objectPath)) return true;
@@ -112,6 +148,7 @@ export class FsObjectBackend extends ObjectBackend {
     await this.hashStore.delete(id);
     return true;
   }
+
   async fetchMetadata(
     id: ObjectReference,
   ): Promise<ObjectMetadata | undefined> {
@@ -132,6 +169,7 @@ export class FsObjectBackend extends ObjectBackend {
     await this.metadataCache.set(id, metadata);
     return metadata;
   }
+
   async writeMetadata(
     id: ObjectReference,
     metadata: ObjectMetadata,
@@ -142,38 +180,26 @@ export class FsObjectBackend extends ObjectBackend {
     await this.metadataCache.set(id, metadata);
     return true;
   }
+
   async fetchHash(id: ObjectReference): Promise<string | undefined> {
     const cacheResult = await this.hashStore.get(id);
-    if (cacheResult !== null) return cacheResult;
+    // FsHashStore#get returns undefined on a database miss, not null
+    if (cacheResult) return cacheResult;
 
     const obj = await this.fetch(id);
     if (obj === undefined) return;
 
-    // hash object
+    // Upstream Drop uses md5 for ETag hashing
     const hash = createHash("md5");
-    hash.setEncoding("hex");
 
-    // local variable to point to object
-    const store = this.hashStore;
-    let hashResult = "";
-
-    const objEnd = new Promise<void>((r) => {
-      obj.on("end", async function () {
-        hash.end();
-        hashResult = hash.read();
-        r();
-      });
-    });
-    // read obj into hash
-    obj.pipe(hash);
-    await objEnd;
-
-    // if hash isn't a string somehow, mark as unknown hash
-    if (typeof hashResult !== "string") {
+    try {
+      await Stream.promises.pipeline(obj, hash);
+      const hashResult = hash.digest("hex");
+      await this.hashStore.save(id, hashResult);
+      return hashResult;
+    } catch {
       return undefined;
     }
-    await store.save(id, hashResult);
-    return typeof hashResult;
   }
 
   async listAll(): Promise<string[]> {
@@ -212,11 +238,6 @@ export class FsObjectBackend extends ObjectBackend {
 class FsHashStore {
   private cache = cacheHandler.createCache<string>("ObjectHashStore");
 
-  /**
-   * Gets hash of object
-   * @param id
-   * @returns
-   */
   async get(id: ObjectReference) {
     const cacheRes = await this.cache.get(id);
     if (cacheRes !== null) {
@@ -236,10 +257,6 @@ class FsHashStore {
     return objectHash.hash;
   }
 
-  /**
-   * Saves hash of object
-   * @param id
-   */
   async save(id: ObjectReference, hash: string) {
     await prisma.objectHash.upsert({
       where: {
@@ -256,10 +273,6 @@ class FsHashStore {
     await this.cache.set(id, hash);
   }
 
-  /**
-   * Hash is no longer valid for whatever reason
-   * @param id
-   */
   async delete(id: ObjectReference) {
     await this.cache.remove(id);
     await prisma.objectHash.deleteMany({

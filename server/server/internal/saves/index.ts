@@ -5,14 +5,29 @@ import objectHandler from "../objects";
 import { randomUUID, createHash } from "node:crypto";
 import type { IncomingMessage } from "node:http";
 
+/** Raised by the measuring stream when a save exceeds `saveSlotSizeLimit`. */
+class SaveSizeLimitError extends Error {
+  constructor() {
+    super("save exceeds saveSlotSizeLimit");
+    this.name = "SaveSizeLimitError";
+  }
+}
+
 class SaveManager {
   async deleteObjectFromSave(
     gameId: string,
     userId: string,
     index: number,
     objectId: string,
-  ) {
-    await objectHandler.deleteWithPermission(objectId, userId);
+  ): Promise<boolean> {
+    void gameId;
+    void userId;
+    void index;
+    // Save objects are system-tracked (`${userId}:read`) and the id is taken
+    // from the caller's own slot history, so reclaim them as the system.
+    // `deleteWithPermission` would require a `delete` grant the object is
+    // deliberately never given, silently leaking every pruned snapshot.
+    return await objectHandler.deleteAsSystem(objectId);
   }
 
   async pushSave(
@@ -38,7 +53,9 @@ class SaveManager {
     const newSaveStream = await objectHandler.createWithStream(
       newSaveObjectId,
       { saveSlot: JSON.stringify({ userId, gameId, index }) },
-      [],
+      // System-tracked object: grant the owner read access (same convention as
+      // screenshots) so the desktop client can pull the archive back down.
+      [`${userId}:read`],
     );
     if (!newSaveStream)
       throw createError({
@@ -46,19 +63,40 @@ class SaveManager {
         statusMessage: "Failed to create writing stream to storage backend.",
       });
 
-    let hash: string | undefined;
-    const hashPromise = Stream.promises.pipeline(
-      stream,
-      createHash("sha256").setEncoding("hex"),
-      async function (source) {
-        // @ts-expect-error Not sure how to get this to be typed
-        hash = (await source.toArray())[0];
+    const sizeLimitMb = await applicationSettings.get("saveSlotSizeLimit");
+    const sizeLimitBytes = sizeLimitMb * 1024 * 1024;
+
+    const hashStream = createHash("sha256");
+    let totalBytes = 0;
+
+    // Measure while streaming so an oversized payload is rejected before the
+    // whole archive reaches disk, rather than after an unbounded write.
+    const measuringStream = new Stream.Transform({
+      transform(chunk: Buffer, _encoding, callback) {
+        totalBytes += chunk.length;
+        if (totalBytes > sizeLimitBytes) {
+          callback(new SaveSizeLimitError());
+          return;
+        }
+        hashStream.update(chunk);
+        callback(null, chunk);
       },
-    );
+    });
 
-    const uploadStream = Stream.promises.pipeline(stream, newSaveStream);
+    try {
+      await Stream.promises.pipeline(stream, measuringStream, newSaveStream);
+    } catch (error) {
+      await objectHandler.deleteAsSystem(newSaveObjectId);
+      if (error instanceof SaveSizeLimitError) {
+        throw createError({
+          statusCode: 413,
+          statusMessage: "Save exceeds saveSlotSizeLimit",
+        });
+      }
+      throw error;
+    }
 
-    await Promise.all([hashPromise, uploadStream]);
+    const hash = hashStream.digest("hex");
 
     if (!hash) {
       await objectHandler.deleteAsSystem(newSaveObjectId);
