@@ -1,0 +1,27 @@
+[Unit]
+Description=Drop Game Distribution Platform
+Wants=network-online.target
+After=network-online.target drop-postgres.service
+Requires=drop-postgres.service
+
+[Container]
+ContainerName=drop
+Image=ghcr.io/drop-oss/drop:nightly
+AutoUpdate=registry
+Network=drop-network.network
+IP=172.20.0.20
+PublishPort=3000:3000
+Volume=drop-data.volume:/data
+# Game storage library mount (uncomment and point to your library path)
+# Volume=/mnt/storage/games:/library:ro
+EnvironmentFile=%E/containers/systemd/drop.env
+Environment=HOSTNAME=drop
+SecurityLabelDisable=true
+
+[Service]
+# PostgreSQL may still be initializing when this unit starts; Restart=always
+# recovers until the database accepts connections.
+Restart=always
+
+[Install]
+WantedBy=multi-user.target default.target
