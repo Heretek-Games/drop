@@ -156,7 +156,11 @@ export class TorrentialService extends Service<unknown> {
   private setupRead() {
     if (!this.socket) return;
     this.socket.on("data", (data) => {
-      this.readbuf = Buffer.concat([this.readbuf, data]);
+      // Newer @types/node versions type "data" as `${string} | NonSharedBuffer`
+      // alongside older `Buffer`-only declarations; normalize to a Buffer so
+      // Buffer.concat stays valid across type environments.
+      const chunk = Buffer.isBuffer(data) ? data : Buffer.from(data, "utf8");
+      this.readbuf = Buffer.concat([this.readbuf, chunk]);
       if (!this.readingQueue) {
         this.readingQueue = true;
         this.queueRead().finally(() => {
