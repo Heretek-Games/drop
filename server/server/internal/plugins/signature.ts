@@ -28,9 +28,9 @@ export function stableStringify(value: unknown): string {
 
 /**
  * Version 2 signature payload: the files aggregate plus the canonical manifest
- * (excluding its `signature` field). Mirrors
- * `@droposs/plugin-cli` `signaturePayloadV2`; a shared fixture vector in both
- * repos guards against drift.
+ * (excluding its `signature` field). Mirrors the plugin CLI's
+ * `signaturePayloadV2` (`@drop-oss/plugin-cli`); a shared fixture vector in
+ * both repos guards against drift.
  */
 export function signaturePayloadV2(
   filesAggregate: string,

@@ -4,9 +4,9 @@ import { createHash, createHmac } from "node:crypto";
 import { SIGNATURE_VERSION, signaturePayloadV2 } from "../signature";
 
 /**
- * Shared cross-repo fixture vector. The same values are asserted by
- * `@droposs/plugin-cli`'s signer tests; changing the canonicalization or the
- * payload layout on either side breaks this test.
+ * Shared cross-repo fixture vector. The same values are asserted by the plugin
+ * CLI's signer tests (`@drop-oss/plugin-cli`); changing the canonicalization or
+ * the payload layout on either side breaks this test.
  */
 const FIXTURE = {
   files: [
