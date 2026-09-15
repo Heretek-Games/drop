@@ -90,8 +90,16 @@ export interface PluginManifest extends PluginMetadata {
    */
   files?: Record<string, string>;
   /**
-   * HMAC-SHA256 (hex) of `checksum`, keyed by `DROP_PLUGIN_SIGNING_KEY`.
-   * Set `DROP_PLUGIN_REQUIRE_SIGNATURE=true` to reject unsigned bundles.
+   * Signature scheme marker. Bundles signed by `@droposs/plugin-cli` >= 0.6.0
+   * carry `2`, meaning `signature` covers the file aggregate plus the canonical
+   * manifest. Absent on legacy bundles, whose signature covers the file
+   * aggregate or entry checksum only.
+   */
+  signatureVersion?: number;
+  /**
+   * HMAC-SHA256 (hex) of the signature payload, keyed by
+   * `DROP_PLUGIN_SIGNING_KEY`. Set `DROP_PLUGIN_REQUIRE_SIGNATURE=true` to
+   * reject unsigned bundles.
    */
   signature?: string;
 

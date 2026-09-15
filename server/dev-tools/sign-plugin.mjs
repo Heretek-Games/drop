@@ -5,9 +5,10 @@
  * Reads `<bundle>/drop-plugin.json`, computes the SHA-256 of the entry file
  * (default `index.js`) into `checksum`, records a `files` map covering every
  * bundle file, and — when `DROP_PLUGIN_SIGNING_KEY` is set — writes an
- * HMAC-SHA256 `signature` over the aggregate bundle digest. The manager
- * verifies all of these (and refuses multi-file bundles without `files`)
- * before importing a bundle.
+ * HMAC-SHA256 `signature` (signatureVersion 2) over the file aggregate plus the
+ * canonical manifest, so `id`/`version`/`capabilities` are covered too. The
+ * manager verifies all of these (and refuses multi-file bundles without
+ * `files`) before importing a bundle.
  *
  * Usage: node dev-tools/sign-plugin.mjs <bundle-dir>
  */
@@ -115,13 +116,39 @@ for (const rel of files) {
 }
 manifest.files = fileChecksums;
 
+/** Deterministic JSON; must stay byte-identical to the manager and the CLI. */
+function stableStringify(value) {
+  if (value === null || typeof value !== "object") {
+    return JSON.stringify(value) ?? "null";
+  }
+  if (Array.isArray(value)) {
+    return `[${value.map(stableStringify).join(",")}]`;
+  }
+  const keys = Object.keys(value).sort((a, b) => a.localeCompare(b, "en"));
+  return `{${keys
+    .map((key) => `${JSON.stringify(key)}:${stableStringify(value[key])}`)
+    .join(",")}}`;
+}
+
+/** Signature payload v2: file aggregate plus canonical manifest. */
+function signaturePayloadV2(filesAggregate, manifest) {
+  const signable = { ...manifest };
+  delete signable.signature;
+  return createHash("sha256")
+    .update(filesAggregate)
+    .update("\0")
+    .update(stableStringify(signable))
+    .digest("hex");
+}
+
 const key = process.env[SIGNING_KEY_ENV];
 if (key) {
-  manifest.signature = createHmac("sha256", key)
-    .update(aggregate.digest("hex"))
-    .digest("hex");
+  manifest.signatureVersion = 2;
+  const payload = signaturePayloadV2(aggregate.digest("hex"), manifest);
+  manifest.signature = createHmac("sha256", key).update(payload).digest("hex");
 } else {
   delete manifest.signature;
+  delete manifest.signatureVersion;
   console.warn(
     `${SIGNING_KEY_ENV} not set; wrote checksums without a signature`,
   );

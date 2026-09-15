@@ -14,6 +14,7 @@ import {
   PluginTrustError,
 } from "./errors";
 import { PluginRegistry } from "./registry";
+import { SIGNATURE_VERSION, signaturePayloadV2 } from "./signature";
 import type {
   CloudSavePathResolver,
   HttpMethod,
@@ -662,6 +663,36 @@ export class PluginManager {
   }
 
   /**
+   * Reconstruct the payload a bundle signature covers. Signature v2 covers the
+   * canonical manifest in addition to the file aggregate; legacy bundles (no
+   * marker) cover the file aggregate, or the entry checksum for single-file
+   * bundles.
+   */
+  private resolveSignedPayload(
+    aggregateDigest: string,
+    entryDigest: string,
+    manifest: PluginManifest,
+  ): string {
+    if (manifest.signatureVersion === SIGNATURE_VERSION) {
+      if (!manifest.files) {
+        throw new Error(
+          `bundle ${manifest.id} declares signatureVersion ${SIGNATURE_VERSION} without file checksums`,
+        );
+      }
+      return signaturePayloadV2(
+        aggregateDigest,
+        manifest as unknown as Record<string, unknown>,
+      );
+    }
+    if (manifest.signatureVersion !== undefined) {
+      throw new Error(
+        `bundle ${manifest.id} uses unsupported signatureVersion ${manifest.signatureVersion}`,
+      );
+    }
+    return manifest.files ? aggregateDigest : entryDigest;
+  }
+
+  /**
    * Verify the bundle signature. When `files` is present the signature covers
    * the aggregate bundle digest; otherwise it covers the entry checksum
    * (legacy single-file bundles). `DROP_PLUGIN_REQUIRE_SIGNATURE=true` refuses
@@ -679,7 +710,11 @@ export class PluginManager {
           `bundle ${manifest.id} is signed but DROP_PLUGIN_SIGNING_KEY is not set`,
         );
       }
-      const covered = manifest.files ? aggregateDigest : entryDigest;
+      const covered = this.resolveSignedPayload(
+        aggregateDigest,
+        entryDigest,
+        manifest,
+      );
       const expected = createHmac("sha256", signingKey)
         .update(covered)
         .digest("hex");
