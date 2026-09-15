@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   CERTIFICATE_KEY_ENV,
+  certificateKeyConfigured,
   isSealedPrivateKey,
   openPrivateKey,
   sealPrivateKey,
@@ -50,5 +51,21 @@ test("rejects a malformed key", () => {
         [CERTIFICATE_KEY_ENV]: "short",
       } as NodeJS.ProcessEnv),
     /32-byte/,
+  );
+});
+
+test("detects whether a certificate key is configured", () => {
+  assert.equal(certificateKeyConfigured({} as NodeJS.ProcessEnv), false);
+  assert.equal(
+    certificateKeyConfigured({
+      [CERTIFICATE_KEY_ENV]: "  ",
+    } as NodeJS.ProcessEnv),
+    false,
+  );
+  assert.equal(
+    certificateKeyConfigured({
+      [CERTIFICATE_KEY_ENV]: SAMPLE_MATERIAL,
+    } as NodeJS.ProcessEnv),
+    true,
   );
 });

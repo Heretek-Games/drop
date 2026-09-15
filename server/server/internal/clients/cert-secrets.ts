@@ -34,6 +34,13 @@ export function isSealedPrivateKey(value: string): boolean {
   return value.startsWith(`${VERSION}:`);
 }
 
+/** Whether an at-rest encryption key is configured for certificate keys. */
+export function certificateKeyConfigured(
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  return Boolean(env[CERTIFICATE_KEY_ENV]?.trim());
+}
+
 /** Encrypts a private key for storage; returns plaintext when no key is set. */
 export function sealPrivateKey(
   plaintext: string,
