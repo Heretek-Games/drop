@@ -61,7 +61,7 @@ tests and a pushed commit; `🟡` usable contract/reference implementation;
   from the SPI; `drop-gse` owns the EAC/BattlEye/Vanguard/Denuvo patterns and
   detects the capability at runtime (generic `findFiles`, legacy `checkAntiCheat`
   fallback). `@droposs/plugin-sdk` documents `ScopedGameScanner.findFiles` and is
-  bumped to `0.5.0` (npm publish pending).
+  published at `0.5.9` (npm provenance-backed).
 
 ## Remaining work (tracked)
 

@@ -249,7 +249,7 @@ Flatpak manifest. Packaging templates live in `distribution/debian/` and
 | lefthook pre-commit | commit     | prettier + eslint --fix (staged), ast-grep scan, gitleaks                                                                         |
 | lefthook pre-push   | push       | server typecheck, `clippy-changed.sh` (Rust), golangci-lint, knip report                                                          |
 | GitHub Actions      | PR/push    | typecheck/lint/clippy, gitleaks history, cargo-audit ×7 crates, cargo-deny, golangci-lint                                         |
-| GitHub Actions      | PR/push    | `server-ci` test job; `ztnet-e2e` (GSE mesh, path-filtered, needs Docker)                                                         |
+| GitHub Actions      | PR/push    | `server-ci` test job                                                                                                              |
 | GitHub Actions      | PR/push    | `analysis` (blocking): actionlint, zizmor, shellcheck, hadolint, pnpm audit, govulncheck, cargo-machete, desktop typecheck + knip |
 | GitHub Actions      | weekly     | semgrep deep scan → Code Scanning                                                                                                 |
 
