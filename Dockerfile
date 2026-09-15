@@ -99,6 +99,18 @@ COPY --from=build-system /app/server/build ./startup
 COPY --from=build-system /app/server/build/nginx.conf /nginx.conf
 COPY --from=torrential-build /build/torrential/target/release/torrential /usr/bin/
 
+# Run as an unprivileged user. Drop (port 4000) and nginx (port 3000) both bind
+# unprivileged ports. Operators using bind-mounted /data or /library must make
+# the mount writable by uid 10001, or run the container with a matching --user.
+RUN groupadd --system --gid 10001 drop \
+    && useradd --system --uid 10001 --gid drop --home-dir /app --shell /usr/sbin/nologin drop \
+    && mkdir -p /pnpm /data /library \
+    && chown -R drop:drop /app /pnpm /data /library
+
+ENV HOME="/app"
+# Numeric id so hadolint can verify it; matches the `drop` user created above.
+USER 10001:10001
+
 ENV LIBRARY="/library"
 ENV DATA="/data"
 ENV NGINX_CONFIG="/nginx.conf"

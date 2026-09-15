@@ -72,36 +72,63 @@ function flattenLocalisationRecursive(
   }
 }
 
-export function deleteLocalisation(localisation: Localisation, key: string) {
+const UNSAFE_LOCALISATION_KEYS = new Set([
+  "__proto__",
+  "constructor",
+  "prototype",
+]);
+
+/** Rejects key segments that could traverse the prototype chain. */
+function assertSafeKeyPart(part: string): void {
+  if (UNSAFE_LOCALISATION_KEYS.has(part)) {
+    throw new Error(`Unsafe localisation key segment: ${part}`);
+  }
+}
+
+/** Own-property check that never consults the prototype chain. */
+function hasOwn(target: object, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(target, key);
+}
+
+/**
+ * Walks a dotted localisation key, validating every segment as an own property
+ * and rejecting prototype-chain keys, and returns the parent branch plus the
+ * final segment. Shared by the read and delete helpers.
+ */
+function resolveLocalisationPath(
+  localisation: Localisation,
+  key: string,
+): { parent: Localisation; last: string } {
   const parts = key.split(".");
+  const last = parts.at(-1)!;
   let current: Localisation | string = localisation;
   for (const part of parts.slice(0, -1)) {
-    if (typeof current === "string")
+    assertSafeKeyPart(part);
+    if (typeof current === "string" || !hasOwn(current, part))
       throw new Error(`${key} not found in localisation`);
     current = current[part];
   }
   if (typeof current === "string")
     throw new Error(`${key} not found in localisation`);
+  assertSafeKeyPart(last);
+  return { parent: current, last };
+}
+
+export function deleteLocalisation(localisation: Localisation, key: string) {
+  const { parent, last } = resolveLocalisationPath(localisation, key);
+  if (!hasOwn(parent, last))
+    throw new Error(`${key} not found in localisation`);
 
   // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
-  delete current[parts.at(-1)!];
+  delete parent[last];
 }
 
 export function fetchLocalisation(
   localisation: Localisation,
   key: string,
 ): string {
-  const parts = key.split(".");
-  let current: Localisation | string = localisation;
-  for (const part of parts.slice(0, -1)) {
-    if (typeof current === "string")
-      throw new Error(`${key} not found in localisation`);
-    current = current[part];
-  }
-  if (typeof current === "string")
-    throw new Error(`${key} not found in localisation`);
-
-  return current[parts.at(-1)!] as string;
+  const { parent, last } = resolveLocalisationPath(localisation, key);
+  return parent[last] as string;
 }
 
 export async function writeJSON<T>(path: string, object: T) {
