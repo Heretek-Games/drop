@@ -228,4 +228,3 @@ jobs:
               srpm="$(find /work/dist/rpm -maxdepth 1 -name "*.src.rpm" -print -quit)"
               copr-cli build "$COPR_ALPHA" "$srpm"
             '
-��6k�ykG��������o��Ӎ��G|��x
