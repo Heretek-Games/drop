@@ -13,6 +13,11 @@ version = 2
 # first-party dependency that goes unmaintained must be replaced rather than
 # ignored.
 unmaintained = "workspace"
+# The ignore below only matches in the crate that depends on bincode
+# (native_model), so `advisory-not-detected` is expected in the other crates
+# that share this config. Allow the unmatched diagnostic rather than scoping a
+# separate deny.toml per crate.
+unused-ignored-advisory = "allow"
 # Fail on known vulnerabilities. Add scoped ignores here with a comment and a
 # tracking issue if a transitive advisory cannot be resolved immediately.
 ignore = [
@@ -25,6 +30,10 @@ ignore = [
 
 [licenses]
 version = 2
+# This allow list is shared by every crate's `cargo deny check` run, so a
+# license needed by one crate's graph is unmatched in the others; allow the
+# unmatched diagnostic instead of erroring per crate.
+unused-allowed-license = "allow"
 # Permissive/inbound licenses accepted for the dependency graph. The workspace
 # itself is AGPL-3.0-only.
 allow = [
@@ -46,7 +55,6 @@ allow = [
     "Unicode-DFS-2016",
     "Unlicense",
     "Zlib",
-    "bzip2-1.0.6",
 ]
 
 [bans]

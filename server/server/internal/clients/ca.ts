@@ -1,4 +1,5 @@
 import type { CertificateStore } from "./ca-store";
+import { CERTIFICATE_KEY_ENV, certificateKeyConfigured } from "./cert-secrets";
 import { dropletInterface } from "../services/torrential/droplet-interface";
 import { logger } from "../logging";
 
@@ -6,6 +7,8 @@ export type CertificateBundle = {
   priv: string;
   cert: string;
 };
+
+let warnedMissingCertificateKey = false;
 
 /*
 This is designed to handle client certificates, as described in the README.md
@@ -21,6 +24,15 @@ export class CertificateAuthority {
   }
 
   static async new(store: CertificateStore) {
+    if (!certificateKeyConfigured() && !warnedMissingCertificateKey) {
+      warnedMissingCertificateKey = true;
+      logger.warn(
+        `${CERTIFICATE_KEY_ENV} is not set; certificate private keys are stored ` +
+          "unencrypted. Set it to a 32-byte key (64 hex characters or base64) " +
+          "to seal them at rest.",
+      );
+    }
+
     const root = await store.fetch("ca");
     let ca;
     if (root === undefined) {

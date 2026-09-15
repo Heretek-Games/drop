@@ -162,9 +162,11 @@ mod tests {
     fn builds_platform_asset_urls() {
         let linux = asset_for("v0.27.0", "linux", "x86_64").expect("linux asset");
         assert_eq!(linux.file_name, "ludusavi-v0.27.0-linux-x64.tar.gz");
-        assert!(linux
-            .url
-            .ends_with("/download/v0.27.0/ludusavi-v0.27.0-linux-x64.tar.gz"));
+        assert!(
+            linux
+                .url
+                .ends_with("/download/v0.27.0/ludusavi-v0.27.0-linux-x64.tar.gz")
+        );
 
         let mac = asset_for("v0.27.0", "macos", "aarch64").expect("mac asset");
         assert_eq!(mac.file_name, "ludusavi-v0.27.0-macos-arm64.tar.gz");

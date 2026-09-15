@@ -96,4 +96,3 @@ pub fn cancel_pipeline_setup(game_id: String) -> bool {
 pub fn reclaim_pipeline_space(game_id: String) -> Result<u64, String> {
     ::process::pipeline::reclaim_pipeline_space_for_game(&game_id)
 }
-

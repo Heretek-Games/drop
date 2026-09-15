@@ -14,6 +14,7 @@ set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/distro/common.sh
+# shellcheck disable=SC1091
 source "$script_dir/common.sh"
 
 channel=""
@@ -107,6 +108,18 @@ if [[ "$channel" == "alpha" ]]; then
 else
   cp "$spec_template" "$spec_out"
 fi
+
+# Persist the version/release into the spec itself. The `--define` flags below
+# only apply to this transient `rpmbuild -bs`; COPR re-expands the spec inside
+# the SRPM *without* them, so without this the spec falls back to the template
+# default (`0.4.0`) and `Source0` points at a tarball name that does not exist.
+# That mismatch caused every COPR build to fail with "Bad file: ...-0.4.0.tar.gz".
+escaped_upstream="${upstream//&/\\&}"
+escaped_release="${release//&/\\&}"
+sed -i \
+  -e "s|^%{!?_pkg_version: %global _pkg_version .*|%global _pkg_version ${escaped_upstream}|" \
+  -e "s|^%{!?_pkg_release: %global _pkg_release .*|%global _pkg_release ${escaped_release}|" \
+  "$spec_out"
 
 tar -C "$tree_parent" -czf "$src_dir/${tree_name}.tar.gz" "$tree_name"
 

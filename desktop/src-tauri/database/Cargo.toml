@@ -26,3 +26,9 @@ whoami = "1.6.1"
 # installed. Scoped to Linux because libdbus-sys does not build elsewhere.
 [target.'cfg(target_os = "linux")'.dependencies]
 libdbus-sys = { version = "0.2.7", features = ["vendored"] }
+
+# `keyring` is only referenced from the commented-out KEY_IV block in src/db.rs
+# (see the `TODO: fix keyring`), so cargo-machete reports it as unused. Keep the
+# dependency until that code is re-enabled instead of re-adding it later.
+[package.metadata.cargo-machete]
+ignored = ["keyring"]

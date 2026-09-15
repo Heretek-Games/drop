@@ -1,6 +1,4 @@
 #![feature(duration_millis_float)]
-#![feature(nonpoison_mutex)]
-#![feature(sync_nonpoison)]
 
 use std::{ops::Deref, sync::OnceLock};
 
@@ -10,13 +8,13 @@ use crate::{
     download_manager_builder::DownloadManagerBuilder, download_manager_frontend::DownloadManager,
 };
 
+pub mod depot_manager;
 pub mod download_manager_builder;
 pub mod download_manager_frontend;
 pub mod downloadable;
 pub mod error;
 pub mod frontend_updates;
 pub mod util;
-pub mod depot_manager;
 
 pub static DOWNLOAD_MANAGER: DownloadManagerWrapper = DownloadManagerWrapper::new();
 

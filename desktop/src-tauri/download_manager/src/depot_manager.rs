@@ -3,7 +3,6 @@ use std::{
     env,
     sync::RwLock,
     time::{Duration, Instant},
-    usize,
 };
 
 use futures_util::StreamExt;

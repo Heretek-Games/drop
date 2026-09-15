@@ -37,10 +37,7 @@ pub async fn fetch_game_reviews(game_id: String) -> Result<Vec<ReviewView>, Stri
         .map_err(|e| e.to_string())?;
 
     if !response.status().is_success() {
-        return Err(format!(
-            "failed to fetch reviews: {}",
-            response.status()
-        ));
+        return Err(format!("failed to fetch reviews: {}", response.status()));
     }
 
     let body = response.text().await.map_err(|e| e.to_string())?;

@@ -1737,3 +1737,44 @@ test("v2 signatures reject manifest tampering", async () => {
     }
   }
 });
+
+test("plugin route patterns keep regex metacharacters literal", async () => {
+  const manager = createTestManager();
+
+  const regexPlugin: ServerPlugin = {
+    metadata: {
+      id: "regex-plugin",
+      name: "Regex Plugin",
+      version: "1.0.0",
+      apiVersion: PLUGIN_API_VERSION,
+      capabilities: ["routes"],
+    },
+    init: (ctx: PluginContext) => {
+      ctx.registerRoute("GET", "/literal/(a+)+", () => ({ literal: true }));
+    },
+  };
+
+  await manager.registerPlugin(regexPlugin);
+
+  const mockEvent = {
+    method: "GET",
+    headers: new Headers(),
+  } as unknown as import("h3").H3Event;
+
+  // The exact literal path matches...
+  const literal = (await manager.dispatch(
+    "regex-plugin",
+    "GET",
+    "/literal/(a+)+",
+    mockEvent,
+  )) as { literal: boolean };
+  assert.equal(literal.literal, true);
+
+  // ...but a path the metacharacters would match if compiled as a regex does not.
+  await assert.rejects(
+    () => manager.dispatch("regex-plugin", "GET", "/literal/aaaa", mockEvent),
+    /No handler found/,
+  );
+
+  await manager.unregisterPlugin("regex-plugin");
+});

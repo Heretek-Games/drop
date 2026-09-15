@@ -1,8 +1,4 @@
 #![deny(unused_must_use)]
-#![feature(fn_traits)]
-#![feature(duration_constructors)]
-#![feature(duration_millis_float)]
-#![feature(iterator_try_collect)]
 #![feature(nonpoison_mutex)]
 #![feature(sync_nonpoison)]
 #![deny(clippy::all)]
@@ -63,34 +59,34 @@ mod client;
 mod cloud_saves;
 mod collections;
 mod community;
-mod handheld;
 mod download_manager;
 mod downloads;
 mod games;
+mod handheld;
 mod plugins;
+mod presence;
 mod process;
 mod remote;
 mod scheduler;
 mod settings;
-mod presence;
 mod shaders;
+mod updates;
 mod webrtc;
 mod workshop;
-mod updates;
 
 use achievements::*;
 use client::*;
 use cloud_saves::*;
 use community::*;
-use handheld::*;
 use download_manager::*;
 use downloads::*;
 use games::*;
+use handheld::*;
 use plugins::*;
+use presence::*;
 use process::*;
 use remote::*;
 use settings::*;
-use presence::*;
 use shaders::*;
 use webrtc::*;
 use workshop::*;
@@ -381,19 +377,16 @@ pub fn run() {
                 let width = 1536.0;
                 let height = 864.0;
 
-                let _main_window = WebviewWindowBuilder::new(
-                    &handle,
-                    "main",
-                    WebviewUrl::App("main".into()),
-                )
-                .title("Drop Desktop App")
-                .min_inner_size(1000.0, 500.0)
-                .inner_size(width, height)
-                .decorations(false)
-                .shadow(false)
-                .data_directory(DATA_ROOT_DIR.join(".webview"))
-                .build()
-                .expect("failed to build main window");
+                let _main_window =
+                    WebviewWindowBuilder::new(&handle, "main", WebviewUrl::App("main".into()))
+                        .title("Drop Desktop App")
+                        .min_inner_size(1000.0, 500.0)
+                        .inner_size(width, height)
+                        .decorations(false)
+                        .shadow(false)
+                        .data_directory(DATA_ROOT_DIR.join(".webview"))
+                        .build()
+                        .expect("failed to build main window");
 
                 app.deep_link().on_open_url(move |event| {
                     debug!("handling drop:// url");
@@ -536,12 +529,7 @@ pub fn run() {
         .expect("error while running tauri application");
 
     app.run(|_app_handle, event| {
-        if let RunEvent::ExitRequested {
-            code,
-            api,
-            ..
-        } = event
-        {
+        if let RunEvent::ExitRequested { code, api, .. } = event {
             run_on_tray(|| {
                 if code.is_none() {
                     api.prevent_exit();

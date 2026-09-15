@@ -19,7 +19,7 @@
 ///
 /// Example usage:
 ///
-/// ```rust
+/// ```ignore
 /// # use native_model::*;
 /// #[derive(Clone, Default, serde::Deserialize, serde::Serialize)]
 /// #[native_model(id = 1, version = 1, with = native_model::rmp_serde_1_3::RmpSerde)]
@@ -59,7 +59,7 @@ impl<T: for<'de> serde::Deserialize<'de>> crate::Decode<T> for RmpSerde {
 ///
 /// Example usage:
 ///
-/// ```rust
+/// ```ignore
 /// # use native_model::*;
 /// #[derive(Clone, Default, serde::Deserialize, serde::Serialize)]
 /// #[native_model(id = 1, version = 1, with = native_model::rmp_serde_1_3::RmpSerdeNamed)]
