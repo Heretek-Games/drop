@@ -95,6 +95,9 @@
                 <div
                   class="flex-1 p-4 rounded-md bg-zinc-900 border border-zinc-700 overflow-y-auto"
                 >
+                  <!-- micromark escapes raw HTML and drops unsafe URI protocols by
+                       default, so this preview never renders untrusted markup. -->
+                  <!-- nosemgrep: javascript.vue.security.audit.xss.templates.avoid-v-html.avoid-v-html -->
                   <div
                     class="prose prose-invert prose-sm h-full overflow-y-auto"
                     v-html="markdownPreview"
