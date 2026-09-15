@@ -1,15 +1,12 @@
 import fs from "node:fs/promises";
-import { timingSafeEqual } from "node:crypto";
 import type { PluginManifest } from "./types";
-
-const SHA256_HEX_PATTERN = /^[0-9a-f]{64}$/i;
-
-function constantTimeEqual(left: string, right: string): boolean {
-  const a = Buffer.from(left, "utf8");
-  const b = Buffer.from(right, "utf8");
-  if (a.length !== b.length) return false;
-  return timingSafeEqual(a, b);
-}
+import {
+  constantTimeEqual,
+  isSha256Hex,
+  verifyBundleFiles,
+  verifyBundleSignature,
+  verifyEntryChecksum,
+} from "./verification";
 
 /** A registry entry pins a plugin's version and/or entry checksum. */
 export interface PluginRegistryEntry {
@@ -108,12 +105,33 @@ export class PluginRegistry {
     }
     if (
       entry.checksum &&
-      (!SHA256_HEX_PATTERN.test(entry.checksum) ||
+      (!isSha256Hex(entry.checksum) ||
         !constantTimeEqual(entry.checksum, digest))
     ) {
       throw new Error(
         `plugin '${manifest.id}' checksum does not match the registry`,
       );
     }
+  }
+
+  /**
+   * Verify an on-disk bundle before its module is imported: entry checksum,
+   * per-file checksums, aggregate digest and signature, then registry
+   * allow-list/pinning. Returns the aggregate digest used to cache-bust the
+   * entry import. `entryPath` is omitted for client-only bundles.
+   */
+  async verifyBundle(
+    pluginDir: string,
+    manifest: PluginManifest,
+    entryPath?: string,
+  ): Promise<string> {
+    let entryDigest = "";
+    if (entryPath !== undefined) {
+      entryDigest = verifyEntryChecksum(await fs.readFile(entryPath), manifest);
+    }
+    const aggregateDigest = await verifyBundleFiles(pluginDir, manifest);
+    verifyBundleSignature(aggregateDigest, entryDigest, manifest);
+    this.check(manifest, entryDigest);
+    return aggregateDigest;
   }
 }
