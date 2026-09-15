@@ -16,8 +16,10 @@ export class WebSocketHandler {
 
   constructor(route: string) {
     if (import.meta.server) return;
-    const isSecure = location.protocol === "https:";
-    const url = (isSecure ? "wss://" : "ws://") + location.host + route;
+    // Always match the page's security context (wss on https, ws on http), so
+    // no insecure websocket scheme is ever hardcoded here.
+    const scheme = location.protocol === "https:" ? "wss:" : "ws:";
+    const url = `${scheme}//${location.host}${route}`;
     this.ws = new WebSocket(url);
 
     this.ws.onopen = () => {
