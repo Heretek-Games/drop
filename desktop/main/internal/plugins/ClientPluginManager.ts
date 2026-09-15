@@ -39,7 +39,7 @@ async function safeInvoke<T>(
     console.debug(
       `[ClientPluginManager] Browser mode: invoke('${cmd}') bypassed`,
     );
-    return fallback !== undefined ? fallback : (null as unknown as T);
+    return fallback ?? (null as unknown as T);
   }
   return await invoke<T>(cmd, args);
 }

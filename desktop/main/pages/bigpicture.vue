@@ -11,13 +11,7 @@
       </button>
     </header>
 
-    <main
-      class="flex-1 px-12 pb-12 outline-none"
-      tabindex="0"
-      role="grid"
-      aria-label="Game library"
-      @keydown="onKeydown"
-    >
+    <main class="flex-1 px-12 pb-12" aria-label="Game library">
       <div class="grid grid-cols-2 gap-8 sm:grid-cols-3 lg:grid-cols-4">
         <button
           v-for="(tile, index) in tiles"
@@ -48,7 +42,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, onMounted, onUnmounted, ref } from "vue";
 
 interface Tile {
   id: string;
@@ -93,6 +87,16 @@ function onKeydown(event: KeyboardEvent) {
   }
   event.preventDefault();
 }
+
+// Big-picture navigation is global: arrow keys work without first focusing
+// the tile area, so the keydown listener lives on the window instead of on
+// a static container element (which would be poor a11y semantics).
+onMounted(() => {
+  window.addEventListener("keydown", onKeydown);
+});
+onUnmounted(() => {
+  window.removeEventListener("keydown", onKeydown);
+});
 
 function appendSearch(key: string) {
   if (key === "Backspace") {
