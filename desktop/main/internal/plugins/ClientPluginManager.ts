@@ -44,40 +44,60 @@ async function safeInvoke<T>(
   return await invoke<T>(cmd, args);
 }
 
-class BrowserLocalStorage implements ClientPluginStorage {
+class TauriPluginStorage implements ClientPluginStorage {
+  // Browser/dev fallback. Plugin state lives in the Rust-side database when
+  // Tauri is available so frontend and backend never split their state.
+  private readonly memory = new Map<string, unknown>();
+
   constructor(private readonly pluginId: string) {}
 
-  private prefixKey(key: string): string {
-    return `drop:plugin:${this.pluginId}:${key}`;
-  }
-
   async get<T>(key: string): Promise<T | null> {
-    try {
-      const val = localStorage.getItem(this.prefixKey(key));
-      return val ? JSON.parse(val) : null;
-    } catch {
-      return null;
+    if (!isTauri()) {
+      return this.memory.has(key) ? (this.memory.get(key) as T) : null;
     }
+    return (
+      (await safeInvoke<T | null>(
+        "plugin_storage_get",
+        { pluginId: this.pluginId, key },
+        null,
+      )) ?? null
+    );
   }
 
   async set<T>(key: string, value: T): Promise<void> {
-    localStorage.setItem(this.prefixKey(key), JSON.stringify(value));
+    if (!isTauri()) {
+      this.memory.set(key, value);
+      return;
+    }
+    await safeInvoke("plugin_storage_set", {
+      pluginId: this.pluginId,
+      key,
+      value,
+    });
   }
 
   async delete(key: string): Promise<void> {
-    localStorage.removeItem(this.prefixKey(key));
+    if (!isTauri()) {
+      this.memory.delete(key);
+      return;
+    }
+    await safeInvoke("plugin_storage_delete", {
+      pluginId: this.pluginId,
+      key,
+    });
   }
 
   async listKeys(): Promise<string[]> {
-    const prefix = `drop:plugin:${this.pluginId}:`;
-    const keys: string[] = [];
-    for (let i = 0; i < localStorage.length; i++) {
-      const k = localStorage.key(i);
-      if (k?.startsWith(prefix)) {
-        keys.push(k.slice(prefix.length));
-      }
+    if (!isTauri()) {
+      return Array.from(this.memory.keys());
     }
-    return keys;
+    return (
+      (await safeInvoke<string[]>(
+        "plugin_storage_list_keys",
+        { pluginId: this.pluginId },
+        [],
+      )) || []
+    );
   }
 }
 
@@ -293,7 +313,7 @@ export class ClientPluginManager {
         debug: (msg, ...args) =>
           console.debug(`[Plugin:${pluginId}] ${msg}`, ...args),
       },
-      storage: new BrowserLocalStorage(pluginId),
+      storage: new TauriPluginStorage(pluginId),
       registerSlot: (slot, component, options) => {
         if (!this.slots[slot]) {
           this.slots[slot] = [];

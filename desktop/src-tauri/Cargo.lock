@@ -1125,6 +1125,7 @@ dependencies = [
  "rand 0.10.2",
  "ron",
  "serde",
+ "serde_json",
  "serde_with",
  "url",
  "whoami",
@@ -1427,6 +1428,7 @@ dependencies = [
  "native_model",
  "page_size",
  "parking_lot 0.12.5",
+ "plugins",
  "process",
  "rand 0.10.2",
  "rayon",
@@ -4454,6 +4456,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "plugins"
+version = "0.1.0"
+dependencies = [
+ "database",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tauri",
+ "tempfile",
+ "tokio",
+ "walkdir",
+]
+
+[[package]]
 name = "png"
 version = "0.17.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4616,7 +4632,6 @@ dependencies = [
  "shell-words",
  "tauri",
  "tauri-plugin-opener",
- "tempfile",
  "utils",
 ]
 

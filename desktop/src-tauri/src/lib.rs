@@ -64,7 +64,6 @@ mod collections;
 mod download_manager;
 mod downloads;
 mod games;
-mod plugins;
 mod process;
 mod remote;
 mod scheduler;
@@ -262,6 +261,10 @@ pub fn run() {
             plugin_game_find_files,
             plugin_register_commands,
             plugin_system_run,
+            plugin_storage_get,
+            plugin_storage_set,
+            plugin_storage_delete,
+            plugin_storage_list_keys,
             // Library
             fetch_library,
             fetch_game,

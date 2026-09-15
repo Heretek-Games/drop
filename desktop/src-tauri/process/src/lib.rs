@@ -19,7 +19,6 @@ pub mod compat;
 pub mod error;
 pub mod format;
 mod parser;
-pub mod path_guard;
 pub mod process_handlers;
 pub mod process_manager;
 
