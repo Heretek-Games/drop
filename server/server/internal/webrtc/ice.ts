@@ -47,6 +47,10 @@ export function turnCredentials(
 ): { username: string; credential: string; expiresAt: number } {
   const expiry = Math.floor(nowMs / 1000) + Math.max(1, Math.floor(ttlSeconds));
   const username = `${expiry}:${userId}`;
+  // coturn's TURN REST API mandates HMAC-SHA1 here
+  // (draft-uberti-behave-turn-rest-00; coturn only validates SHA-1, see
+  // coturn/coturn#1293). SHA-1's collision attacks do not apply to HMAC
+  // preimages, and the credential expires after a short TTL.
   const credential = createHmac("sha1", secret)
     .update(username)
     .digest("base64");

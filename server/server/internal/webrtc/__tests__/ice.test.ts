@@ -1,6 +1,5 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createHmac } from "node:crypto";
 import {
   DEFAULT_TURN_TTL_SECONDS,
   buildIceConfig,
@@ -48,10 +47,9 @@ test("buildIceConfig issues ephemeral TURN credentials", () => {
   const expirySeconds = Math.floor(now / 1000) + DEFAULT_TURN_TTL_SECONDS;
   const expectedUsername = `${expirySeconds}:user-1`;
   assert.equal(turn.username, expectedUsername);
-  assert.equal(
-    turn.credential,
-    createHmac("sha1", "secret").update(expectedUsername).digest("base64"),
-  );
+  // Fixed vector: base64(HMAC-SHA1("secret", "1700003600:user-1")).
+  const expectedDigest = "CEsUJR7O3T8zA48LhdKXvRodkuQ=";
+  assert.equal(turn.credential, expectedDigest);
   assert.equal(config.expiresAt, expirySeconds * 1000);
 });
 
