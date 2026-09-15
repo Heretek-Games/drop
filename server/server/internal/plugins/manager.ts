@@ -136,7 +136,7 @@ function routeTokenToRegexSource(
   paramNames: string[],
 ): { source: string; consumed: number } {
   const char = normalized[index];
-  if (char === ":" && /[A-Za-z0-9_]/.test(normalized[index + 1] ?? "")) {
+  if (char === ":" && /\w/.test(normalized[index + 1] ?? "")) {
     let end = index + 1;
     while (end < normalized.length && /\w/.test(normalized[end])) {
       end++;

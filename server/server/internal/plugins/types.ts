@@ -315,7 +315,10 @@ export interface CloudSavePathResolver {
 
 export interface ScannedGame {
   externalId: string;
-  store: "steam" | "gog" | "epic" | string;
+  // The string literals document the stores Drop ships scanners for; the
+  // `(string & {})` form keeps them usable (namespaced literal suggestions)
+  // instead of being swallowed by plain `string`.
+  store: "steam" | "gog" | "epic" | (string & {});
   title: string;
   installPath: string;
   executablePath?: string;

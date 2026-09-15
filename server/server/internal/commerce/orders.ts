@@ -211,7 +211,7 @@ export class CommerceManager {
     const order = await this.deps.prisma.purchaseOrder.findUnique({
       where: { id: orderId },
     });
-    if (!order || order.userId !== userId || order.status !== "succeeded") {
+    if (order?.userId !== userId || order.status !== "succeeded") {
       throw createError({ statusCode: 404, statusMessage: "Unknown receipt" });
     }
     return parseReceipt(order);
