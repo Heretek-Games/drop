@@ -21,7 +21,9 @@ Environment=HOSTNAME=drop
 SecurityLabelDisable=true
 
 [Service]
+# PostgreSQL may still be initializing when this unit starts; Restart=always
+# recovers until the database accepts connections.
 Restart=always
 
 [Install]
-WantedBy=multi-user.target
+WantedBy=multi-user.target default.target

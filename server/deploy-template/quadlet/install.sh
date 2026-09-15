@@ -58,4 +58,8 @@ echo " Drop Web App: http://localhost:3000"
 echo ""
 echo " To enable multiplayer mesh networking, install the drop-zerotier"
 echo " plugin and point it at your ZTNET controller."
+if [[ $EUID -ne 0 ]]; then
+  echo " Rootless note: run 'loginctl enable-linger ${USER}' to start Drop"
+  echo " on boot without an active login session."
+fi
 echo "==============================================================="

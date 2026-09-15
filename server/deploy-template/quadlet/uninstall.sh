@@ -37,7 +37,7 @@ echo "==> 2. Removing Quadlet unit files from ${QUADLET_DIR}..."
 rm -f "${QUADLET_DIR}/drop-network.network" \
       "${QUADLET_DIR}/drop-postgres.container" \
       "${QUADLET_DIR}/drop.container" \
-      "${QUADLET_DIR}/drop-*.volume"
+      "${QUADLET_DIR}"/drop-*.volume
 
 echo "==> 3. Reloading systemd daemon..."
 ${SYSTEMCTL} daemon-reload
