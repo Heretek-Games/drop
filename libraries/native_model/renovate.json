@@ -5,13 +5,15 @@
     {
       "automerge": true,
       "description": "Automerge non-major updates",
-      "matchUpdateTypes": ["minor", "patch"]
+      "matchUpdateTypes": ["minor", "patch"],
+      "minimumReleaseAge": "7 days"
     },
     {
       "automerge": true,
       "description": "Automerge actions",
       "matchDepTypes": ["action"],
-      "matchUpdateTypes": ["major", "minor", "patch"]
+      "matchUpdateTypes": ["major", "minor", "patch"],
+      "minimumReleaseAge": "7 days"
     }
   ],
   "platformAutomerge": true,
