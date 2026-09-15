@@ -80,6 +80,9 @@ importers:
       autoprefixer:
         specifier: ^10.4.20
         version: 10.5.0(postcss@8.5.24)
+      jiti:
+        specifier: ^2.7.0
+        version: 2.7.0
       postcss:
         specifier: ^8.5.18
         version: 8.5.24

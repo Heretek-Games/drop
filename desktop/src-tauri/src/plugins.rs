@@ -38,22 +38,89 @@ pub struct CommandOutput {
 
 const BLOCKED_COMMANDS: &[&str] = &[
     // Shells
-    "sh", "bash", "dash", "ash", "zsh", "csh", "tcsh", "fish", "ksh",
-    "cmd", "cmd.exe", "powershell", "powershell.exe", "pwsh", "pwsh.exe",
-    "wscript", "wscript.exe", "cscript", "cscript.exe",
+    "sh",
+    "bash",
+    "dash",
+    "ash",
+    "zsh",
+    "csh",
+    "tcsh",
+    "fish",
+    "ksh",
+    "cmd",
+    "cmd.exe",
+    "powershell",
+    "powershell.exe",
+    "pwsh",
+    "pwsh.exe",
+    "wscript",
+    "wscript.exe",
+    "cscript",
+    "cscript.exe",
     // Interpreters & runtimes
-    "python", "python3", "python.exe", "python3.exe", "py", "py.exe",
-    "node", "node.exe", "deno", "deno.exe", "bun", "bun.exe",
-    "perl", "perl.exe", "ruby", "ruby.exe", "php", "php.exe", "lua", "lua.exe",
+    "python",
+    "python3",
+    "python.exe",
+    "python3.exe",
+    "py",
+    "py.exe",
+    "node",
+    "node.exe",
+    "deno",
+    "deno.exe",
+    "bun",
+    "bun.exe",
+    "perl",
+    "perl.exe",
+    "ruby",
+    "ruby.exe",
+    "php",
+    "php.exe",
+    "lua",
+    "lua.exe",
     // Network transfer / remote shells
-    "curl", "curl.exe", "wget", "wget.exe",
-    "nc", "ncat", "netcat", "socat", "telnet", "ssh", "scp", "sftp", "ftp",
+    "curl",
+    "curl.exe",
+    "wget",
+    "wget.exe",
+    "nc",
+    "ncat",
+    "netcat",
+    "socat",
+    "telnet",
+    "ssh",
+    "scp",
+    "sftp",
+    "ftp",
     // Privilege escalation / execution
-    "sudo", "su", "doas", "pkexec", "runas", "runas.exe",
+    "sudo",
+    "su",
+    "doas",
+    "pkexec",
+    "runas",
+    "runas.exe",
     // Destructive filesystem / partition / system tools
-    "rm", "rmdir", "del", "erase", "dd", "format", "mkfs", "fdisk", "parted",
-    "reg", "reg.exe", "regedit", "regedit.exe", "certutil", "certutil.exe",
-    "bitsadmin", "bitsadmin.exe", "mshta", "mshta.exe", "rundll32", "rundll32.exe",
+    "rm",
+    "rmdir",
+    "del",
+    "erase",
+    "dd",
+    "format",
+    "mkfs",
+    "fdisk",
+    "parted",
+    "reg",
+    "reg.exe",
+    "regedit",
+    "regedit.exe",
+    "certutil",
+    "certutil.exe",
+    "bitsadmin",
+    "bitsadmin.exe",
+    "mshta",
+    "mshta.exe",
+    "rundll32",
+    "rundll32.exe",
 ];
 
 fn validate_command_name(command: &str) -> Result<(), String> {
@@ -155,12 +222,7 @@ pub async fn plugin_system_run(
     let output = match tokio::time::timeout(timeout, command.output()).await {
         Ok(Ok(output)) => output,
         Ok(Err(err)) => return Err(format!("failed to run '{bin}': {err}")),
-        Err(_) => {
-            return Err(format!(
-                "'{bin}' timed out after {}ms",
-                timeout.as_millis()
-            ))
-        }
+        Err(_) => return Err(format!("'{bin}' timed out after {}ms", timeout.as_millis())),
     };
 
     Ok(CommandOutput {
@@ -252,10 +314,7 @@ pub async fn plugin_game_fs_backup(
 }
 
 #[tauri::command]
-pub async fn plugin_game_fs_restore(
-    game_id: String,
-    relative_path: String,
-) -> Result<(), String> {
+pub async fn plugin_game_fs_restore(game_id: String, relative_path: String) -> Result<(), String> {
     let install_dir = get_game_install_dir(&game_id)?;
     let backup_relative = format!("{}.drop-backup", relative_path);
     let backup_path = path_guard::safe_join(&install_dir, &backup_relative)
@@ -277,10 +336,7 @@ pub async fn plugin_game_fs_restore(
 }
 
 #[tauri::command]
-pub async fn plugin_game_fs_exists(
-    game_id: String,
-    relative_path: String,
-) -> Result<bool, String> {
+pub async fn plugin_game_fs_exists(game_id: String, relative_path: String) -> Result<bool, String> {
     let install_dir = get_game_install_dir(&game_id)?;
     match path_guard::safe_join(&install_dir, &relative_path) {
         Ok(safe_path) => Ok(safe_path.exists()),
@@ -289,10 +345,7 @@ pub async fn plugin_game_fs_exists(
 }
 
 #[tauri::command]
-pub async fn plugin_game_fs_delete(
-    game_id: String,
-    relative_path: String,
-) -> Result<(), String> {
+pub async fn plugin_game_fs_delete(game_id: String, relative_path: String) -> Result<(), String> {
     let install_dir = get_game_install_dir(&game_id)?;
     path_guard::remove_file(&install_dir, &relative_path)
         .map_err(|e| format!("Failed to delete {relative_path}: {e}"))
@@ -338,12 +391,10 @@ pub async fn plugin_game_scan_executables(
                 .unwrap_or(false)
         };
 
-        if is_exec
-            && let Ok(rel_path) = path.strip_prefix(&install_dir)
-        {
+        if is_exec && let Ok(rel_path) = path.strip_prefix(&install_dir) {
             let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
-            let sha256 = compute_file_sha256(path)
-                .unwrap_or_else(|_| String::from("unknown-sha256"));
+            let sha256 =
+                compute_file_sha256(path).unwrap_or_else(|_| String::from("unknown-sha256"));
 
             executables.push(ScannedExecutable {
                 relative_path: rel_path.to_string_lossy().to_string(),

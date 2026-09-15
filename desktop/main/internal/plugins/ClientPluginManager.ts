@@ -6,15 +6,18 @@ import type {
   ClientPluginContext,
   ClientPluginStorage,
   ClientPluginWebSocket,
+  CloudSavePathResolver,
   CommandResult,
   GameMenuItem,
   HttpMethod,
   LaunchContext,
   LaunchHook,
+  MetadataProvider,
   PlayAction,
   ScopedGameFs,
   ScopedGameScanner,
   SidebarItem,
+  StoreScanner,
   TopBarItem,
   UISlotName,
   UISlotRegistration,
@@ -227,6 +230,8 @@ export class ClientPluginManager {
     "settings:tabs": [],
     "topbar:status": [],
     "sidebar:nav": [],
+    "overlay:panel": [],
+    "overlay:quick-access": [],
   });
 
   public readonly playActionProviders: Array<
@@ -236,6 +241,17 @@ export class ClientPluginManager {
   public readonly sidebarItems = reactive<SidebarItem[]>([]);
   public readonly topBarItems = reactive<TopBarItem[]>([]);
   public readonly launchHooks: LaunchHook[] = [];
+  public readonly storeScanners = reactive<
+    Array<{ pluginId: string; scanner: StoreScanner }>
+  >([]);
+  public readonly metadataProviders = reactive<
+    Array<{ pluginId: string; provider: MetadataProvider }>
+  >([]);
+  public readonly cloudSaveResolvers = reactive<
+    Array<{ pluginId: string; resolver: CloudSavePathResolver }>
+  >([]);
+
+  public readonly serverWs: ClientPluginWebSocket = new TauriPluginWebSocket();
 
   public readonly isInitialized = ref(false);
 
@@ -246,6 +262,7 @@ export class ClientPluginManager {
     plugin: ClientPlugin,
     id?: string,
     commands: string[] = [],
+    capabilities: string[] = [],
   ): Promise<void> {
     const pluginId = id || plugin.metadata?.id || "anonymous-plugin";
     if (this.plugins.has(pluginId)) {
@@ -278,6 +295,9 @@ export class ClientPluginManager {
       },
       storage: new BrowserLocalStorage(pluginId),
       registerSlot: (slot, component, options) => {
+        if (!this.slots[slot]) {
+          this.slots[slot] = [];
+        }
         this.slots[slot].push({
           id: `${pluginId}-${slot}-${this.slots[slot].length}`,
           pluginId,
@@ -324,9 +344,74 @@ export class ClientPluginManager {
           if (idx !== -1) this.launchHooks.splice(idx, 1);
         };
       },
+      registerStoreScanner: (scanner: StoreScanner) => {
+        if (
+          capabilities.length > 0 &&
+          !capabilities.includes("client:library-scan")
+        ) {
+          throw new Error(
+            `Client plugin '${pluginId}' attempted 'registerStoreScanner' without the 'client:library-scan' capability`,
+          );
+        }
+        if (!scanner || typeof scanner.id !== "string" || !scanner.id.trim()) {
+          throw new Error("Store scanner must have a valid non-empty id");
+        }
+        const entry = { pluginId, scanner };
+        this.storeScanners.push(entry);
+        return () => {
+          const idx = this.storeScanners.indexOf(entry);
+          if (idx !== -1) this.storeScanners.splice(idx, 1);
+        };
+      },
+      registerMetadataProvider: (provider: MetadataProvider) => {
+        if (
+          capabilities.length > 0 &&
+          !capabilities.includes("metadata:provider")
+        ) {
+          throw new Error(
+            `Client plugin '${pluginId}' attempted 'registerMetadataProvider' without the 'metadata:provider' capability`,
+          );
+        }
+        if (
+          !provider ||
+          typeof provider.id !== "string" ||
+          !provider.id.trim()
+        ) {
+          throw new Error("Metadata provider must have a valid non-empty id");
+        }
+        const entry = { pluginId, provider };
+        this.metadataProviders.push(entry);
+        return () => {
+          const idx = this.metadataProviders.indexOf(entry);
+          if (idx !== -1) this.metadataProviders.splice(idx, 1);
+        };
+      },
+      registerCloudSaveResolver: (resolver: CloudSavePathResolver) => {
+        if (
+          capabilities.length > 0 &&
+          !capabilities.includes("cloudsave:provider")
+        ) {
+          throw new Error(
+            `Client plugin '${pluginId}' attempted 'registerCloudSaveResolver' without the 'cloudsave:provider' capability`,
+          );
+        }
+        if (
+          !resolver ||
+          typeof resolver.id !== "string" ||
+          !resolver.id.trim()
+        ) {
+          throw new Error("Cloud save resolver must have a valid non-empty id");
+        }
+        const entry = { pluginId, resolver };
+        this.cloudSaveResolvers.push(entry);
+        return () => {
+          const idx = this.cloudSaveResolvers.indexOf(entry);
+          if (idx !== -1) this.cloudSaveResolvers.splice(idx, 1);
+        };
+      },
       gameFs: new TauriScopedGameFs(),
       gameScanner: new TauriScopedGameScanner(),
-      serverWs: new TauriPluginWebSocket(),
+      serverWs: this.serverWs,
       system: {
         run: (
           bin: string,
@@ -394,6 +479,36 @@ export class ClientPluginManager {
         (s) => s.pluginId !== pluginId,
       );
     }
+
+    // Clean up store scanners and metadata providers registered by this plugin
+    this.purgeOwned(this.storeScanners, pluginId);
+    this.purgeOwned(this.metadataProviders, pluginId);
+    this.purgeOwned(this.cloudSaveResolvers, pluginId);
+  }
+
+  /** Removes every reactive entry owned by `pluginId` from `entries`. */
+  private purgeOwned<T extends { pluginId: string }>(
+    entries: T[],
+    pluginId: string,
+  ): void {
+    for (let i = entries.length - 1; i >= 0; i--) {
+      const entry = entries[i];
+      if (entry?.pluginId === pluginId) {
+        entries.splice(i, 1);
+      }
+    }
+  }
+
+  getStoreScanners(): StoreScanner[] {
+    return this.storeScanners.map((e) => e.scanner);
+  }
+
+  getMetadataProviders(): MetadataProvider[] {
+    return this.metadataProviders.map((e) => e.provider);
+  }
+
+  getCloudSaveResolvers(): CloudSavePathResolver[] {
+    return this.cloudSaveResolvers.map((e) => e.resolver);
   }
 
   /**
@@ -404,6 +519,7 @@ export class ClientPluginManager {
     bundleUrl: string,
     cssUrl?: string,
     commands: string[] = [],
+    capabilities: string[] = [],
   ): Promise<void> {
     if (cssUrl) {
       const link = document.createElement("link");
@@ -426,7 +542,7 @@ export class ClientPluginManager {
       );
     }
 
-    await this.registerPlugin(pluginExport, pluginId, commands);
+    await this.registerPlugin(pluginExport, pluginId, commands, capabilities);
   }
 
   /**

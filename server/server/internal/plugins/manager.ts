@@ -14,8 +14,12 @@ import {
   PluginTrustError,
 } from "./errors";
 import { PluginRegistry } from "./registry";
+import { SIGNATURE_VERSION, signaturePayloadV2 } from "./signature";
 import type {
+  CloudSavePathResolver,
   HttpMethod,
+  MetadataProvider,
+  PaymentGateway,
   PluginCapability,
   PluginContext,
   PluginManifest,
@@ -109,6 +113,45 @@ function trimTrailingSlashes(value: string): string {
   return value.slice(0, end);
 }
 
+/** Upper bound on a plugin route pattern, limiting regex construction cost. */
+const MAX_ROUTE_PATTERN_LENGTH = 512;
+
+/** Escapes RegExp metacharacters so literal route text cannot form a pattern. */
+function escapeRegExp(value: string): string {
+  const specials = ".*+?^${}()|[]\\";
+  let escaped = "";
+  for (const char of value) {
+    escaped += specials.includes(char) ? `\\${char}` : char;
+  }
+  return escaped;
+}
+
+/**
+ * Translates one token of a plugin route pattern into regex source. Recognises
+ * `:name`, `*`, and `**`; every other character is escaped so it stays literal.
+ */
+function routeTokenToRegexSource(
+  normalized: string,
+  index: number,
+  paramNames: string[],
+): { source: string; consumed: number } {
+  const char = normalized[index];
+  if (char === ":" && /[A-Za-z0-9_]/.test(normalized[index + 1] ?? "")) {
+    let end = index + 1;
+    while (end < normalized.length && /\w/.test(normalized[end])) {
+      end++;
+    }
+    paramNames.push(normalized.slice(index + 1, end));
+    return { source: "([^/]+)", consumed: end - index };
+  }
+  if (char === "*") {
+    return normalized[index + 1] === "*"
+      ? { source: "(.*)", consumed: 2 }
+      : { source: "([^/]+)", consumed: 1 };
+  }
+  return { source: escapeRegExp(char), consumed: 1 };
+}
+
 /** Resolves a dynamically imported bundle's default or named plugin export. */
 function resolvePluginExport(mod: {
   default?: unknown;
@@ -161,6 +204,18 @@ export class PluginManager {
     string,
     Array<() => void>
   >();
+  private readonly metadataProviders = new Map<
+    string,
+    { pluginId: string; provider: MetadataProvider }
+  >();
+  private readonly cloudSaveResolvers = new Map<
+    string,
+    { pluginId: string; resolver: CloudSavePathResolver }
+  >();
+  private readonly paymentGateways = new Map<
+    string,
+    { pluginId: string; gateway: PaymentGateway }
+  >();
   private readonly log: Logger = logger.child({ name: "plugin-manager" });
 
   constructor(private readonly options: PluginManagerOptions = {}) {
@@ -204,19 +259,28 @@ export class PluginManager {
     regex: RegExp;
     paramNames: string[];
   } {
+    if (pattern.length > MAX_ROUTE_PATTERN_LENGTH) {
+      throw new Error(
+        `Plugin route pattern exceeds ${MAX_ROUTE_PATTERN_LENGTH} characters`,
+      );
+    }
     const paramNames: string[] = [];
-    const normalized = pattern.startsWith("/") ? pattern : `/${pattern}`;
+    const normalized = trimTrailingSlashes(
+      pattern.startsWith("/") ? pattern : `/${pattern}`,
+    );
 
-    const regexStr = trimTrailingSlashes(normalized)
-      .replace(/:(\w+)/g, (_, name) => {
-        paramNames.push(name);
-        return "([^/]+)";
-      })
-      .replace(/\*\*/g, "(.*)")
-      .replace(/\*/g, "([^/]+)");
+    // Build the pattern token-by-token and escape every literal character, so
+    // a plugin cannot inject regex metacharacters (and thus a ReDoS payload)
+    // through a route pattern.
+    let source = "";
+    for (let index = 0; index < normalized.length;) {
+      const token = routeTokenToRegexSource(normalized, index, paramNames);
+      source += token.source;
+      index += token.consumed;
+    }
 
     return {
-      regex: new RegExp(`^${regexStr || "/"}(?:/)?$`),
+      regex: new RegExp(`^${source || "/"}(?:/)?$`),
       paramNames,
     };
   }
@@ -387,6 +451,77 @@ export class PluginManager {
         }
         return fetch(input, init);
       },
+      registerMetadataProvider: (provider: MetadataProvider) => {
+        if (
+          !provider ||
+          typeof provider.id !== "string" ||
+          !provider.id.trim()
+        ) {
+          throw new Error("Metadata provider must have a valid non-empty id");
+        }
+        if (!this.hasCapability(capabilities, "metadata:provider")) {
+          throw new PluginCapabilityError(
+            id,
+            "metadata:provider",
+            `registerMetadataProvider(${provider.id})`,
+          );
+        }
+        const existing = this.metadataProviders.get(provider.id);
+        if (existing && existing.pluginId !== id) {
+          throw new Error(
+            `Metadata provider '${provider.id}' is already claimed by plugin '${existing.pluginId}'`,
+          );
+        }
+        this.metadataProviders.set(provider.id, { pluginId: id, provider });
+        pluginLogger.debug(`Registered metadata provider: ${provider.id}`);
+      },
+      registerCloudSaveResolver: (resolver: CloudSavePathResolver) => {
+        if (
+          !resolver ||
+          typeof resolver.id !== "string" ||
+          !resolver.id.trim()
+        ) {
+          throw new Error("Cloud save resolver must have a valid non-empty id");
+        }
+        if (!this.hasCapability(capabilities, "cloudsave:provider")) {
+          throw new PluginCapabilityError(
+            id,
+            "cloudsave:provider",
+            `registerCloudSaveResolver(${resolver.id})`,
+          );
+        }
+        const existing = this.cloudSaveResolvers.get(resolver.id);
+        if (existing && existing.pluginId !== id) {
+          throw new Error(
+            `Cloud save resolver '${resolver.id}' is already claimed by plugin '${existing.pluginId}'`,
+          );
+        }
+        this.cloudSaveResolvers.set(resolver.id, {
+          pluginId: id,
+          resolver,
+        });
+        pluginLogger.debug(`Registered cloud save resolver: ${resolver.id}`);
+      },
+      registerPaymentGateway: (gateway: PaymentGateway) => {
+        if (!gateway || typeof gateway.id !== "string" || !gateway.id.trim()) {
+          throw new Error("Payment gateway must have a valid non-empty id");
+        }
+        if (!this.hasCapability(capabilities, "commerce:payment")) {
+          throw new PluginCapabilityError(
+            id,
+            "commerce:payment",
+            `registerPaymentGateway(${gateway.id})`,
+          );
+        }
+        const existing = this.paymentGateways.get(gateway.id);
+        if (existing && existing.pluginId !== id) {
+          throw new Error(
+            `Payment gateway '${gateway.id}' is already claimed by plugin '${existing.pluginId}'`,
+          );
+        }
+        this.paymentGateways.set(gateway.id, { pluginId: id, gateway });
+        pluginLogger.debug(`Registered payment gateway: ${gateway.id}`);
+      },
     };
   }
 
@@ -528,6 +663,36 @@ export class PluginManager {
   }
 
   /**
+   * Reconstruct the payload a bundle signature covers. Signature v2 covers the
+   * canonical manifest in addition to the file aggregate; legacy bundles (no
+   * marker) cover the file aggregate, or the entry checksum for single-file
+   * bundles.
+   */
+  private resolveSignedPayload(
+    aggregateDigest: string,
+    entryDigest: string,
+    manifest: PluginManifest,
+  ): string {
+    if (manifest.signatureVersion === SIGNATURE_VERSION) {
+      if (!manifest.files) {
+        throw new Error(
+          `bundle ${manifest.id} declares signatureVersion ${SIGNATURE_VERSION} without file checksums`,
+        );
+      }
+      return signaturePayloadV2(
+        aggregateDigest,
+        manifest as unknown as Record<string, unknown>,
+      );
+    }
+    if (manifest.signatureVersion !== undefined) {
+      throw new Error(
+        `bundle ${manifest.id} uses unsupported signatureVersion ${manifest.signatureVersion}`,
+      );
+    }
+    return manifest.files ? aggregateDigest : entryDigest;
+  }
+
+  /**
    * Verify the bundle signature. When `files` is present the signature covers
    * the aggregate bundle digest; otherwise it covers the entry checksum
    * (legacy single-file bundles). `DROP_PLUGIN_REQUIRE_SIGNATURE=true` refuses
@@ -545,7 +710,11 @@ export class PluginManager {
           `bundle ${manifest.id} is signed but DROP_PLUGIN_SIGNING_KEY is not set`,
         );
       }
-      const covered = manifest.files ? aggregateDigest : entryDigest;
+      const covered = this.resolveSignedPayload(
+        aggregateDigest,
+        entryDigest,
+        manifest,
+      );
       const expected = createHmac("sha256", signingKey)
         .update(covered)
         .digest("hex");
@@ -780,19 +949,30 @@ export class PluginManager {
     this.log.info(`Plugin ${id} unregistered`);
   }
 
+  /** Deletes every map entry whose value is owned by plugin `id`. */
+  private purgeOwned<V extends { pluginId: string }>(
+    map: Map<string, V>,
+    id: string,
+  ): void {
+    for (const [key, entry] of map) {
+      if (entry.pluginId === id) {
+        map.delete(key);
+      }
+    }
+  }
+
   /** Drop a plugin's routes, sockets and event subscriptions. */
   private releasePluginResources(id: string): void {
     this.routes.delete(id);
-    for (const [channel, entry] of this.webSockets) {
-      if (entry.pluginId === id) {
-        this.webSockets.delete(channel);
-      }
-    }
+    this.purgeOwned(this.webSockets, id);
     for (const [channel, pluginId] of this.publicChannels) {
       if (pluginId === id) {
         this.publicChannels.delete(channel);
       }
     }
+    this.purgeOwned(this.metadataProviders, id);
+    this.purgeOwned(this.cloudSaveResolvers, id);
+    this.purgeOwned(this.paymentGateways, id);
     this.subscriptionAuthorizers.delete(id);
     const subscriptions = this.pluginEventSubscriptions.get(id) ?? [];
     for (const off of subscriptions) {
@@ -1184,6 +1364,30 @@ export class PluginManager {
 
   publicWebSocketChannels(): string[] {
     return Array.from(this.publicChannels.keys());
+  }
+
+  getMetadataProviders(): MetadataProvider[] {
+    return Array.from(this.metadataProviders.values()).map((e) => e.provider);
+  }
+
+  getMetadataProvider(id: string): MetadataProvider | undefined {
+    return this.metadataProviders.get(id)?.provider;
+  }
+
+  getCloudSaveResolvers(): CloudSavePathResolver[] {
+    return Array.from(this.cloudSaveResolvers.values()).map((e) => e.resolver);
+  }
+
+  getCloudSaveResolver(id: string): CloudSavePathResolver | undefined {
+    return this.cloudSaveResolvers.get(id)?.resolver;
+  }
+
+  getPaymentGateways(): PaymentGateway[] {
+    return Array.from(this.paymentGateways.values()).map((e) => e.gateway);
+  }
+
+  getPaymentGateway(id: string): PaymentGateway | undefined {
+    return this.paymentGateways.get(id)?.gateway;
   }
 
   private async resolveAuth(event: H3Event): Promise<PluginAuthContext> {

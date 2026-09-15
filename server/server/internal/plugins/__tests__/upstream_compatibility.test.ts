@@ -45,6 +45,21 @@ test("Upstream Invariant: Zero-plugin baseline leaves server in pure vanilla sta
     0,
     "No public channels should exist by default",
   );
+  assert.equal(
+    manager.getMetadataProviders().length,
+    0,
+    "No metadata providers should exist by default",
+  );
+  assert.equal(
+    manager.getCloudSaveResolvers().length,
+    0,
+    "No cloud save resolvers should exist by default",
+  );
+  assert.equal(
+    manager.getPaymentGateways().length,
+    0,
+    "No payment gateways should exist by default",
+  );
 
   // 3. Dispatching to nonexistent plugin fails with 404
   await assert.rejects(
@@ -103,9 +118,9 @@ test("Upstream Invariant: Dynamic public WebSocket channels function without har
   assert.equal(manager.isPublicChannel("community:announcements"), true);
   assert.equal(manager.isPublicChannel("community:private-chat"), false);
   assert.equal(
-    manager.isPublicChannel("unregistered:public-channel"),
+    manager.isPublicChannel("gse:rooms"),
     false,
-    "unregistered channels must not be marked as public",
+    "gse:rooms must not be hardcoded as public",
   );
 
   // Unregistering cleanly wipes out public channel designations

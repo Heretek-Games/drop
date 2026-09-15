@@ -4,7 +4,26 @@ export type UISlotName =
   | "game-detail:badges"
   | "settings:tabs"
   | "topbar:status"
-  | "sidebar:nav";
+  | "sidebar:nav"
+  | "overlay:panel"
+  | "overlay:quick-access";
+
+export type ClientCapability =
+  | "ui:slot"
+  | "ui:play-action"
+  | "ui:context-menu"
+  | "ui:sidebar"
+  | "ui:topbar"
+  | "game:launch-hook"
+  | "game:fs"
+  | "game:scan"
+  | "client:storage"
+  | "client:ws"
+  | "system:sidecar"
+  | "system:command"
+  | "metadata:provider"
+  | "cloudsave:provider"
+  | "client:library-scan";
 
 export type HttpMethod = "GET" | "POST" | "PUT" | "DELETE" | "PATCH" | "ALL";
 
@@ -158,6 +177,21 @@ export interface ClientPluginContext {
   registerSidebarItem(item: SidebarItem): () => void;
   registerTopBarItem(item: TopBarItem): () => void;
   registerLaunchHook(hook: LaunchHook): () => void;
+  /**
+   * Register a store library scanner SPI implementation.
+   * Requires the `client:library-scan` capability.
+   */
+  registerStoreScanner(scanner: StoreScanner): () => void;
+  /**
+   * Register a client-side metadata provider SPI implementation.
+   * Requires the `metadata:provider` capability.
+   */
+  registerMetadataProvider?(provider: MetadataProvider): () => void;
+  /**
+   * Register a client-side cloud save path resolver SPI implementation.
+   * Requires the `cloudsave:provider` capability.
+   */
+  registerCloudSaveResolver?(resolver: CloudSavePathResolver): () => void;
   gameFs: ScopedGameFs;
   gameScanner: ScopedGameScanner;
   serverWs: ClientPluginWebSocket;
@@ -186,4 +220,82 @@ export interface ClientPlugin {
   };
   init(ctx: ClientPluginContext): Promise<void> | void;
   teardown?(): Promise<void> | void;
+}
+
+// ==========================================
+// Metadata Provider SPI (#7, #206, #207, #477)
+// ==========================================
+
+export interface MetadataSearchResult {
+  id: string;
+  title: string;
+  releaseYear?: number;
+  coverUrl?: string;
+  bannerUrl?: string;
+  iconUrl?: string;
+  description?: string;
+  provider: string;
+}
+
+export interface MetadataDetails extends MetadataSearchResult {
+  genres?: string[];
+  developers?: string[];
+  publishers?: string[];
+  screenshots?: string[];
+  metadata?: Record<string, unknown>;
+}
+
+export interface MetadataProvider {
+  id: string;
+  name: string;
+  search(query: string): Promise<MetadataSearchResult[]>;
+  getDetails(id: string): Promise<MetadataDetails | null>;
+}
+
+// ==========================================
+// Store Scanner SPI (#21)
+// ==========================================
+
+export interface ScannedGame {
+  externalId: string;
+  store: "steam" | "gog" | "epic" | string;
+  title: string;
+  installPath: string;
+  executablePath?: string;
+  iconUrl?: string;
+  version?: string;
+}
+
+export interface StoreScanner {
+  id: string;
+  name: string;
+  store: string;
+  scan(): Promise<ScannedGame[]>;
+  launch?(externalId: string): Promise<void>;
+}
+
+// ==========================================
+// Cloud Save Provider SPI (#9)
+// ==========================================
+
+export interface CloudSavePattern {
+  pattern: string;
+  platform?: "windows" | "linux" | "macos";
+  winePrefix?: boolean;
+}
+
+export interface GameInstallContext {
+  gameId: string;
+  gameTitle: string;
+  installDir?: string;
+  winePrefix?: string;
+  executableName?: string;
+}
+
+export interface CloudSavePathResolver {
+  id: string;
+  name: string;
+  resolveSavePaths(
+    gameContext: GameInstallContext,
+  ): Promise<CloudSavePattern[]>;
 }

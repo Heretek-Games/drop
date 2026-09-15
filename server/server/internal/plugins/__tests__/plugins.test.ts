@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { createHash } from "node:crypto";
+import { createHash, createHmac } from "node:crypto";
 import fs from "node:fs/promises";
 import http from "node:http";
 import os from "node:os";
@@ -440,7 +440,7 @@ test("PluginManager fails closed on system:command without a commands allowlist"
           client: {
             entry: "client.js",
             capabilities: ["system:command"],
-            commands: ["/usr/bin/custom-cli"],
+            commands: ["/usr/bin/example-cli"],
           },
         },
         entryBase64,
@@ -479,7 +479,7 @@ test("PluginManager runs storage migrations to the declared version", async () =
   assert.deepEqual(migrations, [[0, 2]]);
 });
 
-test("HelloWorldPlugin proves generic extensible plugin architecture", async () => {
+test("HelloWorldPlugin proves the platform is domain-agnostic", async () => {
   const manager = createTestManager();
   await manager.registerPlugin(new HelloWorldPlugin());
 
@@ -1355,4 +1355,432 @@ test("signed bundle with FilePluginStorage survives storage mutations and reload
       process.env.DROP_PLUGIN_REQUIRE_SIGNATURE = previousRequire;
     }
   }
+});
+
+test("PluginManager registers and gates MetadataProvider, CloudSavePathResolver, and PaymentGateway SPIs", async () => {
+  const manager = createTestManager();
+
+  const metadataPlugin: ServerPlugin = {
+    metadata: {
+      id: "example-metadata-provider",
+      name: "Example Metadata",
+      version: "1.0.0",
+      apiVersion: PLUGIN_API_VERSION,
+      capabilities: ["metadata:provider"],
+    },
+    init: (ctx: PluginContext) => {
+      ctx.registerMetadataProvider({
+        id: "example-metadata",
+        name: "Example Metadata",
+        search: async (query) => [
+          { id: "meta-1", title: query, provider: "example-metadata" },
+        ],
+        getDetails: async (id) => ({
+          id,
+          title: "Sample Game",
+          provider: "example-metadata",
+        }),
+      });
+    },
+  };
+
+  const paymentPlugin: ServerPlugin = {
+    metadata: {
+      id: "example-payment-gateway",
+      name: "Example Payment Gateway",
+      version: "1.0.0",
+      apiVersion: PLUGIN_API_VERSION,
+      capabilities: ["commerce:payment"],
+    },
+    init: (ctx: PluginContext) => {
+      ctx.registerPaymentGateway({
+        id: "example-payment",
+        name: "Example Payment",
+        createPaymentIntent: async () => ({
+          intentId: "pi_test_123",
+          status: "pending",
+        }),
+        handleWebhook: async () => ({
+          orderId: "ord_1",
+          status: "succeeded",
+          transactionId: "txn_1",
+        }),
+      });
+    },
+  };
+
+  await manager.registerPlugin(metadataPlugin);
+  await manager.registerPlugin(paymentPlugin);
+
+  const cloudSavePlugin: ServerPlugin = {
+    metadata: {
+      id: "example-cloudsave-plugin",
+      name: "Example Cloud Saves",
+      version: "1.0.0",
+      apiVersion: PLUGIN_API_VERSION,
+      capabilities: ["cloudsave:provider"],
+    },
+    init: (ctx: PluginContext) => {
+      ctx.registerCloudSaveResolver({
+        id: "example-cloudsave",
+        name: "Example Manifest Resolver",
+        resolveSavePaths: async (gameContext) => [
+          { pattern: `%APPDATA%/${gameContext.gameTitle}/saves` },
+        ],
+      });
+    },
+  };
+  await manager.registerPlugin(cloudSavePlugin);
+
+  const resolvers = manager.getCloudSaveResolvers();
+  assert.equal(resolvers.length, 1);
+  assert.equal(resolvers[0].id, "example-cloudsave");
+  assert.equal(
+    manager.getCloudSaveResolver("example-cloudsave")?.name,
+    "Example Manifest Resolver",
+  );
+
+  // Assert registered
+  const providers = manager.getMetadataProviders();
+  assert.equal(providers.length, 1);
+  assert.equal(providers[0].id, "example-metadata");
+  assert.equal(
+    manager.getMetadataProvider("example-metadata")?.name,
+    "Example Metadata",
+  );
+
+  const gateways = manager.getPaymentGateways();
+  assert.equal(gateways.length, 1);
+  assert.equal(gateways[0].id, "example-payment");
+  assert.equal(
+    manager.getPaymentGateway("example-payment")?.name,
+    "Example Payment",
+  );
+
+  // Collision rejection throws
+  const collidingMetadataPlugin: ServerPlugin = {
+    metadata: {
+      id: "colliding-metadata-plugin",
+      name: "Colliding Metadata",
+      version: "1.0.0",
+      apiVersion: PLUGIN_API_VERSION,
+      capabilities: ["metadata:provider"],
+    },
+    init: (ctx: PluginContext) => {
+      ctx.registerMetadataProvider({
+        id: "example-metadata",
+        name: "Duplicate Metadata",
+        search: async () => [],
+        getDetails: async () => null,
+      });
+    },
+  };
+
+  await assert.rejects(
+    () => manager.registerPlugin(collidingMetadataPlugin),
+    /Metadata provider 'example-metadata' is already claimed by plugin 'example-metadata-provider'/,
+  );
+
+  const collidingPaymentPlugin: ServerPlugin = {
+    metadata: {
+      id: "colliding-payment-plugin",
+      name: "Colliding Payment",
+      version: "1.0.0",
+      apiVersion: PLUGIN_API_VERSION,
+      capabilities: ["commerce:payment"],
+    },
+    init: (ctx: PluginContext) => {
+      ctx.registerPaymentGateway({
+        id: "example-payment",
+        name: "Duplicate Payment",
+        createPaymentIntent: async () => ({ intentId: "", status: "failed" }),
+        handleWebhook: async () => ({
+          orderId: "",
+          status: "failed",
+          transactionId: "",
+        }),
+      });
+    },
+  };
+
+  await assert.rejects(
+    () => manager.registerPlugin(collidingPaymentPlugin),
+    /Payment gateway 'example-payment' is already claimed by plugin 'example-payment-gateway'/,
+  );
+
+  // Invalid ID throws
+  const invalidIdPlugin: ServerPlugin = {
+    metadata: {
+      id: "invalid-id-plugin",
+      name: "Invalid ID",
+      version: "1.0.0",
+      apiVersion: PLUGIN_API_VERSION,
+      capabilities: ["metadata:provider"],
+    },
+    init: (ctx: PluginContext) => {
+      ctx.registerMetadataProvider({
+        id: "   ",
+        name: "Empty ID",
+        search: async () => [],
+        getDetails: async () => null,
+      });
+    },
+  };
+
+  await assert.rejects(
+    () => manager.registerPlugin(invalidIdPlugin),
+    /Metadata provider must have a valid non-empty id/,
+  );
+
+  // Capability violation throws
+  const deniedPlugin: ServerPlugin = {
+    metadata: {
+      id: "denied-spi",
+      name: "Denied SPI",
+      version: "1.0.0",
+      apiVersion: PLUGIN_API_VERSION,
+      capabilities: ["routes"],
+    },
+    init: (ctx: PluginContext) => {
+      ctx.registerMetadataProvider({
+        id: "denied",
+        name: "Denied",
+        search: async () => [],
+        getDetails: async () => null,
+      });
+    },
+  };
+
+  await assert.rejects(
+    () => manager.registerPlugin(deniedPlugin),
+    /attempted 'registerMetadataProvider\(denied\)' without the 'metadata:provider' capability/,
+  );
+
+  // Cloud save resolver: collision, invalid id, and capability gate
+  const collidingCloudSavePlugin: ServerPlugin = {
+    metadata: {
+      id: "colliding-cloudsave-plugin",
+      name: "Colliding Cloud Save",
+      version: "1.0.0",
+      apiVersion: PLUGIN_API_VERSION,
+      capabilities: ["cloudsave:provider"],
+    },
+    init: (ctx: PluginContext) => {
+      ctx.registerCloudSaveResolver({
+        id: "example-cloudsave",
+        name: "Duplicate Cloud Save",
+        resolveSavePaths: async () => [],
+      });
+    },
+  };
+
+  await assert.rejects(
+    () => manager.registerPlugin(collidingCloudSavePlugin),
+    /Cloud save resolver 'example-cloudsave' is already claimed by plugin 'example-cloudsave-plugin'/,
+  );
+
+  const deniedCloudSavePlugin: ServerPlugin = {
+    metadata: {
+      id: "denied-cloudsave",
+      name: "Denied Cloud Save",
+      version: "1.0.0",
+      apiVersion: PLUGIN_API_VERSION,
+      capabilities: ["routes"],
+    },
+    init: (ctx: PluginContext) => {
+      ctx.registerCloudSaveResolver({
+        id: "denied",
+        name: "Denied",
+        resolveSavePaths: async () => [],
+      });
+    },
+  };
+
+  await assert.rejects(
+    () => manager.registerPlugin(deniedCloudSavePlugin),
+    /attempted 'registerCloudSaveResolver\(denied\)' without the 'cloudsave:provider' capability/,
+  );
+
+  // Unregister cleans up SPI entries
+  await manager.unregisterPlugin("example-metadata-provider");
+  assert.equal(manager.getMetadataProviders().length, 0);
+  assert.equal(manager.getMetadataProvider("example-metadata"), undefined);
+
+  await manager.unregisterPlugin("example-cloudsave-plugin");
+  assert.equal(manager.getCloudSaveResolvers().length, 0);
+  assert.equal(manager.getCloudSaveResolver("example-cloudsave"), undefined);
+
+  await manager.unregisterPlugin("example-payment-gateway");
+  assert.equal(manager.getPaymentGateways().length, 0);
+  assert.equal(manager.getPaymentGateway("example-payment"), undefined);
+});
+
+test("legacy files-only signatures still load after v2 support lands", async () => {
+  const dataDir = tmpDataDir();
+  const pluginDir = path.join(dataDir, "plugins", "legacy-signed");
+  await fs.mkdir(pluginDir, { recursive: true });
+  const entry =
+    "export default { metadata: { id: 'legacy-signed', name: 'Legacy'," +
+    " version: '1.0.0', apiVersion: 1 }, init() {} };\n";
+  await fs.writeFile(path.join(pluginDir, "index.mjs"), entry);
+  await fs.writeFile(
+    path.join(pluginDir, "helper.mjs"),
+    "export const value = 1;\n",
+  );
+
+  const files = ["helper.mjs", "index.mjs"].sort((a, b) => a.localeCompare(b));
+  const aggregate = createHash("sha256");
+  const fileChecksums: Record<string, string> = {};
+  for (const rel of files) {
+    const bytes = await fs.readFile(path.join(pluginDir, rel));
+    fileChecksums[rel] = createHash("sha256").update(bytes).digest("hex");
+    aggregate.update(rel);
+    aggregate.update("\0");
+    aggregate.update(String(bytes.length));
+    aggregate.update("\0");
+    aggregate.update(bytes);
+  }
+  const signingKey = "legacy-signing-key";
+  const legacySignature = createHmac("sha256", signingKey)
+    .update(aggregate.digest("hex"))
+    .digest("hex");
+  await fs.writeFile(
+    path.join(pluginDir, "drop-plugin.json"),
+    JSON.stringify({
+      id: "legacy-signed",
+      name: "Legacy",
+      version: "1.0.0",
+      apiVersion: PLUGIN_API_VERSION,
+      entry: "index.mjs",
+      checksum: createHash("sha256").update(entry).digest("hex"),
+      files: fileChecksums,
+      signature: legacySignature,
+    }),
+  );
+
+  const previousKey = process.env.DROP_PLUGIN_SIGNING_KEY;
+  process.env.DROP_PLUGIN_SIGNING_KEY = signingKey;
+  try {
+    const manager = new PluginManager({
+      dataDir,
+      storageFactory: () => new MemoryStorage(),
+      authResolver: async () => ({}),
+    });
+    await manager.discoverAndLoadExternalPlugins();
+    assert.equal(
+      manager.listPlugins().find((p) => p.id === "legacy-signed")?.status,
+      "active",
+      "a legacy files-only signature must still load",
+    );
+  } finally {
+    if (previousKey === undefined) {
+      delete process.env.DROP_PLUGIN_SIGNING_KEY;
+    } else {
+      process.env.DROP_PLUGIN_SIGNING_KEY = previousKey;
+    }
+  }
+});
+
+test("v2 signatures reject manifest tampering", async () => {
+  const dataDir = tmpDataDir();
+  const pluginDir = path.join(dataDir, "plugins", "manifest-tamper");
+  await fs.mkdir(pluginDir, { recursive: true });
+  await fs.writeFile(
+    path.join(pluginDir, "index.mjs"),
+    "export default { metadata: { id: 'manifest-tamper', name: 'Tamper'," +
+      " version: '1.0.0', apiVersion: 1 }, init() {} };\n",
+  );
+  await fs.writeFile(
+    path.join(pluginDir, "drop-plugin.json"),
+    JSON.stringify({
+      id: "manifest-tamper",
+      name: "Tamper",
+      version: "1.0.0",
+      apiVersion: PLUGIN_API_VERSION,
+      entry: "index.mjs",
+    }),
+  );
+
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  const signer = path.resolve(here, "../../../../dev-tools/sign-plugin.mjs");
+  const signingKey = "manifest-tamper-key";
+  const signed = spawnSync(
+    process.execPath,
+    [signer, "plugins/manifest-tamper"],
+    {
+      cwd: dataDir,
+      env: { ...process.env, DROP_PLUGIN_SIGNING_KEY: signingKey },
+      encoding: "utf8",
+    },
+  );
+  assert.equal(signed.status, 0, signed.stderr);
+
+  const manifestPath = path.join(pluginDir, "drop-plugin.json");
+  const manifest = JSON.parse(await fs.readFile(manifestPath, "utf-8"));
+  assert.equal(manifest.signatureVersion, 2);
+  manifest.name = "Tampered";
+  await fs.writeFile(manifestPath, JSON.stringify(manifest));
+
+  const previousKey = process.env.DROP_PLUGIN_SIGNING_KEY;
+  process.env.DROP_PLUGIN_SIGNING_KEY = signingKey;
+  try {
+    const manager = new PluginManager({
+      dataDir,
+      storageFactory: () => new MemoryStorage(),
+      authResolver: async () => ({}),
+    });
+    await manager.discoverAndLoadExternalPlugins();
+    assert.equal(
+      manager.listPlugins().find((p) => p.id === "manifest-tamper"),
+      undefined,
+      "a tampered manifest must not load",
+    );
+  } finally {
+    if (previousKey === undefined) {
+      delete process.env.DROP_PLUGIN_SIGNING_KEY;
+    } else {
+      process.env.DROP_PLUGIN_SIGNING_KEY = previousKey;
+    }
+  }
+});
+
+test("plugin route patterns keep regex metacharacters literal", async () => {
+  const manager = createTestManager();
+
+  const regexPlugin: ServerPlugin = {
+    metadata: {
+      id: "regex-plugin",
+      name: "Regex Plugin",
+      version: "1.0.0",
+      apiVersion: PLUGIN_API_VERSION,
+      capabilities: ["routes"],
+    },
+    init: (ctx: PluginContext) => {
+      ctx.registerRoute("GET", "/literal/(a+)+", () => ({ literal: true }));
+    },
+  };
+
+  await manager.registerPlugin(regexPlugin);
+
+  const mockEvent = {
+    method: "GET",
+    headers: new Headers(),
+  } as unknown as import("h3").H3Event;
+
+  // The exact literal path matches...
+  const literal = (await manager.dispatch(
+    "regex-plugin",
+    "GET",
+    "/literal/(a+)+",
+    mockEvent,
+  )) as { literal: boolean };
+  assert.equal(literal.literal, true);
+
+  // ...but a path the metacharacters would match if compiled as a regex does not.
+  await assert.rejects(
+    () => manager.dispatch("regex-plugin", "GET", "/literal/aaaa", mockEvent),
+    /No handler found/,
+  );
+
+  await manager.unregisterPlugin("regex-plugin");
 });
