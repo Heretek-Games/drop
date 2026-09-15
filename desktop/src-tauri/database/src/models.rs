@@ -352,8 +352,8 @@ mod tests {
 
         let serialized =
             serde_json::to_string(&parsed).expect("Failed to serialize UninstallConfiguration");
-        let roundtrip: UninstallConfiguration =
-            serde_json::from_str(&serialized).expect("Failed to re-parse serialized UninstallConfiguration");
+        let roundtrip: UninstallConfiguration = serde_json::from_str(&serialized)
+            .expect("Failed to re-parse serialized UninstallConfiguration");
 
         assert_eq!(parsed, roundtrip);
     }
@@ -369,7 +369,7 @@ mod tests {
             platform: Platform::Linux,
         };
 
-        let uninstallers = vec![win_uninstaller.clone(), linux_uninstaller.clone()];
+        let uninstallers = [win_uninstaller.clone(), linux_uninstaller.clone()];
 
         // Match behavior used in process_manager::run_uninstaller
         let resolved_win = uninstallers
@@ -377,14 +377,10 @@ mod tests {
             .find(|u| u.platform == Platform::Windows);
         assert_eq!(resolved_win, Some(&win_uninstaller));
 
-        let resolved_linux = uninstallers
-            .iter()
-            .find(|u| u.platform == Platform::Linux);
+        let resolved_linux = uninstallers.iter().find(|u| u.platform == Platform::Linux);
         assert_eq!(resolved_linux, Some(&linux_uninstaller));
 
-        let resolved_mac = uninstallers
-            .iter()
-            .find(|u| u.platform == Platform::macOS);
+        let resolved_mac = uninstallers.iter().find(|u| u.platform == Platform::macOS);
         assert_eq!(resolved_mac, None);
     }
 }

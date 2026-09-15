@@ -642,6 +642,7 @@ async fn execute_pipeline(
     Ok(reclaimable)
 }
 
+#[allow(clippy::too_many_arguments)] // progress reporting carries the full step context
 fn emit_progress(
     app_handle: &AppHandle,
     game_id: &str,
@@ -1179,6 +1180,7 @@ async fn execute_run_command(
     .await
 }
 
+#[allow(clippy::too_many_arguments)] // native process runner needs the full command context
 async fn run_process_with_progress<F>(
     mut cmd: tokio::process::Command,
     app_handle: &AppHandle,
@@ -1313,12 +1315,12 @@ pub fn calculate_reclaimable_space(recipe: &PipelineRecipe, install_dir: &Path) 
     let mut total_bytes = 0u64;
 
     for step in &recipe.steps {
-        if step.action == PipelineStepAction::Cleanup {
-            if let Some(serde_json::Value::Array(targets)) = step.params.get("targets") {
-                for t in targets {
-                    if let Some(pat) = t.as_str() {
-                        total_bytes += calculate_pattern_size(install_dir, pat);
-                    }
+        if step.action == PipelineStepAction::Cleanup
+            && let Some(serde_json::Value::Array(targets)) = step.params.get("targets")
+        {
+            for t in targets {
+                if let Some(pat) = t.as_str() {
+                    total_bytes += calculate_pattern_size(install_dir, pat);
                 }
             }
         }
@@ -1341,12 +1343,12 @@ pub fn reclaim_pipeline_space(
     let mut total_deleted = 0u64;
 
     for step in &recipe.steps {
-        if step.action == PipelineStepAction::Cleanup {
-            if let Some(serde_json::Value::Array(targets)) = step.params.get("targets") {
-                for t in targets {
-                    if let Some(pat) = t.as_str() {
-                        total_deleted += delete_pattern(install_dir, pat);
-                    }
+        if step.action == PipelineStepAction::Cleanup
+            && let Some(serde_json::Value::Array(targets)) = step.params.get("targets")
+        {
+            for t in targets {
+                if let Some(pat) = t.as_str() {
+                    total_deleted += delete_pattern(install_dir, pat);
                 }
             }
         }
@@ -1379,12 +1381,11 @@ fn calculate_pattern_size(base_dir: &Path, pattern: &str) -> u64 {
 
     for entry in entries.flatten() {
         let name = entry.file_name().to_string_lossy().to_string();
-        if re.is_match(&name) {
-            if let Ok(meta) = entry.metadata() {
-                if meta.is_file() {
-                    size += meta.len();
-                }
-            }
+        if re.is_match(&name)
+            && let Ok(meta) = entry.metadata()
+            && meta.is_file()
+        {
+            size += meta.len();
         }
     }
     size
@@ -1403,15 +1404,14 @@ fn delete_pattern(base_dir: &Path, pattern: &str) -> u64 {
 
     for entry in entries.flatten() {
         let name = entry.file_name().to_string_lossy().to_string();
-        if re.is_match(&name) {
-            if let Ok(meta) = entry.metadata() {
-                if meta.is_file() {
-                    let len = meta.len();
-                    if crate::path_guard::remove_file(base_dir, &name).is_ok() {
-                        deleted += len;
-                        info!("Reclaimed space: deleted {}", entry.path().display());
-                    }
-                }
+        if re.is_match(&name)
+            && let Ok(meta) = entry.metadata()
+            && meta.is_file()
+        {
+            let len = meta.len();
+            if crate::path_guard::remove_file(base_dir, &name).is_ok() {
+                deleted += len;
+                info!("Reclaimed space: deleted {}", entry.path().display());
             }
         }
     }

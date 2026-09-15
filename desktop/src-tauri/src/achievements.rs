@@ -13,15 +13,13 @@ pub struct AchievementUnlockRequest {
 /// Unlocks achievements through the core client API (used by the GSE and
 /// RetroAchievements client bridges after they diff newly earned achievements).
 #[tauri::command]
-pub async fn unlock_achievements(
-    requests: Vec<AchievementUnlockRequest>,
-) -> Result<usize, String> {
+pub async fn unlock_achievements(requests: Vec<AchievementUnlockRequest>) -> Result<usize, String> {
     if borrow_db_checked().auth.is_none() {
         return Err("not authenticated".to_string());
     }
 
-    let url = generate_url(&["/api/v1/client/achievements/unlock"], &[])
-        .map_err(|e| e.to_string())?;
+    let url =
+        generate_url(&["/api/v1/client/achievements/unlock"], &[]).map_err(|e| e.to_string())?;
 
     let mut unlocked = 0usize;
     for request in requests {

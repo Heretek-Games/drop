@@ -98,4 +98,3 @@ mod tests {
         assert!(post.load(Ordering::SeqCst));
     }
 }
-

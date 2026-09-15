@@ -1,5 +1,3 @@
-#![feature(nonpoison_rwlock)]
-
 pub mod db;
 pub mod debug;
 pub mod interface;

@@ -83,7 +83,13 @@ pub fn set_partially_installed(
     app_handle: Option<&AppHandle>,
     configuration: UserConfiguration,
 ) {
-    set_partially_installed_db(&mut borrow_db_mut_checked(), meta, install_dir, app_handle, configuration);
+    set_partially_installed_db(
+        &mut borrow_db_mut_checked(),
+        meta,
+        install_dir,
+        app_handle,
+        configuration,
+    );
 }
 
 pub fn set_partially_installed_db(
@@ -182,7 +188,7 @@ pub fn uninstall_game_logic(meta: DownloadableMetadata, app_handle: &AppHandle) 
                 GameStatusManager::fetch_state(&meta.id, &db_handle),
             );
 
-            debug!("uninstalled game id {}", &meta.id);
+            debug!("uninstalled game id {}", meta.id);
             app_emit!(&app_handle, "update_library", ());
         });
     } else {

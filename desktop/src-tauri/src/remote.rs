@@ -358,4 +358,3 @@ pub async fn plugin_request_ws(
         "plugin WebSocket closed before replying".to_string(),
     ))
 }
-

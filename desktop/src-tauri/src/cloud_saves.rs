@@ -108,8 +108,7 @@ pub async fn provision_ludusavi() -> Result<String, String> {
         return Ok(client.executable_path.to_string_lossy().to_string());
     }
 
-    let release_url =
-        "https://api.github.com/repos/mtkennerly/ludusavi/releases/latest";
+    let release_url = "https://api.github.com/repos/mtkennerly/ludusavi/releases/latest";
     let release_response = DROP_CLIENT_ASYNC
         .get(release_url)
         .header("User-Agent", "Drop Desktop Client")
@@ -123,15 +122,11 @@ pub async fn provision_ludusavi() -> Result<String, String> {
         ));
     }
     let release_body = release_response.text().await.map_err(|e| e.to_string())?;
-    let tag = cloud_saves::provision::parse_latest_tag(&release_body)
-        .map_err(|e| e.to_string())?;
+    let tag = cloud_saves::provision::parse_latest_tag(&release_body).map_err(|e| e.to_string())?;
 
-    let asset = cloud_saves::provision::asset_for(
-        &tag,
-        std::env::consts::OS,
-        std::env::consts::ARCH,
-    )
-    .ok_or_else(|| "unsupported platform for Ludusavi".to_string())?;
+    let asset =
+        cloud_saves::provision::asset_for(&tag, std::env::consts::OS, std::env::consts::ARCH)
+            .ok_or_else(|| "unsupported platform for Ludusavi".to_string())?;
 
     let asset_response = DROP_CLIENT_ASYNC
         .get(&asset.url)

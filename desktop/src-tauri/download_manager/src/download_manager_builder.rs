@@ -16,9 +16,7 @@ use crate::{
     depot_manager::DepotManager,
     download_manager_frontend::DownloadStatus,
     error::ApplicationDownloadError,
-    frontend_updates::{
-        DownloadStatsUpdateEvent, QueueUpdateEvent, QueueUpdateEventQueueData,
-    },
+    frontend_updates::{DownloadStatsUpdateEvent, QueueUpdateEvent, QueueUpdateEventQueueData},
 };
 
 use super::{
@@ -278,7 +276,7 @@ impl DownloadManagerBuilder {
                     // Ok(true) is for completed and exited properly
                     Ok(v) => v,
                     Err(e) => {
-                        error!("download {:?} has error {}", download_agent.metadata(), &e);
+                        error!("download {:?} has error {}", download_agent.metadata(), e);
                         download_agent.on_error(&app_handle, &e);
                         send!(sender, DownloadManagerSignal::Error(e));
                         return;
@@ -301,7 +299,7 @@ impl DownloadManagerBuilder {
                         error!(
                             "download {:?} has validation error {}",
                             download_agent.metadata(),
-                            &e
+                            e
                         );
                         download_agent.on_error(&app_handle, &e);
                         send!(sender, DownloadManagerSignal::Error(e));

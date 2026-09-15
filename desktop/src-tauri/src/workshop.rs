@@ -34,9 +34,6 @@ pub async fn fetch_workshop_subscriptions() -> Result<serde_json::Value, String>
 
 /// A Workshop mod's releases (used to read the `mod.json` manifest).
 #[tauri::command]
-pub async fn fetch_workshop_mod(
-    game_id: String,
-    key: String,
-) -> Result<serde_json::Value, String> {
+pub async fn fetch_workshop_mod(game_id: String, key: String) -> Result<serde_json::Value, String> {
     fetch_authenticated_json(&["/api/v1/workshop", &game_id, "mods", &key]).await
 }

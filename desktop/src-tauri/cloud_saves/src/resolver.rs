@@ -34,7 +34,7 @@ pub fn resolve(meta: &mut CloudSaveMetadata) -> File {
             None => {
                 warn!(
                     "File {:?} could not be backed up because it did not provide an OS",
-                    &file
+                    file
                 );
                 continue;
             }
@@ -47,7 +47,7 @@ pub fn resolve(meta: &mut CloudSaveMetadata) -> File {
         let path = match parse_path(t_path, handler, &meta.game_version) {
             Ok(path) => path,
             Err(err) => {
-                warn!("Skipping save path for {:?}: {err}", &file);
+                warn!("Skipping save path for {:?}: {err}", file);
                 continue;
             }
         };
@@ -125,7 +125,7 @@ pub fn extract(file: PathBuf) -> Result<(), BackupError> {
             None => {
                 warn!(
                     "File {:?} could not be replaced up because it did not provide an OS",
-                    &file
+                    file
                 );
                 continue;
             }
