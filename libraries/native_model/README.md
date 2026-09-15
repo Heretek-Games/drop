@@ -28,7 +28,7 @@ See [concepts](#concepts) for more details.
                 |                                  |
 ```
 
-```rust,ignore
+```rust
 use native_model::native_model;
 use serde::{Deserialize, Serialize};
 
@@ -68,7 +68,7 @@ let bytes = native_model::encode(&dot).unwrap();
 
 // Application 2
 // We are able to decode the bytes directly into a new type DotV2 (upgrade).
-let (mut dot, source_version) = native_model::decode::<DotV2>(bytes).unwrap();
+let (mut dot, _source_version) = native_model::decode::<DotV2>(bytes).unwrap();
 assert_eq!(dot, DotV2 {
     name: "".to_string(),
     x: 1,
@@ -76,8 +76,9 @@ assert_eq!(dot, DotV2 {
 });
 dot.name = "Dot".to_string();
 dot.x = 5;
-// For interoperability, we encode the data with the version compatible with Application 1 (downgrade).
-let bytes = native_model::encode_downgrade(dot, source_version).unwrap();
+// For interoperability with Application 1, convert back to the old model and
+// encode that; encoding always writes the type's current version.
+let bytes = native_model::encode(&DotV1::from(dot)).unwrap();
 
 // Application 2 sends bytes to Application 1.
 
@@ -155,7 +156,7 @@ Attributes:
   - `type`: The previous version of the model that you use for the TryFrom implementation.
   - `error`: The error type that you use for the TryFrom implementation.
 
-```rust,ignore
+```rust
 use native_model::native_model;
 use serde::{Deserialize, Serialize};
 
@@ -261,7 +262,8 @@ serde = { version = "1.0", features = [ "derive" ] }
 native_model = { version = "0.4", features = [ "rmp_serde_1_3" ] }
 ```
 
-2. Assign the `rmp_serde_1_3` codec to your `struct` using the `with` attribute:
+2. Assign the `rmp_serde_1_3` codec to your `struct` using the `with` attribute
+   (requires the `rmp_serde_1_3` feature, so this example is not compiled by default):
 
 ```rust,ignore
 use native_model::native_model;
