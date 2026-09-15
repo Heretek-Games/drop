@@ -5,6 +5,13 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
+  # desktop/main is a separate pnpm workspace with its own pnpm-lock.yaml, so
+  # the root npm entry does not cover it.
+  - package-ecosystem: npm
+    directory: "/desktop/main"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
   - package-ecosystem: cargo
     directory: "/cli"
     schedule:
@@ -17,6 +24,22 @@ updates:
     open-pull-requests-limit: 5
   - package-ecosystem: cargo
     directory: "/desktop/src-tauri"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+  # tailscale is a separate crate with its own Cargo.lock under src-tauri.
+  - package-ecosystem: cargo
+    directory: "/desktop/src-tauri/tailscale"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+  - package-ecosystem: cargo
+    directory: "/libraries/droplet"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+  - package-ecosystem: cargo
+    directory: "/libraries/droplet_types"
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
