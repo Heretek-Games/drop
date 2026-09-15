@@ -102,10 +102,13 @@ COPY --from=torrential-build /build/torrential/target/release/torrential /usr/bi
 # Run as an unprivileged user. Drop (port 4000) and nginx (port 3000) both bind
 # unprivileged ports. Operators using bind-mounted /data or /library must make
 # the mount writable by uid 10001, or run the container with a matching --user.
+# /cache gets the same treatment: torrential seeds the chunk cache there
+# (CHUNK_CACHE_DIR) and a fresh named volume would otherwise be unwritable
+# for uid 10001.
 RUN groupadd --system --gid 10001 drop \
     && useradd --system --uid 10001 --gid drop --home-dir /app --shell /usr/sbin/nologin drop \
-    && mkdir -p /pnpm /data /library \
-    && chown -R drop:drop /app /pnpm /data /library
+    && mkdir -p /pnpm /data /library /cache \
+    && chown -R drop:drop /app /pnpm /data /library /cache
 
 ENV HOME="/app"
 # Numeric id so hadolint can verify it; matches the `drop` user created above.
