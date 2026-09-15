@@ -20,7 +20,7 @@ export function stableStringify(value: unknown): string {
     return `[${value.map(stableStringify).join(",")}]`;
   }
   const record = value as Record<string, unknown>;
-  const keys = Object.keys(record).sort();
+  const keys = Object.keys(record).sort((a, b) => a.localeCompare(b, "en"));
   return `{${keys
     .map((key) => `${JSON.stringify(key)}:${stableStringify(record[key])}`)
     .join(",")}}`;

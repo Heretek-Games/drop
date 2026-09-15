@@ -124,7 +124,7 @@ function stableStringify(value) {
   if (Array.isArray(value)) {
     return `[${value.map(stableStringify).join(",")}]`;
   }
-  const keys = Object.keys(value).sort();
+  const keys = Object.keys(value).sort((a, b) => a.localeCompare(b, "en"));
   return `{${keys
     .map((key) => `${JSON.stringify(key)}:${stableStringify(value[key])}`)
     .join(",")}}`;
