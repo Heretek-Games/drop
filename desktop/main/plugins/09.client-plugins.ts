@@ -40,11 +40,12 @@ async function loadRemotePlugin(plugin: RemotePluginInfo): Promise<void> {
   const commands = Array.isArray(plugin.client?.commands)
     ? plugin.client.commands
     : [];
+  const rootCapabilities = Array.isArray(plugin.capabilities)
+    ? plugin.capabilities
+    : [];
   const capabilities = Array.isArray(plugin.client?.capabilities)
     ? plugin.client.capabilities
-    : Array.isArray(plugin.capabilities)
-      ? plugin.capabilities
-      : [];
+    : rootCapabilities;
 
   try {
     await clientPluginManager.loadFromUrl(

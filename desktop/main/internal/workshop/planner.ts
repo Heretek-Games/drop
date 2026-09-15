@@ -77,8 +77,15 @@ export function planModLoad(mods: ModManifest[]): ModLoadPlan {
   }
   const conflicts: ModConflict[] = [...fileOwners.entries()]
     .filter(([, owners]) => owners.length > 1)
-    .map(([path, mods]) => ({ path, mods: [...mods].sort() }))
+    .map(([path, mods]) => ({
+      path,
+      mods: [...mods].sort((a, b) => a.localeCompare(b)),
+    }))
     .sort((a, b) => a.path.localeCompare(b.path));
 
-  return { order, missing: [...missing].sort(), conflicts };
+  return {
+    order,
+    missing: [...missing].sort((a, b) => a.localeCompare(b)),
+    conflicts,
+  };
 }
