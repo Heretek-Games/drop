@@ -1,5 +1,5 @@
 use std::{
-    fs::{self, File, create_dir_all},
+    fs::{self, create_dir_all, File},
     io::{self, Read, Write},
     path::{Path, PathBuf},
 };
@@ -9,7 +9,6 @@ use crate::error::BackupError;
 use super::{backup_manager::BackupHandler, placeholder::*};
 use database::GameVersion;
 use log::{debug, warn};
-use rustix::path::Arg;
 use tempfile::tempfile;
 
 use super::{backup_manager::BackupManager, metadata::CloudSaveMetadata, normalise::normalize};
@@ -210,26 +209,34 @@ pub fn parse_path(
 ) -> Result<PathBuf, BackupError> {
     let mut s = PathBuf::new();
     for component in path.components() {
-        match component.as_str().unwrap() {
-            ROOT => s.push(backup_handler.root_translate(&path, game)?),
-            GAME => s.push(backup_handler.game_translate(&path, game)?),
-            BASE => s.push(backup_handler.base_translate(&path, game)?),
-            HOME => s.push(backup_handler.home_translate(&path, game)?),
-            STORE_USER_ID => s.push(backup_handler.store_user_id_translate(&path, game)?),
-            OS_USER_NAME => s.push(backup_handler.os_user_name_translate(&path, game)?),
-            WIN_APP_DATA => s.push(backup_handler.win_app_data_translate(&path, game)?),
-            WIN_LOCAL_APP_DATA => s.push(backup_handler.win_local_app_data_translate(&path, game)?),
-            WIN_LOCAL_APP_DATA_LOW => {
-                s.push(backup_handler.win_local_app_data_low_translate(&path, game)?)
+        match component.as_os_str().to_str() {
+            None => {
+                s.push(PathBuf::from(component.as_os_str()));
+                continue;
             }
-            WIN_DOCUMENTS => s.push(backup_handler.win_documents_translate(&path, game)?),
-            WIN_PUBLIC => s.push(backup_handler.win_public_translate(&path, game)?),
-            WIN_PROGRAM_DATA => s.push(backup_handler.win_program_data_translate(&path, game)?),
-            WIN_DIR => s.push(backup_handler.win_dir_translate(&path, game)?),
-            XDG_DATA => s.push(backup_handler.xdg_data_translate(&path, game)?),
-            XDG_CONFIG => s.push(backup_handler.xdg_config_translate(&path, game)?),
-            SKIP => s.push(backup_handler.skip_translate(&path, game)?),
-            _ => s.push(PathBuf::from(component.as_os_str())),
+            Some(component) => match component {
+                ROOT => s.push(backup_handler.root_translate(&path, game)?),
+                GAME => s.push(backup_handler.game_translate(&path, game)?),
+                BASE => s.push(backup_handler.base_translate(&path, game)?),
+                HOME => s.push(backup_handler.home_translate(&path, game)?),
+                STORE_USER_ID => s.push(backup_handler.store_user_id_translate(&path, game)?),
+                OS_USER_NAME => s.push(backup_handler.os_user_name_translate(&path, game)?),
+                WIN_APP_DATA => s.push(backup_handler.win_app_data_translate(&path, game)?),
+                WIN_LOCAL_APP_DATA => {
+                    s.push(backup_handler.win_local_app_data_translate(&path, game)?)
+                }
+                WIN_LOCAL_APP_DATA_LOW => {
+                    s.push(backup_handler.win_local_app_data_low_translate(&path, game)?)
+                }
+                WIN_DOCUMENTS => s.push(backup_handler.win_documents_translate(&path, game)?),
+                WIN_PUBLIC => s.push(backup_handler.win_public_translate(&path, game)?),
+                WIN_PROGRAM_DATA => s.push(backup_handler.win_program_data_translate(&path, game)?),
+                WIN_DIR => s.push(backup_handler.win_dir_translate(&path, game)?),
+                XDG_DATA => s.push(backup_handler.xdg_data_translate(&path, game)?),
+                XDG_CONFIG => s.push(backup_handler.xdg_config_translate(&path, game)?),
+                SKIP => s.push(backup_handler.skip_translate(&path, game)?),
+                _ => s.push(PathBuf::from(component)),
+            },
         }
     }
 
