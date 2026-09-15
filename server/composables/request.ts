@@ -69,9 +69,23 @@ export const $dropFetch: DropFetch = async (rawRequest, opts) => {
 
   const state = useState(id);
   if (state.value) {
-    // Deep copy
+    // Deep copy.
+    // Cannot use structuredClone here: h3 hands SSR-internal $fetch results
+    // back as null-prototype objects, which structuredClone rejects inside the
+    // Nitro runtime ("#<Object> could not be cloned"), failing server render
+    // while state is cached. The cached payload is API JSON, so a JSON
+    // round-trip is both a valid deep copy and clone-safe.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const object = structuredClone<any>(state.value);
+    let object: any;
+    try {
+      // The JSON round-trip is deliberate: structuredClone must not be used
+      // here (see comment above).
+      // eslint-disable-next-line unicorn/prefer-structured-clone
+      object = JSON.parse(JSON.stringify(state.value));
+    } catch (cloneError) {
+      console.error("$dropFetch deep copy failed for", id, cloneError);
+      throw cloneError;
+    }
     // Never use again on client
     if (import.meta.client) state.value = undefined;
     return object;
