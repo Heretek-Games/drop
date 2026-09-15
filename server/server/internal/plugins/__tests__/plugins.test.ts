@@ -1634,7 +1634,13 @@ test("legacy files-only signatures still load after v2 support lands", async () 
     aggregate.update("\0");
     aggregate.update(bytes);
   }
+  // Test fixture: this key is public by construction (it signs a deliberately
+  // legacy bundle inside this test) and is not a real secret.
+  // nosemgrep: javascript.lang.security.audit.hardcoded-hmac-key.hardcoded-hmac-key
   const signingKey = "legacy-signing-key";
+  // Test fixture: this key is public by construction (it signs a deliberately
+  // legacy bundle inside this test) and is not a real secret.
+  // nosemgrep: javascript.lang.security.audit.hardcoded-hmac-key.hardcoded-hmac-key
   const legacySignature = createHmac("sha256", signingKey)
     .update(aggregate.digest("hex"))
     .digest("hex");
