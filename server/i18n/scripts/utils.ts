@@ -87,7 +87,7 @@ function assertSafeKeyPart(part: string): void {
 
 /** Own-property check that never consults the prototype chain. */
 function hasOwn(target: object, key: string): boolean {
-  return Object.prototype.hasOwnProperty.call(target, key);
+  return Object.hasOwn(target, key);
 }
 
 /**

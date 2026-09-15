@@ -61,16 +61,15 @@ export class SaveManager {
   }
 
   async deleteObjectFromSave(
-    gameId: string,
-    userId: string,
-    index: number,
+    // The save-slot coordinates identify the slot for the API surface, but the
+    // object ownership comes from the object id itself (see below), so these
+    // intentionally stay unused here.
+    _gameId: string,
+    _userId: string,
+    _index: number,
     objectId: string,
   ): Promise<boolean> {
-    void gameId;
-    void userId;
-    void index;
     // Save objects are system-tracked (`${userId}:read`) and the id is taken
-    // from the caller's own slot history, so reclaim them as the system.
     // `deleteWithPermission` would require a `delete` grant the object is
     // deliberately never given, silently leaking every pruned snapshot.
     return await this.deps.objectHandler.deleteAsSystem(objectId);
