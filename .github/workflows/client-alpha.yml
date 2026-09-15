@@ -162,7 +162,7 @@ jobs:
             --outdir dist/ppa >> "$GITHUB_OUTPUT"
 
       - name: publish to Launchpad PPA
-        uses: yuezk/publish-ppa-package@3e4da8d50b48950e8a84cd4302f031a17b5bfd27 # v2.0.1
+        uses: yuezk/publish-ppa-package@554d3292d1ccaa8975281f3e34dd5bffd8f8d54e # v2 (composite, passphrase optional)
         with:
           repository: ${{ env.PPA_ALPHA }}
           series: "jammy noble"
@@ -173,7 +173,6 @@ jobs:
           deb_email: contact@heretek.games
           deb_fullname: Heretek Games
           gpg_private_key: ${{ secrets.PPA_GPG_PRIVATE_KEY }}
-          gpg_passphrase: ${{ secrets.PPA_GPG_PASSPHRASE }}
 
   copr-alpha:
     name: Publish Alpha to Fedora COPR
@@ -229,3 +228,4 @@ jobs:
               srpm="$(find /work/dist/rpm -maxdepth 1 -name "*.src.rpm" -print -quit)"
               copr-cli build "$COPR_ALPHA" "$srpm"
             '
+��6k�ykG��������o��Ӎ��G|��x
