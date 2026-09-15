@@ -12,6 +12,7 @@
     "test": "node --test --import jiti/register internal/**/__tests__/*.test.ts"
   },
   "dependencies": {
+    "@drop/plugin-api": "file:../../libraries/plugin-api",
     "@headlessui/vue": "^1.7.23",
     "@heroicons/vue": "^2.1.5",
     "@nuxtjs/tailwindcss": "^6.12.2",

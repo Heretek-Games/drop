@@ -98,6 +98,8 @@ importers:
         specifier: latest
         version: 3.5.42(typescript@5.9.3)
 
+  libraries/plugin-api: {}
+
   server:
     dependencies:
       '@bufbuild/protobuf':
@@ -106,6 +108,9 @@ importers:
       '@discordapp/twemoji':
         specifier: ^16.0.1
         version: 16.0.1
+      '@drop/plugin-api':
+        specifier: workspace:*
+        version: link:../libraries/plugin-api
       '@headlessui/vue':
         specifier: ^1.7.23
         version: 1.7.23(vue@3.5.42(typescript@5.9.3))

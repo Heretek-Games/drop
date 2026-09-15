@@ -1,245 +1,30 @@
 import { reactive, ref } from "vue";
-import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
 import type {
   ClientPlugin,
   ClientPluginContext,
-  ClientPluginStorage,
   ClientPluginWebSocket,
   CloudSavePathResolver,
-  CommandResult,
   GameMenuItem,
   HttpMethod,
   LaunchContext,
   LaunchHook,
   MetadataProvider,
   PlayAction,
-  ScopedGameFs,
-  ScopedGameScanner,
   SidebarItem,
   StoreScanner,
   TopBarItem,
   UISlotName,
   UISlotRegistration,
 } from "./types";
+import { safeInvoke } from "./host";
+import { TauriPluginStorage } from "./host/storage";
+import { TauriScopedGameFs } from "./host/game-fs";
+import { TauriScopedGameScanner } from "./host/game-scanner";
+import { TauriPluginWebSocket } from "./host/websocket";
+import { createPluginSystem } from "./host/system";
+import { executeLaunchPipeline as runLaunchPipeline } from "./launch-pipeline";
 
-export function isTauri(): boolean {
-  return (
-    typeof window !== "undefined" &&
-    ("__TAURI_INTERNALS__" in window || "__TAURI__" in window)
-  );
-}
-
-async function safeInvoke<T>(
-  cmd: string,
-  args?: Record<string, unknown>,
-  fallback?: T,
-): Promise<T> {
-  if (!isTauri()) {
-    console.debug(
-      `[ClientPluginManager] Browser mode: invoke('${cmd}') bypassed`,
-    );
-    return fallback !== undefined ? fallback : (null as unknown as T);
-  }
-  return await invoke<T>(cmd, args);
-}
-
-class TauriPluginStorage implements ClientPluginStorage {
-  // Browser/dev fallback. Plugin state lives in the Rust-side database when
-  // Tauri is available so frontend and backend never split their state.
-  private readonly memory = new Map<string, unknown>();
-
-  constructor(private readonly pluginId: string) {}
-
-  async get<T>(key: string): Promise<T | null> {
-    if (!isTauri()) {
-      return this.memory.has(key) ? (this.memory.get(key) as T) : null;
-    }
-    return (
-      (await safeInvoke<T | null>(
-        "plugin_storage_get",
-        { pluginId: this.pluginId, key },
-        null,
-      )) ?? null
-    );
-  }
-
-  async set<T>(key: string, value: T): Promise<void> {
-    if (!isTauri()) {
-      this.memory.set(key, value);
-      return;
-    }
-    await safeInvoke("plugin_storage_set", {
-      pluginId: this.pluginId,
-      key,
-      value,
-    });
-  }
-
-  async delete(key: string): Promise<void> {
-    if (!isTauri()) {
-      this.memory.delete(key);
-      return;
-    }
-    await safeInvoke("plugin_storage_delete", {
-      pluginId: this.pluginId,
-      key,
-    });
-  }
-
-  async listKeys(): Promise<string[]> {
-    if (!isTauri()) {
-      return Array.from(this.memory.keys());
-    }
-    return (
-      (await safeInvoke<string[]>(
-        "plugin_storage_list_keys",
-        { pluginId: this.pluginId },
-        [],
-      )) || []
-    );
-  }
-}
-
-class TauriScopedGameFs implements ScopedGameFs {
-  async readFile(gameId: string, relativePath: string): Promise<Uint8Array> {
-    const res = await safeInvoke<number[]>(
-      "plugin_game_fs_read",
-      { gameId, relativePath },
-      [],
-    );
-    return new Uint8Array(res);
-  }
-
-  async writeFile(
-    gameId: string,
-    relativePath: string,
-    data: Uint8Array | string,
-  ): Promise<void> {
-    const bytes =
-      typeof data === "string"
-        ? Array.from(new TextEncoder().encode(data))
-        : Array.from(data);
-    await safeInvoke("plugin_game_fs_write", {
-      gameId,
-      relativePath,
-      data: bytes,
-    });
-  }
-
-  async backupFile(gameId: string, relativePath: string): Promise<string> {
-    return (
-      (await safeInvoke<string>("plugin_game_fs_backup", {
-        gameId,
-        relativePath,
-      })) || ""
-    );
-  }
-
-  async restoreFile(gameId: string, relativePath: string): Promise<void> {
-    await safeInvoke("plugin_game_fs_restore", {
-      gameId,
-      relativePath,
-    });
-  }
-
-  async fileExists(gameId: string, relativePath: string): Promise<boolean> {
-    return (
-      (await safeInvoke<boolean>(
-        "plugin_game_fs_exists",
-        { gameId, relativePath },
-        false,
-      )) ?? false
-    );
-  }
-
-  async deleteFile(gameId: string, relativePath: string): Promise<void> {
-    await safeInvoke("plugin_game_fs_delete", {
-      gameId,
-      relativePath,
-    });
-  }
-}
-
-class TauriScopedGameScanner implements ScopedGameScanner {
-  async scanExecutables(
-    gameId: string,
-  ): Promise<Array<{ relativePath: string; sha256: string; size: number }>> {
-    return (
-      (await safeInvoke<
-        Array<{ relativePath: string; sha256: string; size: number }>
-      >("plugin_game_scan_executables", { gameId }, [])) || []
-    );
-  }
-
-  async findFiles(gameId: string, patterns: string[]): Promise<string[]> {
-    return (
-      (await safeInvoke<string[]>(
-        "plugin_game_find_files",
-        { gameId, patterns },
-        [],
-      )) || []
-    );
-  }
-}
-
-class TauriPluginWebSocket implements ClientPluginWebSocket {
-  async send(channel: string, data: unknown): Promise<unknown> {
-    return await safeInvoke("plugin_request_ws", { channel, data });
-  }
-
-  subscribe(channel: string, listener: (data: unknown) => void): () => void {
-    if (isTauri()) {
-      let disposed = false;
-      let unlisten: (() => void) | undefined;
-
-      safeInvoke("plugin_subscribe", { channel }).catch((err) => {
-        console.error(`Failed to subscribe to plugin channel ${channel}:`, err);
-      });
-
-      // The Rust host forwards decoded WebSocket frames as the Tauri event
-      // `plugin:event`. Tauri events are not DOM events, so the payload must be
-      // consumed with `listen` rather than `window.addEventListener`.
-      void listen<{ channel?: string; data?: unknown }>(
-        "plugin:event",
-        (event) => {
-          if (event.payload?.channel === channel) {
-            listener(event.payload.data);
-          }
-        },
-      )
-        .then((off) => {
-          if (disposed) off();
-          else unlisten = off;
-        })
-        .catch((err) => {
-          console.error(
-            `Failed to listen for plugin events on ${channel}:`,
-            err,
-          );
-        });
-
-      return () => {
-        disposed = true;
-        unlisten?.();
-        unlisten = undefined;
-      };
-    }
-
-    // Browser/dev fallback: a host harness can dispatch a DOM CustomEvent.
-    const handler = (event: Event) => {
-      const custom = event as CustomEvent<{ channel?: string; data?: unknown }>;
-      if (custom?.detail?.channel === channel) {
-        listener(custom.detail.data);
-      }
-    };
-
-    window.addEventListener("plugin:event", handler);
-    return () => {
-      window.removeEventListener("plugin:event", handler);
-    };
-  }
-}
+export { isTauri, safeInvoke } from "./host";
 
 export class ClientPluginManager {
   private readonly plugins = new Map<string, ClientPlugin>();
@@ -432,28 +217,7 @@ export class ClientPluginManager {
       gameFs: new TauriScopedGameFs(),
       gameScanner: new TauriScopedGameScanner(),
       serverWs: this.serverWs,
-      system: {
-        run: (
-          bin: string,
-          args?: string[],
-          options?: { cwd?: string; timeoutMs?: number },
-        ) =>
-          safeInvoke<CommandResult>(
-            "plugin_system_run",
-            {
-              pluginId,
-              bin,
-              args,
-              cwd: options?.cwd,
-              timeoutMs: options?.timeoutMs,
-            },
-            {
-              code: 1,
-              stdout: "",
-              stderr: "Host native execution not available in browser mode",
-            },
-          ),
-      },
+      system: createPluginSystem(pluginId),
       serverRequest: <T>(method: HttpMethod, path = "", body?: unknown) =>
         safeInvoke<T>("plugin_request", {
           pluginId,
@@ -590,90 +354,11 @@ export class ClientPluginManager {
    * If any pre-launch hook aborts, completed stages are rolled back in reverse order.
    * If launch succeeds, executes post-exit cleanup hooks.
    */
-  private sortHooks(stages: LaunchHook["stage"][]): LaunchHook[] {
-    return this.launchHooks
-      .filter((h) => stages.includes(h.stage))
-      .sort((a, b) => {
-        const stageDiff = stages.indexOf(a.stage) - stages.indexOf(b.stage);
-        if (stageDiff !== 0) return stageDiff;
-        return (a.order ?? 0) - (b.order ?? 0);
-      });
-  }
-
-  private rollbackCompletedStages(completedHooks: LaunchHook[]): void {
-    for (let i = completedHooks.length - 1; i >= 0; i--) {
-      const rollbackHook = completedHooks[i];
-      if (!rollbackHook) continue;
-      console.log(`Rolling back stage: ${rollbackHook.stage}`);
-    }
-  }
-
-  private async runPreLaunchPipeline(
-    activePreHooks: LaunchHook[],
-    context: LaunchContext,
-  ): Promise<void> {
-    const completedHooks: LaunchHook[] = [];
-    for (const hook of activePreHooks) {
-      try {
-        await hook.execute(context);
-        completedHooks.push(hook);
-      } catch (error) {
-        console.error(
-          `Pre-launch hook [${hook.stage}] failed. Rolling back completed stages...`,
-          error,
-        );
-        this.rollbackCompletedStages(completedHooks);
-        throw new Error(
-          `Launch aborted during stage '${hook.stage}': ${
-            error instanceof Error ? error.message : String(error)
-          }`,
-          { cause: error },
-        );
-      }
-    }
-  }
-
-  private async runPostExitPipeline(
-    activePostHooks: LaunchHook[],
-    context: LaunchContext,
-  ): Promise<void> {
-    for (const hook of activePostHooks) {
-      try {
-        await hook.execute(context);
-      } catch (postErr) {
-        console.warn(`Post-exit hook [${hook.stage}] warning:`, postErr);
-      }
-    }
-  }
-
-  /**
-   * Playnite-style Game Launch Pipeline Coordinator.
-   * Executes pre-launch hooks sorted by stage and priority.
-   * If any pre-launch hook aborts, completed stages are rolled back in reverse order.
-   * If launch succeeds, executes post-exit cleanup hooks.
-   */
   async executeLaunchPipeline<T>(
     context: LaunchContext,
     launchFn: () => Promise<T>,
   ): Promise<T> {
-    const preLaunchStages: LaunchHook["stage"][] = [
-      "pre-launch:validate",
-      "pre-launch:prepare",
-      "pre-launch:stage",
-      "pre-launch:network",
-    ];
-
-    const postExitStages: LaunchHook["stage"][] = [
-      "post-exit:cleanup",
-      "post-exit:restore",
-      "post-exit:sync",
-    ];
-
-    await this.runPreLaunchPipeline(this.sortHooks(preLaunchStages), context);
-    const launchResult = await launchFn();
-    await this.runPostExitPipeline(this.sortHooks(postExitStages), context);
-
-    return launchResult;
+    return runLaunchPipeline(this.launchHooks, context, launchFn);
   }
 }
 
