@@ -1,6 +1,7 @@
 import { APITokenMode } from "~/prisma/client/enums";
 import prisma from "../db/database";
 import sessionHandler from "../session";
+import { hashToken } from "../auth/tokens";
 import type { MinimumRequestObject } from "~/server/h3";
 
 export const userACLs = [
@@ -122,7 +123,8 @@ class ACLManager {
       request.headers.get("Authorization")?.split(" ") ?? [];
     if (!type || !token) return undefined;
     if (type != "Bearer") return undefined;
-    return token;
+    // Persisted tokens are SHA-256 digests; hash the presented value to look up.
+    return hashToken(token);
   }
 
   /**

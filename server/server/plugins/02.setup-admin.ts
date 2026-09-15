@@ -1,5 +1,6 @@
 import { APITokenMode } from "~/prisma/client/enums";
 import prisma from "~/server/internal/db/database";
+import { generateToken, hashToken } from "~/server/internal/auth/tokens";
 import { systemConfig } from "../internal/config/sys-conf";
 import { logger } from "../internal/logging";
 
@@ -22,8 +23,10 @@ export default defineNitroPlugin(async (_nitro) => {
   // but has not been configured
   // so it should be in-place
 
-  const token = await prisma.aPIToken.create({
+  const plaintextToken = generateToken();
+  await prisma.aPIToken.create({
     data: {
+      token: hashToken(plaintextToken),
       name: "Setup Wizard",
       mode: APITokenMode.System,
       acls: ["setup"],
@@ -35,7 +38,7 @@ export default defineNitroPlugin(async (_nitro) => {
     // Opt-in only: the setup token is a one-time admin credential and must
     // not be written to logs by default.
     logger.info(
-      `Open ${setupBaseUrl}?token=${token.token} in a browser to get started with Drop.`,
+      `Open ${setupBaseUrl}?token=${plaintextToken} in a browser to get started with Drop.`,
     );
   } else {
     logger.info(
