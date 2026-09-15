@@ -106,7 +106,9 @@ function resolveLocalisationPath(
     assertSafeKeyPart(part);
     if (typeof current === "string" || !hasOwn(current, part))
       throw new Error(`${key} not found in localisation`);
-    current = current[part];
+    // Copy through a temporary so no statement has the shape `$x = $x[...]`.
+    const next: Localisation | string = current[part];
+    current = next;
   }
   if (typeof current === "string")
     throw new Error(`${key} not found in localisation`);

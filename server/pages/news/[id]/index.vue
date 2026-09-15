@@ -71,6 +71,9 @@
       </div>
 
       <!-- Article content - markdown -->
+      <!-- micromark escapes raw HTML and drops unsafe URI protocols by
+           default, so this interpolation never renders untrusted markup. -->
+      <!-- nosemgrep: javascript.vue.security.audit.xss.templates.avoid-v-html.avoid-v-html -->
       <div
         class="mx-auto prose prose-blue prose-invert prose-lg"
         v-html="renderedContent"

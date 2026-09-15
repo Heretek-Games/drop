@@ -174,7 +174,7 @@ class TauriPluginWebSocket implements ClientPluginWebSocket {
       let unlisten: (() => void) | undefined;
 
       safeInvoke("plugin_subscribe", { channel }).catch((err) => {
-        console.error(`Failed to subscribe to plugin channel ${channel}:`, err);
+        console.error("Failed to subscribe to plugin channel:", channel, err);
       });
 
       // The Rust host forwards decoded WebSocket frames as the Tauri event
@@ -193,10 +193,7 @@ class TauriPluginWebSocket implements ClientPluginWebSocket {
           else unlisten = off;
         })
         .catch((err) => {
-          console.error(
-            `Failed to listen for plugin events on ${channel}:`,
-            err,
-          );
+          console.error("Failed to listen for plugin events on", channel, err);
         });
 
       return () => {
@@ -275,23 +272,20 @@ export class ClientPluginManager {
     try {
       await safeInvoke("plugin_register_commands", { pluginId, commands });
     } catch (err) {
-      console.warn(
-        `Failed to register command allowlist for ${pluginId}:`,
-        err,
-      );
+      console.warn("Failed to register command allowlist for:", pluginId, err);
     }
 
     const context: ClientPluginContext = {
       id: pluginId,
       logger: {
         info: (msg, ...args) =>
-          console.log(`[Plugin:${pluginId}] ${msg}`, ...args),
+          console.log("[Plugin:%s] %s", pluginId, msg, ...args),
         warn: (msg, ...args) =>
-          console.warn(`[Plugin:${pluginId}] ${msg}`, ...args),
+          console.warn("[Plugin:%s] %s", pluginId, msg, ...args),
         error: (msg, ...args) =>
-          console.error(`[Plugin:${pluginId}] ${msg}`, ...args),
+          console.error("[Plugin:%s] %s", pluginId, msg, ...args),
         debug: (msg, ...args) =>
-          console.debug(`[Plugin:${pluginId}] ${msg}`, ...args),
+          console.debug("[Plugin:%s] %s", pluginId, msg, ...args),
       },
       storage: new BrowserLocalStorage(pluginId),
       registerSlot: (slot, component, options) => {
@@ -446,9 +440,9 @@ export class ClientPluginManager {
     try {
       await plugin.init(context);
       this.plugins.set(pluginId, plugin);
-      console.log(`Initialized client plugin: ${pluginId}`);
+      console.log("Initialized client plugin:", pluginId);
     } catch (e) {
-      console.error(`Failed to initialize client plugin ${pluginId}:`, e);
+      console.error("Failed to initialize client plugin:", pluginId, e);
     }
   }
 
@@ -459,7 +453,7 @@ export class ClientPluginManager {
         try {
           await plugin.teardown();
         } catch (e) {
-          console.error(`Error during plugin teardown for ${pluginId}:`, e);
+          console.error("Error during plugin teardown for:", pluginId, e);
         }
       }
       this.plugins.delete(pluginId);
@@ -556,7 +550,8 @@ export class ClientPluginManager {
         actions.push(...result);
       } catch (err) {
         console.error(
-          `Error querying play action provider for game ${gameId}:`,
+          "Error querying play action provider for game:",
+          gameId,
           err,
         );
       }
@@ -584,7 +579,7 @@ export class ClientPluginManager {
     for (let i = completedHooks.length - 1; i >= 0; i--) {
       const rollbackHook = completedHooks[i];
       if (!rollbackHook) continue;
-      console.log(`Rolling back stage: ${rollbackHook.stage}`);
+      console.log("Rolling back stage:", rollbackHook.stage);
     }
   }
 
@@ -599,7 +594,9 @@ export class ClientPluginManager {
         completedHooks.push(hook);
       } catch (error) {
         console.error(
-          `Pre-launch hook [${hook.stage}] failed. Rolling back completed stages...`,
+          "Pre-launch hook failed on stage",
+          hook.stage,
+          "- rolling back completed stages...",
           error,
         );
         this.rollbackCompletedStages(completedHooks);
@@ -621,7 +618,7 @@ export class ClientPluginManager {
       try {
         await hook.execute(context);
       } catch (postErr) {
-        console.warn(`Post-exit hook [${hook.stage}] warning:`, postErr);
+        console.warn("Post-exit hook warning on stage", hook.stage, postErr);
       }
     }
   }

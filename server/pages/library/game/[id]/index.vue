@@ -103,6 +103,9 @@
 
           <div class="space-y-6">
             <div class="bg-zinc-800/50 rounded-xl p-6 backdrop-blur-sm">
+              <!-- micromark escapes raw HTML and drops unsafe URI protocols by
+                 default, so this interpolation never renders untrusted markup. -->
+              <!-- nosemgrep: javascript.vue.security.audit.xss.templates.avoid-v-html.avoid-v-html -->
               <div
                 class="prose prose-invert prose-blue overflow-y-auto custom-scrollbar max-w-none"
                 v-html="descriptionHTML"

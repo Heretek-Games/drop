@@ -278,6 +278,9 @@
           </div>
 
           <div>
+            <!-- micromark escapes raw HTML and drops unsafe URI protocols by
+                 default, so this interpolation never renders untrusted markup. -->
+            <!-- nosemgrep: javascript.vue.security.audit.xss.templates.avoid-v-html.avoid-v-html -->
             <div
               class="mt-12 prose prose-invert prose-blue max-w-none"
               v-html="descriptionHTML"

@@ -1,13 +1,15 @@
 import fs from "node:fs";
 import process from "node:process";
-import childProcess from "node:child_process";
+import { spawn as crossSpawn } from "cross-spawn";
 import createLogger from "pino";
 
 const OUTPUT = "./.output";
 const logger = createLogger({ transport: { target: "pino-pretty" } });
 
-async function spawn(exec, opts) {
-  const output = childProcess.spawn(exec, { ...opts, shell: true });
+// cross-spawn avoids `shell: true` on POSIX and resolves Windows shims (e.g.
+// pnpm.cmd) without an interpolating shell.
+async function spawn(exec, args = [], opts = {}) {
+  const output = crossSpawn(exec, args, { ...opts, shell: false });
   output.stdout.on("data", (data) => {
     process.stdout.write(data);
   });
@@ -33,10 +35,10 @@ for (const view of views) {
   process.chdir(`./${view}`);
 
   loggerChild.info(`Install deps for "${view}"`);
-  await spawn("pnpm install");
+  await spawn("pnpm", ["install"]);
 
   loggerChild.info(`Building "${view}"`);
-  await spawn("pnpm run build", {
+  await spawn("pnpm", ["run", "build"], {
     env: { ...process.env, NUXT_APP_BASE_URL: `/${view}/` },
   });
 

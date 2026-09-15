@@ -26,7 +26,7 @@ export function usePlayActions(gameId: string | (() => string)) {
     try {
       actions.value = await clientPluginManager.getPlayActions(id);
     } catch (err) {
-      console.error(`Failed to load play actions for game ${id}:`, err);
+      console.error("Failed to load play actions for game:", id, err);
       actions.value = [];
     } finally {
       isLoading.value = false;

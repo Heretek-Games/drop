@@ -56,7 +56,8 @@ async function loadRemotePlugin(plugin: RemotePluginInfo): Promise<void> {
     );
   } catch (loadErr) {
     console.debug(
-      `Plugin ${plugin.id} has no client bundle or failed to load:`,
+      "Plugin has no client bundle or failed to load:",
+      plugin.id,
       loadErr,
     );
   }
