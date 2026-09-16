@@ -130,6 +130,14 @@ impl DatabaseInterface {
         !borrow_db_checked().base_url.is_empty()
     }
 
+    /// Parses the stored base URL, returning an error instead of panicking
+    /// when it is not configured yet (e.g. before the client has connected
+    /// to a Drop server on a fresh install).
+    pub fn try_base_url(&self) -> Result<Url, url::ParseError> {
+        let handle = borrow_db_checked();
+        Url::parse(&handle.base_url)
+    }
+
     pub fn fetch_base_url(&self) -> Url {
         let handle = borrow_db_checked();
         Url::parse(&handle.base_url)

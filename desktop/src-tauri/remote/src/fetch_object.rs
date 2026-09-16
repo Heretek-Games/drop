@@ -40,7 +40,10 @@ pub async fn fetch_object(
 
     let header = generate_authorization_header();
     let client = DROP_CLIENT_ASYNC.clone();
-    let url = format!("{}api/v1/client/object/{object_id}", DB.fetch_base_url());
+    let base_url = DB
+        .try_base_url()
+        .map_err(|e| CacheError::Remote(e.into()))?;
+    let url = format!("{}api/v1/client/object/{object_id}", base_url);
     let response = client.get(url).header("Authorization", header).send().await;
 
     match response {

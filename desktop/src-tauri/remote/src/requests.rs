@@ -11,7 +11,10 @@ pub fn generate_url(
     query: &[(&str, &str)],
 ) -> Result<Url, RemoteAccessError> {
     let path_appended = path_components.join("/");
-    let mut base_url = DB.fetch_base_url().join(&path_appended)?;
+    // The client may issue server requests before it has been configured with
+    // a Drop server URL (e.g. IPC commands during webview startup on a fresh
+    // install). Treat that as an error instead of panicking.
+    let mut base_url = DB.try_base_url()?.join(&path_appended)?;
     {
         let mut queries = base_url.query_pairs_mut();
         for (param, val) in query {
