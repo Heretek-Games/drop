@@ -248,12 +248,7 @@ pub async fn plugin_system_run(
             match tokio::time::timeout(timeout, fallback.output()).await {
                 Ok(Ok(output)) => output,
                 Ok(Err(err)) => return Err(format!("failed to run '{bin}': {err}")),
-                Err(_) => {
-                    return Err(format!(
-                        "'{bin}' timed out after {}ms",
-                        timeout.as_millis()
-                    ))
-                }
+                Err(_) => return Err(format!("'{bin}' timed out after {}ms", timeout.as_millis())),
             }
         }
         Err(_) => return Err(format!("'{bin}' timed out after {}ms", timeout.as_millis())),
@@ -603,8 +598,7 @@ mod tests {
         use std::path::PathBuf;
 
         // Fixture directory fully controlled by the test, not host state.
-        let tmp =
-            std::env::temp_dir().join(format!("drop-plugin-test-{}", std::process::id()));
+        let tmp = std::env::temp_dir().join(format!("drop-plugin-test-{}", std::process::id()));
         std::fs::create_dir_all(&tmp).unwrap();
         let cleanup = |tmp: &PathBuf| std::fs::remove_dir_all(tmp).unwrap();
 
@@ -641,9 +635,15 @@ mod tests {
 
     #[test]
     fn test_is_spawn_lookup_failure_shape() {
-        assert!(is_spawn_lookup_failure(&io::Error::from(io::ErrorKind::NotFound)));
-        assert!(!is_spawn_lookup_failure(&io::Error::from(io::ErrorKind::PermissionDenied)));
-        assert!(!is_spawn_lookup_failure(&io::Error::from(io::ErrorKind::Other)));
+        assert!(is_spawn_lookup_failure(&io::Error::from(
+            io::ErrorKind::NotFound
+        )));
+        assert!(!is_spawn_lookup_failure(&io::Error::from(
+            io::ErrorKind::PermissionDenied
+        )));
+        assert!(!is_spawn_lookup_failure(&io::Error::from(
+            io::ErrorKind::Other
+        )));
     }
 
     #[test]
