@@ -112,6 +112,46 @@
         </div>
 
         <div
+          v-if="isResolving"
+          class="rounded-lg border border-blue-500/30 bg-blue-950/20 p-4"
+        >
+          <p class="text-xs text-blue-200">
+            Scanning the installed files to find the game's launch executable...
+          </p>
+        </div>
+
+        <div
+          v-else-if="targetCandidates.length > 0"
+          class="rounded-lg border border-yellow-500/30 bg-yellow-950/20 p-4"
+        >
+          <h4 class="text-sm font-semibold text-zinc-200">
+            Choose your launch executable
+          </h4>
+          <p class="mt-1 text-xs text-zinc-400">
+            The installer created {{ targetCandidates.length }} possible game
+            executables. Pick the one that starts the game.
+          </p>
+          <ul class="mt-3 max-h-56 space-y-1 overflow-y-auto custom-scrollbar">
+            <li v-for="candidate in targetCandidates" :key="candidate.path">
+              <button
+                type="button"
+                class="flex w-full items-center justify-between rounded-md bg-zinc-800/60 px-3 py-2 text-left text-xs text-zinc-200 ring-1 ring-inset ring-zinc-700 transition hover:bg-zinc-700/80"
+                @click="adoptTarget(candidate.path)"
+              >
+                <span class="truncate font-mono">{{ candidate.path }}</span>
+                <span class="ml-3 shrink-0 font-mono text-zinc-500">
+                  {{ Math.round(candidate.score) }}
+                </span>
+              </button>
+            </li>
+          </ul>
+        </div>
+
+        <p v-else-if="resolveError" class="text-xs text-red-400">
+          {{ resolveError }}
+        </p>
+
+        <div
           v-if="reclaimableBytes > 0 && !reclaimed"
           class="rounded-lg border border-zinc-700 bg-zinc-800/40 p-4 space-y-3"
         >
@@ -241,7 +281,11 @@ import {
   TrashIcon,
   WrenchIcon,
 } from "@heroicons/vue/20/solid";
-import type { PipelineCompletedEvent, PipelineProgressEvent } from "~/types";
+import type {
+  ExecutableCandidate,
+  PipelineCompletedEvent,
+  PipelineProgressEvent,
+} from "~/types";
 const runningPipelines = new Set<string>();
 
 const props = defineProps<{
@@ -280,6 +324,67 @@ let unlistenProgress: UnlistenFn | undefined;
 let unlistenCompleted: UnlistenFn | undefined;
 
 const isRunning = computed(() => status.value === "running");
+
+const isResolving = ref(false);
+const targetCandidates = ref<ExecutableCandidate[]>([]);
+const resolveError = ref<string | null>(null);
+const resolvedTarget = ref<string | null>(null);
+
+async function applyCompletedAsync(event: PipelineCompletedEvent) {
+  if (event.success && event.preemptScan) await resolveTarget(null);
+}
+
+async function resolveTarget(chosen: string | null): Promise<void> {
+  isResolving.value = true;
+  if (chosen === null) {
+    targetCandidates.value = [];
+    resolveError.value = null;
+  }
+  try {
+    const result = await invoke<{
+      adopted: string | null;
+      candidates: ExecutableCandidate[];
+    }>("resolve_launch_target", {
+      gameId: props.gameId,
+      chosen: chosen ?? undefined,
+    });
+    resolvedTarget.value = result.adopted ?? resolvedTarget.value;
+    if (result.adopted) {
+      targetCandidates.value = [];
+      resolveError.value = null;
+    } else {
+      targetCandidates.value = result.candidates;
+      if (result.candidates.length === 0) {
+        resolveError.value =
+          "No game executables were found in the install directory.";
+      }
+    }
+  } catch (e) {
+    console.error("launch target resolution failed:", e);
+    resolveError.value = String(e);
+  } finally {
+    isResolving.value = false;
+  }
+}
+
+async function adoptTarget(path: string) {
+  isResolving.value = true;
+  try {
+    await invoke("resolve_launch_target", {
+      gameId: props.gameId,
+      chosen: path,
+    });
+    resolvedTarget.value = path;
+    targetCandidates.value = [];
+    resolveError.value = null;
+  } catch (e) {
+    console.error("failed to adopt launch target:", e);
+    resolveError.value = String(e);
+  } finally {
+    isResolving.value = false;
+  }
+}
+
 const totalSteps = computed(() => steps.value.length);
 const currentStep = computed(() => steps.value[currentStepIndex.value]);
 const currentStepNumber = computed(() =>
@@ -345,6 +450,10 @@ function applyCompleted(event: PipelineCompletedEvent) {
     status.value = "cancelled";
   } else {
     status.value = "failed";
+  }
+
+  if (status.value === "completed") {
+    void applyCompletedAsync(event);
   }
 }
 

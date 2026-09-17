@@ -328,6 +328,8 @@ pub fn run() {
             start_pipeline_setup,
             cancel_pipeline_setup,
             reclaim_pipeline_space,
+            scan_installed_dir,
+            resolve_launch_target,
             #[cfg(target_os = "linux")]
             ::process::compat::fetch_proton_paths,
             #[cfg(target_os = "linux")]

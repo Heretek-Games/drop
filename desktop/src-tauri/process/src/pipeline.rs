@@ -108,6 +108,10 @@ pub struct PipelineCompletedEvent {
     pub success: bool,
     pub reclaimable_bytes: u64,
     pub error: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub install_dir: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub preempt_scan: Option<bool>,
 }
 
 pub fn parse_7z_progress(line: &str) -> Option<u8> {
@@ -257,6 +261,84 @@ pub fn prepare_pipeline(game_id: &str) -> Result<PreparedPipeline, String> {
         install_dir,
         meta,
     })
+}
+
+const INSTALLED_DIR_SCAN_LIMIT: usize = 200;
+const INSTALLED_DIR_SCAN_SKIP_DIRS: [&str; 7] = [
+    "_commonredist",
+    "redist",
+    "directx",
+    "support",
+    "dependencies",
+    ".drop_iso_tmp",
+    ".drop_patch_tmp",
+];
+
+/// Lists candidate launch executables (relative `/`-separated `.exe` paths)
+/// inside a game's installed directory for post-setup target resolution.
+pub fn scan_installed_dir(game_id: &str) -> Result<Vec<String>, String> {
+    let install_dir = {
+        let db_lock = borrow_db_checked();
+        let status = db_lock
+            .applications
+            .game_statuses
+            .get(game_id)
+            .ok_or_else(|| "Game status not found".to_string())?;
+        match status {
+            GameDownloadStatus::Installed { install_dir, .. } => PathBuf::from(install_dir),
+            _ => return Err("Game is not in an installed/setup state".to_string()),
+        }
+    };
+
+    let mut results = Vec::new();
+    for entry in walkdir::WalkDir::new(&install_dir)
+        .max_depth(8)
+        .follow_links(false)
+        .into_iter()
+        .filter_map(Result::ok)
+    {
+        if !entry.file_type().is_file() {
+            continue;
+        }
+        let rel_path = match entry.path().strip_prefix(&install_dir) {
+            Ok(rel) => rel,
+            Err(_) => continue,
+        };
+        if rel_path
+            .components()
+            .filter_map(|c| match c {
+                std::path::Component::Normal(p) => Some(p.to_string_lossy().to_lowercase()),
+                _ => None,
+            })
+            .any(|seg| INSTALLED_DIR_SCAN_SKIP_DIRS.contains(&seg.as_str()))
+        {
+            continue;
+        }
+        let rel = rel_path
+            .components()
+            .filter_map(|c| match c {
+                std::path::Component::Prefix(_) => {
+                    Some(c.as_os_str().to_string_lossy().into_owned())
+                }
+                std::path::Component::Normal(p) => Some(p.to_string_lossy().into_owned()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .join("/");
+        if rel.is_empty() {
+            continue;
+        }
+        let name = entry.file_name().to_string_lossy().to_lowercase();
+        if !name.ends_with(".exe") {
+            continue;
+        }
+        results.push(rel);
+        if results.len() >= INSTALLED_DIR_SCAN_LIMIT {
+            break;
+        }
+    }
+
+    Ok(results)
 }
 
 /// Appends admin-provided setup executables as ordered `run_command` steps
@@ -447,6 +529,8 @@ pub async fn run_prepared_pipeline(
                     success: true,
                     reclaimable_bytes,
                     error: None,
+                    install_dir: Some(install_dir.display().to_string()),
+                    preempt_scan: Some(recipe.target_executable.is_empty()),
                 },
             );
 
@@ -462,6 +546,8 @@ pub async fn run_prepared_pipeline(
                     success: false,
                     reclaimable_bytes: 0,
                     error: Some(err.clone()),
+                    install_dir: None,
+                    preempt_scan: None,
                 },
             );
 

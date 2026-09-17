@@ -135,6 +135,19 @@ export type PipelineCompletedEvent = {
   success: boolean;
   reclaimableBytes: number;
   error?: string | null;
+  installDir?: string | null;
+  preemptScan?: boolean | null;
+};
+
+export type ExecutableCandidate = {
+  path: string;
+  score: number;
+  reasons: string[];
+  isPrimary: boolean;
+};
+
+export type ScanInstallResponse = {
+  candidates: ExecutableCandidate[];
 };
 
 export type Settings = {
