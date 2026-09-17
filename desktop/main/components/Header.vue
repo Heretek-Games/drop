@@ -41,6 +41,7 @@
             </HeaderWidget>
           </li>
           <OfflineHeaderWidget v-if="state?.status === AppStatus.Offline" />
+          <PluginSlot name="topbar:status" />
           <HeaderUserWidget />
         </ol>
       </div>

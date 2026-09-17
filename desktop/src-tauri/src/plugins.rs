@@ -206,14 +206,18 @@ pub async fn plugin_system_run(
         }
     }
 
+    // Prefer direct execution (resolved through the inherited PATH) and retry
+    // with well-known installation directories when the spawn is not found, so
+    // system daemon CLIs (e.g. `zerotier-cli`) resolve in GUI sessions whose
+    // PATH omits /usr/sbin.
     let mut command = TokioCommand::new(&bin);
     command
-        .args(args.unwrap_or_default())
+        .args(args.clone().unwrap_or_default())
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .kill_on_drop(true);
-    if let Some(dir) = cwd {
+    if let Some(dir) = cwd.as_deref() {
         command.current_dir(dir);
     }
 
@@ -221,7 +225,37 @@ pub async fn plugin_system_run(
     let timeout = Duration::from_millis(timeout_ms.unwrap_or(15_000).clamp(1, 120_000));
     let output = match tokio::time::timeout(timeout, command.output()).await {
         Ok(Ok(output)) => output,
-        Ok(Err(err)) => return Err(format!("failed to run '{bin}': {err}")),
+        Ok(Err(err)) => {
+            // Only spawn failures (binary not on PATH) are retried through the
+            // well-known-directory fallback; a child that started but failed
+            // is returned as-is.
+            if !is_spawn_lookup_failure(&err) {
+                return Err(format!("failed to run '{bin}': {err}"));
+            }
+            let Some(path) = resolve_in_well_known_dirs(&bin, &well_known_command_dirs()) else {
+                return Err(format!("failed to run '{bin}': {err}"));
+            };
+            let mut fallback = TokioCommand::new(path);
+            fallback
+                .args(args.unwrap_or_default())
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped())
+                .kill_on_drop(true);
+            if let Some(dir) = cwd.as_deref() {
+                fallback.current_dir(dir);
+            }
+            match tokio::time::timeout(timeout, fallback.output()).await {
+                Ok(Ok(output)) => output,
+                Ok(Err(err)) => return Err(format!("failed to run '{bin}': {err}")),
+                Err(_) => {
+                    return Err(format!(
+                        "'{bin}' timed out after {}ms",
+                        timeout.as_millis()
+                    ))
+                }
+            }
+        }
         Err(_) => return Err(format!("'{bin}' timed out after {}ms", timeout.as_millis())),
     };
 
@@ -230,6 +264,106 @@ pub async fn plugin_system_run(
         stdout: String::from_utf8_lossy(&output.stdout).to_string(),
         stderr: String::from_utf8_lossy(&output.stderr).to_string(),
     })
+}
+
+/// Well-known installation directories where CLI binaries for system daemons
+/// live outside an ordinary desktop session's inherited `PATH`.
+///
+/// - Linux packagers place service CLIs in `/usr/sbin` or `/usr/local/sbin`,
+///   which many graphical sessions omit.
+/// - macOS GUI launches (Finder/Dock) restrict `PATH` to
+///   `/usr/bin:/bin:/usr/sbin:/sbin`, so `/usr/local/bin` and the ZeroTier One
+///   install directory are invisible.
+/// - Windows installers under `Program Files` never add themselves to `PATH`.
+pub(crate) fn well_known_command_dirs() -> Vec<PathBuf> {
+    well_known_platform_dirs()
+}
+
+fn well_known_platform_dirs() -> Vec<PathBuf> {
+    let mut dirs: Vec<PathBuf> = Vec::new();
+    #[cfg(target_os = "linux")]
+    {
+        dirs.extend(
+            ["/usr/sbin", "/usr/local/sbin", "/opt/ZeroTier/One"]
+                .iter()
+                .map(PathBuf::from),
+        );
+    }
+    #[cfg(target_os = "macos")]
+    {
+        dirs.extend(
+            [
+                "/Library/Application Support/ZeroTier/One",
+                "/usr/local/bin",
+                "/usr/local/sbin",
+                "/opt/homebrew/bin",
+            ]
+            .iter()
+            .map(PathBuf::from),
+        );
+    }
+    #[cfg(windows)]
+    {
+        for key in ["ProgramFiles(x86)", "ProgramFiles", "ProgramData"] {
+            if let Some(root) = std::env::var_os(key) {
+                dirs.push(PathBuf::from(root).join("ZeroTier").join("One"));
+            }
+        }
+    }
+    dirs.retain(|dir| dir.is_dir());
+    dirs
+}
+
+/// Resolve an allowlisted bare executable name inside the well-known command
+/// directories. Returns an absolute path only for a regular, non-symlink,
+/// executable file whose file name is exactly `bin` (plus `.exe` on Windows),
+/// so the security model of the bare-name allowlist is preserved: no user
+/// query can influence the fallback path.
+fn resolve_in_well_known_dirs(bin: &str, dirs: &[PathBuf]) -> Option<PathBuf> {
+    let candidates: Vec<String> = vec![bin.to_string()];
+    #[cfg(windows)]
+    candidates.push(format!("{bin}.exe"));
+
+    for dir in dirs {
+        for name in &candidates {
+            let path = dir.join(name);
+            if is_plain_executable(&path) {
+                return Some(path);
+            }
+        }
+    }
+    None
+}
+
+/// Whether a spawn failure reflects "binary could not be located" (retry the
+/// well-known-directory fallback) rather than a failure after the child
+/// already spawned.
+fn is_spawn_lookup_failure(err: &io::Error) -> bool {
+    matches!(err.kind(), io::ErrorKind::NotFound)
+        || err.to_string().contains("No such file or directory")
+}
+
+fn is_plain_executable(path: &Path) -> bool {
+    let Ok(meta) = fs::symlink_metadata(path) else {
+        return false;
+    };
+    // Never resolve symlinks: consistent with the rest of the plugin FS layer,
+    // a fallback candidate must be a plain file.
+    if meta.is_symlink() || !meta.is_file() {
+        return false;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        (meta.permissions().mode() & 0o111) != 0
+    }
+    #[cfg(not(unix))]
+    {
+        matches!(
+            path.extension().and_then(|ext| ext.to_str()),
+            Some(ext) if ext.eq_ignore_ascii_case("exe")
+        )
+    }
 }
 
 fn get_game_install_dir(game_id: &str) -> Result<PathBuf, String> {
@@ -460,6 +594,56 @@ mod tests {
         assert!(validate_command_name("game_helper.exe").is_ok());
         assert!(validate_command_name("runner").is_ok());
         assert!(validate_command_name("tool.v1").is_ok());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_resolve_well_known_dirs() {
+        use std::os::unix::fs::PermissionsExt;
+        use std::path::PathBuf;
+
+        // Fixture directory fully controlled by the test, not host state.
+        let tmp =
+            std::env::temp_dir().join(format!("drop-plugin-test-{}", std::process::id()));
+        std::fs::create_dir_all(&tmp).unwrap();
+        let cleanup = |tmp: &PathBuf| std::fs::remove_dir_all(tmp).unwrap();
+
+        let dirs = vec![PathBuf::from(&tmp)];
+
+        // Executable file resolves to the exact absolute path.
+        let bin = tmp.join("zerotier-cli");
+        fs::write(&bin, b"#!/bin/sh\n").unwrap();
+        fs::set_permissions(&bin, fs::Permissions::from_mode(0o755)).unwrap();
+        assert_eq!(
+            resolve_in_well_known_dirs("zerotier-cli", &dirs),
+            Some(bin.clone())
+        );
+
+        // Unknown names never resolve, even when a like-named symlink or a
+        // non-executable file exists (fail-closed symmetry with the FS layer).
+        std::os::unix::fs::symlink(&bin, tmp.join("shadowed-cli")).unwrap();
+        let plain = tmp.join("plain");
+        fs::write(&plain, b"data").unwrap();
+        fs::set_permissions(&plain, fs::Permissions::from_mode(0o644)).unwrap();
+        assert!(resolve_in_well_known_dirs("shadowed-cli", &dirs).is_none());
+        assert!(resolve_in_well_known_dirs("plain", &dirs).is_none());
+
+        // A vanished directory yields no candidate.
+        cleanup(&tmp);
+        assert!(resolve_in_well_known_dirs("zerotier-cli", &dirs).is_none());
+    }
+
+    #[test]
+    fn test_well_known_dirs_are_existing_dirs() {
+        // Directory candidates are only reported when they exist on disk.
+        assert!(well_known_command_dirs().iter().all(|d| d.is_dir()));
+    }
+
+    #[test]
+    fn test_is_spawn_lookup_failure_shape() {
+        assert!(is_spawn_lookup_failure(&io::Error::from(io::ErrorKind::NotFound)));
+        assert!(!is_spawn_lookup_failure(&io::Error::from(io::ErrorKind::PermissionDenied)));
+        assert!(!is_spawn_lookup_failure(&io::Error::from(io::ErrorKind::Other)));
     }
 
     #[test]
