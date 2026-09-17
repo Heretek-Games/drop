@@ -18,10 +18,10 @@ import { systemConfig } from "../config/sys-conf";
 import type { TaskRunContext } from "../tasks";
 import taskHandler, { wrapTaskContext } from "../tasks";
 import { randomUUID } from "node:crypto";
-import { fuzzy } from "fast-fuzzy";
 import { logger } from "~/server/internal/logging";
 import { createGameImportTaskId } from "../library";
 import type { GameTagModel } from "~/prisma/client/models";
+import { parseSearchQuery, rankSearchResults } from "./query";
 
 export class MissingMetadataProviderConfig extends Error {
   private readonly providerName: string;
@@ -54,6 +54,9 @@ export abstract class MetadataProvider {
   ): Promise<CompanyMetadata | undefined>;
 }
 
+export { parseSearchQuery } from "./query";
+export type { ParsedSearchQuery } from "./query";
+
 export class MetadataHandler {
   // Ordered by priority
   private readonly providers: PriorityListIndexed<MetadataProvider> =
@@ -77,6 +80,7 @@ export class MetadataHandler {
   }
 
   async search(query: string) {
+    const search = parseSearchQuery(query);
     const promises: Promise<InternalGameMetadataResult[]>[] = [];
     for (const provider of this.providers.values()) {
       const queryTransformationPromise = new Promise<
@@ -89,7 +93,7 @@ export class MetadataHandler {
           systemConfig.getMetadataTimeout(),
         );
         try {
-          const results = await provider.search(query);
+          const results = await provider.search(search.title);
           const mappedResults: InternalGameMetadataResult[] = results.map(
             (result) => ({
               ...result,
@@ -107,14 +111,12 @@ export class MetadataHandler {
     }
 
     const results = await Promise.allSettled(promises);
-    const successfulResults = results
-      .filter((result) => result.status === "fulfilled")
-      .flatMap((result) => result.value)
-      .map((result) => {
-        const match = fuzzy(query, result.name);
-        return { ...result, fuzzy: match };
-      })
-      .sort((a, b) => b.fuzzy - a.fuzzy);
+    const successfulResults = rankSearchResults(
+      results
+        .filter((result) => result.status === "fulfilled")
+        .flatMap((result) => result.value),
+      search,
+    );
 
     return successfulResults;
   }
