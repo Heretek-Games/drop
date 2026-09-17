@@ -17,11 +17,37 @@ import type {
   ScopedGameFs,
   ScopedGameScanner,
   SidebarItem,
+  Sidecar,
   StoreScanner,
   TopBarItem,
   UISlotName,
   UISlotRegistration,
 } from "./types";
+
+/** Platform data used to pick the matching sidecar target. */
+export interface SidecarPlatform {
+  os: "linux" | "macos" | "windows";
+  arch: "x64" | "arm64";
+}
+
+/**
+ * Best-effort host platform detection for sidecar target selection. Runs in
+ * the desktop webview, where Tauri provides a real UA; wrong guesses never
+ * break anything because staging downloads are sha256-verified per target.
+ */
+export function detectSidecarPlatform(): SidecarPlatform | null {
+  if (typeof navigator === "undefined") return null;
+  const ua = navigator.userAgent ?? "";
+  let os: SidecarPlatform["os"] | null = null;
+  if (/windows/i.test(ua)) os = "windows";
+  else if (/macintosh|mac os x/i.test(ua)) os = "macos";
+  else if (/linux/i.test(ua)) os = "linux";
+  if (!os) return null;
+  const arch: SidecarPlatform["arch"] = /aarch64|arm64|apple m[123]/i.test(ua)
+    ? "arm64"
+    : "x64";
+  return { os, arch };
+}
 
 export function isTauri(): boolean {
   return (
@@ -253,6 +279,50 @@ export class ClientPluginManager {
   public readonly isInitialized = ref(false);
 
   /**
+   * Stage the sidecar binary for the current platform that a plugin bundle
+   * declares. The Tauri command verifies the SHA-256, stages the binary under
+   * the plugin's app-data bin dir and makes it executable, so
+   * `ctx.system.run` later resolves the allowlisted bare name against it.
+   * Non-fatal: hosts without a matching target stay on PATH/fallbacks.
+   */
+  async stageSidecars(
+    pluginId: string,
+    commands: string[],
+    sidecars: Sidecar[] | undefined,
+  ): Promise<void> {
+    if (!Array.isArray(sidecars) || sidecars.length === 0) return;
+    const platform = detectSidecarPlatform();
+    if (!platform) {
+      console.debug("Unknown sidecar platform; skipping staging");
+      return;
+    }
+    const commandSet = new Set(commands);
+    for (const sidecar of sidecars) {
+      if (!commandSet.has(sidecar.name)) continue;
+      const target = sidecar.targets.find(
+        (t) => t.os === platform.os && t.arch === platform.arch,
+      );
+      if (!target) continue;
+      try {
+        await safeInvoke("plugin_sidecar_stage", {
+          pluginId,
+          name: sidecar.name,
+          asset: target.path,
+          sha256: target.sha256,
+        });
+        console.debug("Staged sidecar:", pluginId, sidecar.name);
+      } catch (err) {
+        console.warn(
+          "Failed to stage sidecar; falling back to PATH resolution:",
+          pluginId,
+          sidecar.name,
+          err,
+        );
+      }
+    }
+  }
+
+  /**
    * Register and initialize a client plugin instance.
    */
   async registerPlugin(
@@ -465,6 +535,11 @@ export class ClientPluginManager {
       commands: [],
     }).catch(() => {
       // Best effort: the plugin may never have registered a allowlist.
+    });
+
+    // Drop any staged sidecar binaries for this plugin.
+    await safeInvoke("plugin_sidecar_clear", { pluginId }).catch(() => {
+      // Best effort: the plugin may never have staged a sidecar.
     });
 
     // Clean up UI slots registered by this plugin

@@ -1,6 +1,7 @@
 import * as Vue from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { clientPluginManager } from "~/internal/plugins/ClientPluginManager";
+import type { Sidecar } from "~/internal/plugins/types";
 
 declare global {
   interface Window {
@@ -24,6 +25,7 @@ interface RemotePluginInfo {
     css?: string;
     commands?: string[];
     capabilities?: string[];
+    sidecars?: Sidecar[];
   };
 }
 
@@ -46,6 +48,15 @@ async function loadRemotePlugin(plugin: RemotePluginInfo): Promise<void> {
   const capabilities = Array.isArray(plugin.client?.capabilities)
     ? plugin.client.capabilities
     : rootCapabilities;
+
+  // Stage any declared sidecar binary for this host platform before init so
+  // `ctx.system.run` resolves it after PATH and the well-known dirs. The
+  // Tauri command verifies the SHA-256 citation from the bundle manifest.
+  await clientPluginManager.stageSidecars(
+    plugin.id,
+    commands,
+    plugin.client?.sidecars,
+  );
 
   try {
     await clientPluginManager.loadFromUrl(

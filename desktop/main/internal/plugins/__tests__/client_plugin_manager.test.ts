@@ -1,11 +1,15 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { ClientPluginManager } from "../ClientPluginManager";
+import {
+  ClientPluginManager,
+  detectSidecarPlatform,
+} from "../ClientPluginManager";
 import type {
   ClientPlugin,
   ClientPluginContext,
   CloudSavePathResolver,
   MetadataProvider,
+  Sidecar,
   StoreScanner,
 } from "../types";
 
@@ -372,4 +376,82 @@ test("ClientPluginManager aggregates PlayActions and tolerates failing providers
   assert.equal(actions.length, 2);
   assert.equal(actions[0]?.id, "action-offline");
   assert.equal(actions[1]?.id, "action-multiplayer");
+});
+
+/* ============================== sidecar staging =========================== */
+
+test("detectSidecarPlatform classifies desktop user agents", () => {
+  const withUa = (ua: string | undefined) => {
+    const original = Object.getOwnPropertyDescriptor(globalThis, "navigator");
+    const nav = Object.defineProperties(
+      {},
+      {
+        userAgent: {
+          get: () => ua,
+          configurable: true,
+        },
+      },
+    );
+    Object.defineProperty(globalThis, "navigator", {
+      value: nav,
+      configurable: true,
+      writable: true,
+    });
+    try {
+      return detectSidecarPlatform();
+    } finally {
+      if (original) {
+        Object.defineProperty(globalThis, "navigator", original);
+      } else {
+        delete (globalThis as { navigator?: unknown }).navigator;
+      }
+    }
+  };
+
+  assert.deepEqual(
+    withUa(
+      "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36",
+    ),
+    { os: "linux", arch: "x64" },
+  );
+  assert.deepEqual(
+    withUa(
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/126.0 Safari/537.36",
+    ),
+    { os: "windows", arch: "x64" },
+  );
+  assert.deepEqual(
+    withUa(
+      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15",
+    ),
+    { os: "macos", arch: "x64" },
+  );
+  assert.deepEqual(withUa("Mozilla/5.0 (X11; aarch64) Linux"), {
+    os: "linux",
+    arch: "arm64",
+  });
+});
+
+test("stageSidecars skips sidecars whose name is not allowlisted and items without a matching target", async () => {
+  const manager = new ClientPluginManager();
+  const invoked: Array<{ cmd: string; args?: Record<string, unknown> }> = [];
+  (globalThis as { __TAURI_INTERNALS__?: object }).__TAURI_INTERNALS__ = {
+    // Force the manager's invoke path into the browser-mode branch instead of
+    // a real IPC call so this test never touches the host.
+    transformCallback: () => 0,
+  };
+  const originalConsole = console.debug;
+  console.debug = (msg) => {
+    invoked.push({ cmd: String(msg), args: undefined });
+  };
+  try {
+    const sidecars: Sidecar[] = [
+      { name: "gse-engine", targets: [] },
+      { name: "not-allowlisted", targets: [] },
+    ];
+    await manager.stageSidecars("sidecar-demo", ["gse-engine"], sidecars);
+  } finally {
+    console.debug = originalConsole;
+    delete (globalThis as { __TAURI_INTERNALS__?: object }).__TAURI_INTERNALS__;
+  }
 });

@@ -7,7 +7,6 @@ import type { H3Event } from "h3";
 import { getQuery, createError } from "h3";
 import type { Logger } from "pino";
 import { logger } from "../logging";
-import { PLUGIN_API_VERSION } from "./types";
 import {
   PluginApiVersionError,
   PluginCapabilityError,
@@ -15,12 +14,14 @@ import {
 } from "./errors";
 import { PluginRegistry } from "./registry";
 import { SIGNATURE_VERSION, signaturePayloadV2 } from "./signature";
+import { PLUGIN_API_VERSION } from "./types";
 import type {
   CloudSavePathResolver,
   HttpMethod,
   MetadataProvider,
   PaymentGateway,
   PluginCapability,
+  PluginSidecar,
   PluginContext,
   PluginManifest,
   PluginMetadata,
@@ -602,7 +603,135 @@ export class PluginManager {
       );
     }
 
+    await this.verifySidecarMetadata(root, manifest, files);
     return await this.aggregateBundleDigest(root, files);
+  }
+
+  /**
+   * Validate the `client.sidecars` declaration for an installed bundle:
+   * every target path must be a present regular file covered by the declared
+   * `files` checksums (including the sidecar `sha256`), confined inside the
+   * bundle, and each sidecar `name` must be allowlisted in `client.commands`.
+   */
+  private async verifySidecarMetadata(
+    root: string,
+    manifest: PluginManifest,
+    files: string[],
+  ): Promise<void> {
+    const sidecars = manifest.client?.sidecars;
+    if (sidecars === undefined) return;
+    if (!Array.isArray(sidecars) || sidecars.length === 0) {
+      throw new Error(
+        `bundle ${manifest.id}: client.sidecars must be a non-empty array when declared`,
+      );
+    }
+    if (!manifest.files) {
+      throw new Error(
+        `bundle ${manifest.id}: client.sidecars requires manifest 'files' checksums`,
+      );
+    }
+
+    const commands = new Set<string>(manifest.client?.commands ?? []);
+    for (const [idx, sidecar] of sidecars.entries()) {
+      const label = `client.sidecars[${idx}]`;
+      this.assertSidecarShape(manifest, label, sidecar, commands);
+      await this.assertSidecarTargets(root, manifest, label, sidecar, files);
+    }
+  }
+
+  /** Validate one sidecar declaration's shape and allowlist membership. */
+  private assertSidecarShape(
+    manifest: PluginManifest,
+    label: string,
+    sidecar: PluginSidecar | undefined,
+    commands: Set<string>,
+  ): asserts sidecar is PluginSidecar {
+    if (typeof sidecar?.name !== "string" || !Array.isArray(sidecar.targets)) {
+      throw new Error(
+        `bundle ${manifest.id}: ${label} must declare { name: string, targets: array }`,
+      );
+    }
+    if (!commands.has(sidecar.name)) {
+      throw new Error(
+        `bundle ${manifest.id}: ${label} sidecar name '${sidecar.name}' must be allowlisted in client.commands`,
+      );
+    }
+  }
+
+  /** Validate each declared sidecar target against the bundle on disk. */
+  private async assertSidecarTargets(
+    root: string,
+    manifest: PluginManifest,
+    label: string,
+    sidecar: PluginSidecar,
+    files: string[],
+  ): Promise<void> {
+    const seenTargets = new Set<string>();
+    for (const [tIdx, target] of sidecar.targets.entries()) {
+      const tLabel = `${label}.targets[${tIdx}]`;
+      const key = `${target.os}-${target.arch}`;
+      if (seenTargets.has(key)) {
+        throw new Error(
+          `bundle ${manifest.id}: ${tLabel} duplicate target '${key}' (only one binary per os+arch)`,
+        );
+      }
+      seenTargets.add(key);
+      await this.assertSidecarTargetPath(root, manifest, tLabel, target, files);
+      await this.assertSidecarTargetDigest(root, manifest, tLabel, target);
+    }
+  }
+
+  /** Validate one sidecar target's path containment and file presence. */
+  private async assertSidecarTargetPath(
+    root: string,
+    manifest: PluginManifest,
+    tLabel: string,
+    target: { path: string },
+    files: string[],
+  ): Promise<void> {
+    const resolved = path.resolve(root, target.path);
+    if (
+      typeof target.path !== "string" ||
+      path.isAbsolute(target.path) ||
+      !isInsideDirectory(root, resolved)
+    ) {
+      throw new Error(
+        `bundle ${manifest.id}: ${tLabel} path must be a bundle-relative path`,
+      );
+    }
+    const stat = await fs.stat(resolved).catch(() => null);
+    if (!stat || !stat.isFile()) {
+      throw new Error(
+        `bundle ${manifest.id}: ${tLabel} declared sidecar file missing: ${target.path}`,
+      );
+    }
+    if (!files.includes(target.path)) {
+      throw new Error(
+        `bundle ${manifest.id}: ${tLabel} file '${target.path}' is not covered by the manifest 'files' checksums`,
+      );
+    }
+  }
+
+  /** Verify one sidecar target's cited sha256 against the file on disk. */
+  private async assertSidecarTargetDigest(
+    root: string,
+    manifest: PluginManifest,
+    tLabel: string,
+    target: { path: string; sha256: string },
+  ): Promise<void> {
+    const resolved = path.resolve(root, target.path);
+    const digest = createHash("sha256")
+      .update(await fs.readFile(resolved))
+      .digest("hex");
+    if (
+      typeof target.sha256 !== "string" ||
+      !SHA256_HEX_PATTERN.test(target.sha256) ||
+      !constantTimeEqual(target.sha256, digest)
+    ) {
+      throw new Error(
+        `bundle ${manifest.id}: ${tLabel} sha256 mismatch for ${target.path}`,
+      );
+    }
   }
 
   /** Verify every declared `files` entry against the bundle on disk. */

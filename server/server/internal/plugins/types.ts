@@ -118,7 +118,31 @@ export interface PluginManifest extends PluginMetadata {
      * (requires the `system:command` capability). Enforced by the desktop host.
      */
     commands?: string[];
+    /**
+     * Optional native sidecar binaries shipped inside the plugin bundle. Each
+     * sidecar name must also appear in `commands`; the server verifies the
+     * declared SHA-256 digests at install time, serves the binaries over the
+     * client asset route, and the desktop host stages the target matching the
+     * current platform.
+     */
+    sidecars?: PluginSidecar[];
   };
+}
+
+/** One declared native sidecar executable shipped inside a client bundle. */
+export interface PluginSidecar {
+  /** Bare executable name; must also be listed in `client.commands`. */
+  name: string;
+  targets: PluginSidecarTarget[];
+}
+
+/** A platform-specific sidecar binary declared inside the bundle. */
+export interface PluginSidecarTarget {
+  os: "linux" | "macos" | "windows";
+  arch: "x64" | "arm64";
+  /** Relative to the plugin bundle root (POSIX separators). */
+  path: string;
+  sha256: string;
 }
 
 export interface PluginStateRecord {

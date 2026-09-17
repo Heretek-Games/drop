@@ -1885,3 +1885,182 @@ test("PluginManager installs and executes a universal v2 .dropplugin package", a
 
   await manager.unregisterPlugin("universal-pkg");
 });
+
+/* ============================== client.sidecars =========================== */
+
+const SIDECAR_BYTES = Buffer.from("fake-gse-engine-binary");
+
+function sidecarBundleFixture(overrides: {
+  sidecars?: unknown[] | undefined;
+  withFile?: boolean;
+}) {
+  const binaryBase64 = SIDECAR_BYTES.toString("base64");
+  const binaryDigest = createHash("sha256").update(SIDECAR_BYTES).digest("hex");
+  const serverEntry = `
+    export default class SidecarDemoPlugin {
+      constructor() {
+        this.metadata = {
+          id: "sidecar-demo",
+          name: "Sidecar Demo",
+          version: "1.0.0",
+          apiVersion: 2,
+          capabilities: ["routes"],
+        };
+      }
+      init(ctx) { }
+    }
+`;
+  const clientEntry = `console.log("sidecar-demo client bundle loaded");`;
+  const serverDigest = createHash("sha256").update(serverEntry).digest("hex");
+  const clientDigest = createHash("sha256").update(clientEntry).digest("hex");
+
+  const manifest: Record<string, unknown> = {
+    id: "sidecar-demo",
+    name: "Sidecar Demo",
+    version: "1.0.0",
+    apiVersion: PLUGIN_API_VERSION,
+    targets: ["server", "client"],
+    capabilities: ["routes", "game:launch-hook", "system:command"],
+    server: { entry: "server.js", capabilities: ["routes"] },
+    client: {
+      entry: "client.js",
+      capabilities: ["game:launch-hook", "system:command"],
+      commands: ["gse-engine"],
+      sidecars: overrides.sidecars,
+    },
+    files: {
+      "server.js": serverDigest,
+      "client.js": clientDigest,
+      "sidecars/linux-x64/gse-engine": binaryDigest,
+    },
+  };
+
+  const payload: Record<string, string> = {
+    "server.js": Buffer.from(serverEntry).toString("base64"),
+    "client.js": Buffer.from(clientEntry).toString("base64"),
+  };
+  if (overrides.withFile !== false) {
+    payload["sidecars/linux-x64/gse-engine"] = binaryBase64;
+  }
+  return { manifest, payload };
+}
+
+test("PluginManager installs a bundle with a valid client.sidecars declaration", async () => {
+  const manager = createTestManager();
+  const { manifest, payload } = sidecarBundleFixture({
+    sidecars: [
+      {
+        name: "gse-engine",
+        targets: [
+          {
+            os: "linux",
+            arch: "x64",
+            path: "sidecars/linux-x64/gse-engine",
+            sha256: createHash("sha256").update(SIDECAR_BYTES).digest("hex"),
+          },
+        ],
+      },
+    ],
+  });
+
+  await manager.installBundle(
+    manifest as unknown as Parameters<PluginManager["installBundle"]>[0],
+    payload,
+  );
+  const installed = manager.listPlugins().find((p) => p.id === "sidecar-demo");
+  assert.equal(installed?.status, "active");
+
+  // Sidecar binaries are servable via the existing client asset route.
+  const asset = await manager.getClientAssetPath(
+    "sidecar-demo",
+    "sidecars/linux-x64/gse-engine",
+  );
+  assert.ok(asset, "sidecar binary must be resolvable");
+});
+
+test("PluginManager fails closed on sidecar sha256 mismatch", async () => {
+  const manager = createTestManager();
+  const { manifest, payload } = sidecarBundleFixture({
+    sidecars: [
+      {
+        name: "gse-engine",
+        targets: [
+          {
+            os: "linux",
+            arch: "x64",
+            path: "sidecars/linux-x64/gse-engine",
+            sha256: "0".repeat(64),
+          },
+        ],
+      },
+    ],
+  });
+
+  await assert.rejects(
+    () =>
+      manager.installBundle(
+        manifest as unknown as Parameters<PluginManager["installBundle"]>[0],
+        payload,
+      ),
+    /sha256 mismatch/,
+  );
+});
+
+test("PluginManager fails closed on undeclared sidecar paths and unlisted names", async () => {
+  const digest = createHash("sha256").update(SIDECAR_BYTES).digest("hex");
+  const manager = createTestManager();
+
+  // Missing bundle file.
+  const { manifest: missing, payload: missingPayload } = sidecarBundleFixture({
+    sidecars: [
+      {
+        name: "gse-engine",
+        targets: [
+          {
+            os: "linux",
+            arch: "x64",
+            path: "sidecars/windows-x64/gse-engine.exe",
+            sha256: digest,
+          },
+        ],
+      },
+    ],
+    withFile: false,
+  });
+  await assert.rejects(
+    () =>
+      manager.installBundle(
+        missing as unknown as Parameters<PluginManager["installBundle"]>[0],
+        missingPayload,
+      ),
+    /bundle manifest lists missing file|declared sidecar file missing|not covered/,
+  );
+
+  // Name not allowlisted.
+  const { manifest: unlisted, payload: unlistedPayload } = sidecarBundleFixture(
+    {
+      sidecars: [
+        {
+          name: "not-allowlisted",
+          targets: [
+            {
+              os: "linux",
+              arch: "x64",
+              path: "sidecars/linux-x64/gse-engine",
+              sha256: digest,
+            },
+          ],
+        },
+      ],
+    },
+  );
+  (unlisted.client as Record<string, unknown>).commands = ["other-tool"];
+  await assert.rejects(
+    () =>
+      manager.installBundle(
+        unlisted as unknown as Parameters<PluginManager["installBundle"]>[0],
+        unlistedPayload,
+      ),
+    /must be allowlisted/,
+  );
+});

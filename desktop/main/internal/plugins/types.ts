@@ -302,3 +302,26 @@ export interface CloudSavePathResolver {
     gameContext: GameInstallContext,
   ): Promise<CloudSavePattern[]>;
 }
+
+/**
+ * A platform-specific native sidecar binary declared inside a client plugin
+ * bundle (`client.sidecars`). Verified by the server at install time and
+ * staged by the desktop host into a per-plugin bin directory.
+ */
+export interface SidecarTarget {
+  /** Target operating system. */
+  os: "linux" | "macos" | "windows";
+  /** Target CPU architecture. */
+  arch: "x64" | "arm64";
+  /** Relative to the plugin bundle root (POSIX separators). */
+  path: string;
+  /** SHA-256 hex digest of the binary contents. */
+  sha256: string;
+}
+
+export interface Sidecar {
+  /** Bare executable name; must also be listed in `client.commands`. */
+  name: string;
+  /** Per-platform (and per-architecture) binaries for this sidecar. */
+  targets: SidecarTarget[];
+}

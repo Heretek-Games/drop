@@ -276,6 +276,8 @@ pub fn run() {
             plugin_game_find_files,
             plugin_register_commands,
             plugin_system_run,
+            plugin_sidecar_stage,
+            plugin_sidecar_clear,
             // Library
             fetch_library,
             fetch_game,
