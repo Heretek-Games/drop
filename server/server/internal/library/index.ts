@@ -27,6 +27,8 @@ import {
   classifyDistribution,
   generatePipelineRecipe,
   DistributionType,
+  matchPatchToBaseVersion,
+  parseVersionHint,
 } from "./pipeline";
 import { isExcludedExecutablePath } from "./pipeline/executable-scorer";
 
@@ -354,7 +356,7 @@ class LibraryManager {
       const chosen = preload?.at(0);
       if (!chosen) {
         context.logger.warn(
-          `No executable could be auto-detected for ${libraryPath} (${version.name}); skipping`,
+          `No executable could be auto-detected for ${libraryPath} (${version.name}); it will be resolved from the install directory after the first client setup`,
         );
         index++;
         continue;
@@ -825,6 +827,53 @@ class LibraryManager {
             },
           });
           const currentIndex = largestIndex ? largestIndex.versionIndex + 1 : 0;
+          const libBase =
+            (library as unknown as { config?: { baseDir?: string } }).config
+              ?.baseDir ?? "";
+          const classification = classifyDistribution(
+            versionPath
+              ? path.join(libBase, game.libraryPath, versionPath)
+              : "",
+            game.mName,
+            fileList ?? [],
+          );
+          const resultRecipe = generatePipelineRecipe(
+            classification,
+            game.mName,
+          );
+
+          let requiredContentConnect: Prisma.GameVersionCreateInput["requiredContent"] =
+            undefined;
+          if (metadata.delta && metadata.requiredContent.length === 0) {
+            const bases = await prisma.gameVersion.findMany({
+              where: { gameId },
+              orderBy: { versionIndex: "desc" },
+              select: { versionId: true, versionPath: true, delta: true },
+            });
+            const match = matchPatchToBaseVersion(
+              parseVersionHint(version.name) ?? classification.versionHint,
+              bases,
+              bases.map((v) => v.versionId),
+            );
+            if (match) {
+              logger.info(
+                `Auto-matched update to base version ${match.versionPath ?? match.versionId}`,
+              );
+              requiredContentConnect = {
+                connect: [{ versionId: match.versionId }],
+              };
+            } else {
+              logger.warn(
+                `No base version matched for update ${version.name}; importing without required content`,
+              );
+            }
+          } else if (metadata.requiredContent.length > 0) {
+            requiredContentConnect = {
+              connect: metadata.requiredContent.map((id) => ({
+                versionId: id,
+              })),
+            };
+          }
 
           // Then, create the database object
           const newVersion = await prisma.gameVersion.create({
@@ -838,29 +887,14 @@ class LibraryManager {
               displayName: metadata.displayName ?? null,
 
               versionPath,
-              dropletManifest: (() => {
-                const libBase =
-                  (library as unknown as { config?: { baseDir?: string } })
-                    .config?.baseDir ?? "";
-                const classification = classifyDistribution(
-                  versionPath
-                    ? path.join(libBase, game.libraryPath, versionPath)
-                    : "",
-                  game.mName,
-                  fileList ?? [],
-                );
-                const recipe = generatePipelineRecipe(
-                  classification,
-                  game.mName,
-                );
-                return attachRecipeToManifest(
-                  manifest,
-                  recipe,
-                ) as unknown as Prisma.InputJsonValue;
-              })(),
+              dropletManifest: attachRecipeToManifest(
+                manifest,
+                resultRecipe,
+              ) as unknown as Prisma.InputJsonValue,
               fileList,
               versionIndex: currentIndex,
               delta: metadata.delta,
+              requiredContent: requiredContentConnect,
 
               onlySetup: metadata.onlySetup,
               uninstallers: {
@@ -878,30 +912,11 @@ class LibraryManager {
                       command: v.launch,
                       platform: v.platform,
                     }));
-                    if (data.length === 0) {
-                      const libBase =
-                        (
-                          library as unknown as {
-                            config?: { baseDir?: string };
-                          }
-                        ).config?.baseDir ?? "";
-                      const classification = classifyDistribution(
-                        versionPath
-                          ? path.join(libBase, game.libraryPath, versionPath)
-                          : "",
-                        game.mName,
-                        fileList ?? [],
-                      );
-                      const recipe = generatePipelineRecipe(
-                        classification,
-                        game.mName,
-                      );
-                      if (recipe.setupCommand) {
-                        data.push({
-                          command: recipe.setupCommand,
-                          platform: Platform.Windows,
-                        });
-                      }
+                    if (data.length === 0 && resultRecipe.setupCommand) {
+                      data.push({
+                        command: resultRecipe.setupCommand,
+                        platform: Platform.Windows,
+                      });
                     }
                     return data;
                   })(),
