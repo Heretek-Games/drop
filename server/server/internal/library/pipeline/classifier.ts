@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { DistributionType, type ClassificationResult } from "./types";
+import { parseVersionHint } from "./version";
 import { scoreExecutables } from "./executable-scorer";
 
 const SCENE_GROUPS = [
@@ -48,6 +49,7 @@ interface ClassificationContext {
   lowerFiles: string[];
   releaseGroup: string | undefined;
   nfoFile: string | undefined;
+  versionHint: string | undefined;
   rars: string[];
   hasSfvs: boolean;
   hasIso: boolean;
@@ -447,6 +449,7 @@ export function classifyDistribution(
   const folderName = path.basename(dirPath);
   const lowerFolder = folderName.toLowerCase();
   const lowerFiles = fileList.map((f) => f.toLowerCase());
+  const versionHint = parseVersionHint(folderName);
   const { releaseGroup, nfoFile } = resolveReleaseGroup(fileList, folderName);
 
   const ctx: ClassificationContext = {
@@ -458,6 +461,7 @@ export function classifyDistribution(
     lowerFiles,
     releaseGroup,
     nfoFile,
+    versionHint,
     rars: allFilesWithSubdirs.filter(isRarPart),
     hasSfvs: allFilesWithSubdirs.some((f) => f.toLowerCase().endsWith(".sfv")),
     hasIso: allFilesWithSubdirs.some((f) => f.toLowerCase().endsWith(".iso")),
@@ -465,7 +469,10 @@ export function classifyDistribution(
 
   for (const classify of CLASSIFIERS) {
     const result = classify(ctx);
-    if (result) return result;
+    if (result) {
+      result.versionHint ??= versionHint;
+      return result;
+    }
   }
 
   return {

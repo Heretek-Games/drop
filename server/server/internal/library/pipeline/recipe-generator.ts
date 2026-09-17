@@ -535,25 +535,31 @@ fi
       setupCommand = "drop-pipeline-setup.bat";
       const installerExe = classification.installerExe || "setup.exe";
 
+      // Repack wrappers are Inno Setup shells, so silent flags skip the wizard
+      // prompts (component/language screens) while keeping the progress UI.
       steps.push({
         id: "run_installer",
         action: "run_command",
         params: {
-          command: installerExe,
+          command: `${installerExe} /SILENT /SUPPRESSMSGBOXES /NORESTART`,
           targetDir: ".",
         },
-        description: `Run repack installer (${installerExe})`,
+        description: `Run repack installer (${installerExe}) silently`,
       });
 
       setupScriptWindows = `@echo off
 echo ${batchEcho(`[Drop Pipeline] Launching Repack Installer (${installerExe})...`)}
-start /wait "" ${batchQuote(installerExe)}
+start /wait "" ${batchQuote(installerExe)} /SILENT /SUPPRESSMSGBOXES /NORESTART
+if %ERRORLEVEL% NEQ 0 (
+  echo [Drop Pipeline] Silent installation failed; relaunching interactively...
+  start /wait "" ${batchQuote(installerExe)}
+)
 exit /b %ERRORLEVEL%
 `;
 
       setupScriptLinux = `#!/bin/bash
 echo ${shellQuote(`[Drop Pipeline] Repack installation under Wine/Proton required for ${installerExe}`)}
-wine ${shellQuote(installerExe)}
+${shellQuote(installerExe)} /SILENT /SUPPRESSMSGBOXES /NORESTART
 `;
       break;
     }
@@ -612,6 +618,7 @@ exit 0
     version: "1",
     distributionType: classification.type,
     releaseGroup: classification.releaseGroup,
+    versionHint: classification.versionHint,
     steps,
     targetExecutable,
     setupCommand,

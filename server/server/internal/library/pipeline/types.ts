@@ -42,6 +42,7 @@ export interface ClassificationResult {
   confidence: number;
   releaseGroup?: string;
   nfoPath?: string;
+  versionHint?: string;
   primaryArchive?: string;
   multipartRars?: string[];
   installerExe?: string;
@@ -56,6 +57,7 @@ export interface PipelineRecipe {
   version: "1";
   distributionType: DistributionType;
   releaseGroup?: string;
+  versionHint?: string;
   steps: PipelineStep[];
   targetExecutable: string;
   targetArgs?: string[];
