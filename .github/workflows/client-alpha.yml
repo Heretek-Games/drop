@@ -128,6 +128,102 @@ jobs:
           app-id: org.droposs.client.Alpha
           tag: alpha
 
+  build-and-publish-alpha-windows:
+    name: Build and publish Alpha Windows installer
+    needs: [build-and-publish-alpha] # serialized so the 'alpha' release already exists (avoids create/upload race)
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # actions/checkout@v7
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: setup pnpm
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # pnpm/action-setup@v6
+        with:
+          run_install: false
+
+      - name: setup node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # actions/setup-node@v7
+        with:
+          node-version: lts/*
+          cache: pnpm
+
+      - name: install Rust nightly
+        uses: dtolnay/rust-toolchain@7c8d7d138f5c09cef361f8214cf96882cd029cdb # dtolnay/rust-toolchain@nightly
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # swatinem/rust-cache@v2
+        with:
+          workspaces: "./desktop/src-tauri -> target"
+
+      - name: compute alpha version
+        id: version
+        shell: bash
+        run: |
+          BASE_VERSION=$(jq -r .version desktop/src-tauri/tauri.conf.json)
+          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+          ALPHA_VERSION="${BASE_VERSION}-alpha.${{ github.run_number }}.${SHORT_SHA}"
+          echo "alpha_version=${ALPHA_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "Building Alpha version: ${ALPHA_VERSION}"
+
+          # Update version in tauri.conf.json so the binary and installer are stamped with the alpha version
+          jq --arg v "$ALPHA_VERSION" '.version = $v' desktop/src-tauri/tauri.conf.json > desktop/src-tauri/tauri.conf.json.tmp
+          mv desktop/src-tauri/tauri.conf.json.tmp desktop/src-tauri/tauri.conf.json
+
+      - name: install frontend dependencies
+        run: pnpm install
+
+      - name: build Tauri NSIS installer
+        run: |
+          pnpm --filter drop-app exec tauri build --bundles nsis
+
+      - name: stage NSIS installer asset
+        id: exe
+        shell: bash
+        env:
+          ALPHA_VERSION: ${{ steps.version.outputs.alpha_version }}
+        run: |
+          EXE_PATH=$(find desktop/src-tauri/target/release/bundle/nsis -name "*-setup.exe" | head -n1)
+          [ -f "$EXE_PATH" ] || { echo "NSIS installer not found" >&2; exit 1; }
+          TARGET_NAME="Drop.Desktop.Client_${ALPHA_VERSION}_x64-setup.exe"
+          cp "$EXE_PATH" "$TARGET_NAME"
+          echo "exe_path=${TARGET_NAME}" >> "$GITHUB_OUTPUT"
+          echo "exe_name=${TARGET_NAME}" >> "$GITHUB_OUTPUT"
+          ls -la "$TARGET_NAME"
+
+      - name: upload alpha installer artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # actions/upload-artifact@v7
+        with:
+          name: drop-alpha-exe
+          path: ${{ steps.exe.outputs.exe_path }}
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: publish to rolling 'alpha' GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ALPHA_VERSION: ${{ steps.version.outputs.alpha_version }}
+          EXE_PATH: ${{ steps.exe.outputs.exe_path }}
+        shell: bash
+        run: |
+          tag="alpha"
+          title="Drop Alpha (${ALPHA_VERSION})"
+          notes="Automated alpha build from commit ${{ github.sha }} on develop."
+
+          # The linux job runs first and owns release creation/edits; only upload here.
+          if ! gh release view "$tag" >/dev/null 2>&1; then
+            echo "Release $tag missing (linux job should have created it); creating"
+            gh release create "$tag" "$EXE_PATH" \
+              --title "$title" --notes "$notes" --prerelease --target "${{ github.sha }}"
+          else
+            echo "Uploading installer to existing release $tag"
+            gh release upload "$tag" "$EXE_PATH" --clobber
+          fi
+
   ppa-alpha:
     name: Publish Alpha to Ubuntu PPA
     needs: [build-and-publish-alpha]
