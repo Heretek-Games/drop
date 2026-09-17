@@ -13,6 +13,7 @@ import { PLUGIN_API_VERSION } from "../types";
 import type {
   PluginCapability,
   PluginContext,
+  PluginManifest,
   PluginMetadata,
   PluginStorage,
   ServerPlugin,
@@ -1783,4 +1784,104 @@ test("plugin route patterns keep regex metacharacters literal", async () => {
   );
 
   await manager.unregisterPlugin("regex-plugin");
+});
+
+test("PluginManager installs and executes a universal v2 .dropplugin package", async () => {
+  const manager = createTestManager();
+
+  const serverJs = `
+    export default class UniversalPlugin {
+      constructor() {
+        this.metadata = {
+          id: "universal-pkg",
+          name: "Universal Package",
+          version: "1.0.0",
+          apiVersion: 2,
+          capabilities: ["routes"],
+        };
+      }
+      init(ctx) {
+        ctx.registerRoute("GET", "/status", () => ({ ready: true }));
+      }
+    }
+  `;
+  const clientJs = `console.log("universal client bundle loaded");`;
+
+  const serverDigest = createHash("sha256")
+    .update(Buffer.from(serverJs))
+    .digest("hex");
+  const clientDigest = createHash("sha256")
+    .update(Buffer.from(clientJs))
+    .digest("hex");
+
+  const filesMap: Record<string, string> = {
+    "dist/server.js": Buffer.from(serverJs).toString("base64"),
+    "dist/client.js": Buffer.from(clientJs).toString("base64"),
+  };
+
+  const droppluginPackage = {
+    format: "dropplugin-v2",
+    id: "universal-pkg",
+    version: "1.0.0",
+    manifest: {
+      id: "universal-pkg",
+      name: "Universal Package",
+      version: "1.0.0",
+      apiVersion: PLUGIN_API_VERSION,
+      targets: ["server", "client"],
+      capabilities: ["routes"],
+      server: {
+        entry: "dist/server.js",
+        capabilities: ["routes"],
+      },
+      client: {
+        entry: "dist/client.js",
+        capabilities: ["ui:slot"],
+      },
+      checksum: serverDigest,
+      files: {
+        "dist/server.js": serverDigest,
+        "dist/client.js": clientDigest,
+      },
+    },
+    files: filesMap,
+  };
+
+  // Install the packaged bundle map
+  await manager.installBundle(
+    droppluginPackage.manifest as unknown as PluginManifest,
+    droppluginPackage.files,
+  );
+
+  // Assert registered and active
+  const plugins = manager.listPlugins();
+  const installed = plugins.find((p) => p.id === "universal-pkg");
+  assert.ok(installed, "universal-pkg must be listed in plugins");
+  assert.equal(installed.status, "active");
+
+  // Assert server route works
+  const mockEvent = {
+    method: "GET",
+    headers: new Headers(),
+  } as unknown as import("h3").H3Event;
+
+  const res = (await manager.dispatch(
+    "universal-pkg",
+    "GET",
+    "/status",
+    mockEvent,
+  )) as { ready: boolean };
+  assert.equal(res.ready, true);
+
+  // Assert client asset can be served for desktop client
+  const clientAsset = await manager.getClientAssetPath(
+    "universal-pkg",
+    "dist/client.js",
+  );
+  assert.ok(clientAsset, "client asset path must be resolvable");
+  assert.ok(clientAsset.endsWith("dist/client.js"));
+  const clientContent = await fs.readFile(clientAsset, "utf-8");
+  assert.equal(clientContent, clientJs);
+
+  await manager.unregisterPlugin("universal-pkg");
 });

@@ -205,3 +205,171 @@ test("ClientPluginManager cleans up SPI entries and slots on unregisterPlugin", 
   assert.equal(manager.getStoreScanners().length, 0);
   assert.equal(manager.getMetadataProviders().length, 0);
 });
+
+test("ClientPluginManager executes launch pipeline in stage order and runs post-exit hooks", async () => {
+  const manager = new ClientPluginManager();
+  const stagesExecuted: string[] = [];
+
+  const hookPlugin: ClientPlugin = {
+    metadata: {
+      id: "pipeline-hooks",
+      name: "Pipeline Hooks",
+      version: "1.0.0",
+    },
+    init(ctx: ClientPluginContext) {
+      ctx.registerLaunchHook({
+        stage: "pre-launch:validate",
+        order: 10,
+        execute: () => {
+          stagesExecuted.push("validate:10");
+        },
+      });
+      ctx.registerLaunchHook({
+        stage: "pre-launch:validate",
+        order: 1,
+        execute: () => {
+          stagesExecuted.push("validate:1");
+        },
+      });
+      ctx.registerLaunchHook({
+        stage: "pre-launch:prepare",
+        execute: () => {
+          stagesExecuted.push("prepare");
+        },
+      });
+      ctx.registerLaunchHook({
+        stage: "post-exit:cleanup",
+        execute: () => {
+          stagesExecuted.push("cleanup");
+        },
+      });
+    },
+  };
+
+  await manager.registerPlugin(
+    hookPlugin,
+    "pipeline-hooks",
+    [],
+    ["game:launch-hook"],
+  );
+
+  const context = {
+    gameId: "game-42",
+    gameTitle: "Test Adventure",
+    gameDir: "/tmp/test-game",
+  };
+
+  const result = await manager.executeLaunchPipeline(context, async () => {
+    stagesExecuted.push("launched");
+    return "ok-launched";
+  });
+
+  assert.equal(result, "ok-launched");
+  assert.deepEqual(stagesExecuted, [
+    "validate:1",
+    "validate:10",
+    "prepare",
+    "launched",
+    "cleanup",
+  ]);
+});
+
+test("ClientPluginManager pre-launch failure aborts launch and rolls back completed stages", async () => {
+  const manager = new ClientPluginManager();
+  const stagesExecuted: string[] = [];
+
+  const failingPlugin: ClientPlugin = {
+    metadata: {
+      id: "failing-plugin",
+      name: "Failing Plugin",
+      version: "1.0.0",
+    },
+    init(ctx: ClientPluginContext) {
+      ctx.registerLaunchHook({
+        stage: "pre-launch:validate",
+        execute: () => {
+          stagesExecuted.push("validate");
+        },
+      });
+      ctx.registerLaunchHook({
+        stage: "pre-launch:stage",
+        execute: () => {
+          stagesExecuted.push("stage");
+          throw new Error("Anti-cheat integrity check failed");
+        },
+      });
+      ctx.registerLaunchHook({
+        stage: "post-exit:cleanup",
+        execute: () => {
+          stagesExecuted.push("cleanup-never");
+        },
+      });
+    },
+  };
+
+  await manager.registerPlugin(
+    failingPlugin,
+    "failing-plugin",
+    [],
+    ["game:launch-hook"],
+  );
+
+  const context = {
+    gameId: "game-42",
+    gameTitle: "Test Adventure",
+    gameDir: "/tmp/test-game",
+  };
+
+  let launchRan = false;
+  await assert.rejects(
+    () =>
+      manager.executeLaunchPipeline(context, async () => {
+        launchRan = true;
+      }),
+    /Launch aborted during stage 'pre-launch:stage': Anti-cheat integrity check failed/,
+  );
+
+  assert.equal(launchRan, false);
+  assert.deepEqual(stagesExecuted, ["validate", "stage"]);
+});
+
+test("ClientPluginManager aggregates PlayActions and tolerates failing providers", async () => {
+  const manager = new ClientPluginManager();
+
+  const providerPlugin1: ClientPlugin = {
+    metadata: { id: "p1", name: "P1", version: "1.0.0" },
+    init(ctx: ClientPluginContext) {
+      ctx.registerPlayAction(() => [
+        {
+          id: "action-offline",
+          name: "Play Offline",
+          execute: () => {},
+        },
+      ]);
+    },
+  };
+
+  const providerPlugin2: ClientPlugin = {
+    metadata: { id: "p2", name: "P2", version: "1.0.0" },
+    init(ctx: ClientPluginContext) {
+      ctx.registerPlayAction(() => {
+        throw new Error("Provider error");
+      });
+      ctx.registerPlayAction(() => [
+        {
+          id: "action-multiplayer",
+          name: "Play Multiplayer Room",
+          execute: () => {},
+        },
+      ]);
+    },
+  };
+
+  await manager.registerPlugin(providerPlugin1, "p1", [], ["ui:play-action"]);
+  await manager.registerPlugin(providerPlugin2, "p2", [], ["ui:play-action"]);
+
+  const actions = await manager.getPlayActions("game-123");
+  assert.equal(actions.length, 2);
+  assert.equal(actions[0]?.id, "action-offline");
+  assert.equal(actions[1]?.id, "action-multiplayer");
+});

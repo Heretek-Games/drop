@@ -449,3 +449,46 @@ pub async fn plugin_game_find_files(
 
     Ok(matches)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_validate_command_name_allowed() {
+        assert!(validate_command_name("custom-tool").is_ok());
+        assert!(validate_command_name("game_helper.exe").is_ok());
+        assert!(validate_command_name("runner").is_ok());
+        assert!(validate_command_name("tool.v1").is_ok());
+    }
+
+    #[test]
+    fn test_validate_command_name_blocked() {
+        assert!(validate_command_name("sh").is_err());
+        assert!(validate_command_name("bash").is_err());
+        assert!(validate_command_name("powershell.exe").is_err());
+        assert!(validate_command_name("cmd").is_err());
+        assert!(validate_command_name("python").is_err());
+        assert!(validate_command_name("node").is_err());
+        assert!(validate_command_name("curl").is_err());
+        assert!(validate_command_name("wget").is_err());
+        assert!(validate_command_name("sudo").is_err());
+        assert!(validate_command_name("rm").is_err());
+        assert!(validate_command_name("format").is_err());
+        assert!(validate_command_name("regedit").is_err());
+    }
+
+    #[test]
+    fn test_validate_command_name_syntax_rules() {
+        assert!(validate_command_name("").is_err());
+        assert!(validate_command_name(".hidden").is_err());
+        assert!(validate_command_name("-flag").is_err());
+        assert!(validate_command_name("path/to/bin").is_err());
+        assert!(validate_command_name("path\\to\\bin").is_err());
+        assert!(validate_command_name("has spaces").is_err());
+        assert!(validate_command_name("tool;rm").is_err());
+        assert!(validate_command_name("tool&run").is_err());
+        let too_long = "a".repeat(65);
+        assert!(validate_command_name(&too_long).is_err());
+    }
+}
