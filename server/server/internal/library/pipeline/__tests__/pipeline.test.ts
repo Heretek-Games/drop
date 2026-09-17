@@ -200,6 +200,100 @@ test("classifyDistribution identifies Standalone 7z Archives", () => {
   );
 });
 
+test("classifyDistribution classifies a RAR-wrapped scene update with a patcher", () => {
+  const files = [
+    "tenoke-baby.steps.update.nfo",
+    "tenoke-baby.steps.update.sfv",
+    "tenoke-baby.steps.update.rar",
+    "tenoke-baby.steps.update.r00",
+    "Update.exe",
+  ];
+
+  const result = classifyDistribution(
+    "/data/Baby.Steps.Update.v0.2-TENOKE",
+    "Baby Steps",
+    files,
+  );
+
+  assert.equal(result.type, DistributionType.PatchUpdate);
+  assert.equal(result.releaseGroup, "TENOKE");
+  assert.equal(result.primaryArchive, "tenoke-baby.steps.update.rar");
+
+  const recipe = generatePipelineRecipe(result, "Baby Steps");
+  assert.equal(recipe.distributionType, DistributionType.PatchUpdate);
+  assert.equal(recipe.setupCommand, "drop-pipeline-setup.bat");
+  assert.ok(recipe.steps.some((s) => s.action === "extract_rar"));
+  assert.ok(
+    recipe.steps.some(
+      (s) =>
+        s.action === "run_command" &&
+        s.params.command === ".drop_patch_tmp/Update.exe",
+    ),
+    "patcher must run from the temp directory",
+  );
+  assert.ok(recipe.steps.some((s) => s.action === "cleanup"));
+  assert.ok(recipe.setupScriptWindows?.includes(".drop_patch_tmp"));
+  assert.ok(
+    recipe.setupScriptWindows?.includes("tenoke-baby.steps.update.rar"),
+  );
+});
+
+test("classifyDistribution classifies an unpacked Update overlay release", () => {
+  const files = [
+    String.raw`Update\Baby Steps.exe`,
+    String.raw`Update\data.pak`,
+  ];
+
+  const result = classifyDistribution(
+    "/data/Baby.Steps.Update.v0.1.Hotfix-TENOKE",
+    "Baby Steps",
+    files,
+  );
+
+  assert.equal(result.type, DistributionType.PatchUpdate);
+  assert.equal(result.updateDir, "Update");
+
+  const recipe = generatePipelineRecipe(result, "Baby Steps");
+  assert.equal(recipe.distributionType, DistributionType.PatchUpdate);
+  const overlay = recipe.steps.find((s) => s.action === "apply_crack");
+  assert.ok(overlay);
+  assert.equal(overlay.params.crackDir, "Update");
+  assert.ok(
+    !recipe.steps.some(
+      (s) => s.action !== "apply_crack" && s.action.includes("extract"),
+    ),
+    "unpacked updates must not emit extraction steps",
+  );
+  assert.ok(recipe.setupScriptWindows?.includes(String.raw`"Update\*"`));
+});
+
+test("classifyDistribution classifies a single-archive update with flat patch files", () => {
+  const files = ["Some.Game.Update.7z"];
+
+  const result = classifyDistribution(
+    "/data/Some.Game.Update.Repack-DOGE",
+    "Some Game",
+    files,
+  );
+
+  assert.equal(result.type, DistributionType.PatchUpdate);
+  assert.equal(result.primaryArchive, "Some.Game.Update.7z");
+
+  const recipe = generatePipelineRecipe(result, "Some Game");
+  assert.ok(recipe.steps.some((s) => s.action === "extract_archive"));
+  const overlay = recipe.steps.find((s) => s.action === "apply_crack");
+  assert.ok(overlay);
+  assert.equal(overlay.params.crackDir, ".drop_patch_tmp");
+});
+
+test("plain portable releases without update structure are not PatchUpdate", () => {
+  const files = ["Launch.bat", "binaries/BabySteps.exe", "readme.txt"];
+
+  const result = classifyDistribution("/data/Baby.Steps", "Baby Steps", files);
+
+  assert.notEqual(result.type, DistributionType.PatchUpdate);
+});
+
 test("attachRecipeToManifest embeds a recipe in torrential string manifests", () => {
   const manifest = JSON.stringify({
     version: "2",

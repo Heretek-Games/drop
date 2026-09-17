@@ -145,6 +145,45 @@ function detectUpdateRelease(fileList: string[], folderName: string): boolean {
   );
 }
 
+const PATCHER_EXE_REGEX = /(?:update|patch|hotfix)/i;
+const UPDATE_DIR_REGEX = /^(update|patches?|hotfixes?)$/i;
+
+/**
+ * Finds a patcher executable (e.g. Update.exe, patcher_hotfix_1.exe) anywhere
+ * inside the release folder, preferring the shallowest path.
+ */
+function detectPatcherExe(allFilesWithSubdirs: string[]): string | undefined {
+  const candidates = allFilesWithSubdirs
+    .map((f) => f.replace(/\\/g, "/"))
+    .filter(
+      (f) =>
+        f.toLowerCase().endsWith(".exe") &&
+        PATCHER_EXE_REGEX.test(path.basename(f)),
+    )
+    .sort((a, b) => a.split("/").length - b.split("/").length);
+  return candidates[0];
+}
+
+/**
+ * Finds an update overlay directory (Update/, Patches/, Hotfixes/) that
+ * contains files to be copied over the base game install. Works both for
+ * real directory listings (the dir is a top-level entry) and for the
+ * recursive file lists produced by `versionReaddir` (dir derived from
+ * subpaths), tolerating Windows backslash separators.
+ */
+function detectUpdateOverlayDir(
+  fileList: string[],
+  allFilesWithSubdirs: string[],
+): string | undefined {
+  const candidates = allFilesWithSubdirs
+    .map((f) => f.replace(/\\/g, "/"))
+    .filter((f) => f.includes("/") && UPDATE_DIR_REGEX.test(f.split("/")[0]));
+  if (candidates.length > 0) {
+    return candidates[0].split("/")[0];
+  }
+  return fileList.find((entry) => UPDATE_DIR_REGEX.test(entry));
+}
+
 function baseResult(
   ctx: ClassificationContext,
   type: DistributionType,
@@ -160,10 +199,31 @@ function baseResult(
 }
 
 const classifyPatchUpdate: DistributionClassifier = (ctx) => {
-  const isUpdate = detectUpdateRelease(ctx.fileList, ctx.folderName);
-  if (!isUpdate || (ctx.rars.length === 0 && !ctx.releaseGroup)) {
+  if (!detectUpdateRelease(ctx.fileList, ctx.folderName)) {
     return undefined;
   }
+
+  const rars = ctx.rars;
+  const primaryRar =
+    rars.length > 0
+      ? ctx.fileList.find((f) => /\.part0*1\.rar$/i.test(f)) ||
+        ctx.fileList.find((f) => f.toLowerCase().endsWith(".rar")) ||
+        rars[0]
+      : undefined;
+  const plainArchive = ctx.fileList.find((f) =>
+    ARCHIVE_EXTENSIONS.has(path.extname(f).toLowerCase()),
+  );
+  const primaryArchive = primaryRar ?? plainArchive;
+  const patcher = detectPatcherExe(ctx.allFilesWithSubdirs);
+  const updateDir = detectUpdateOverlayDir(
+    ctx.fileList,
+    ctx.allFilesWithSubdirs,
+  );
+
+  if (!primaryArchive && !patcher && !updateDir) {
+    return undefined;
+  }
+
   return {
     ...baseResult(
       ctx,
@@ -173,7 +233,10 @@ const classifyPatchUpdate: DistributionClassifier = (ctx) => {
     ),
     releaseGroup: ctx.releaseGroup,
     nfoPath: ctx.nfoFile,
-    multipartRars: ctx.rars,
+    primaryArchive,
+    installerExe: patcher,
+    updateDir,
+    multipartRars: rars.length > 0 ? rars : undefined,
   };
 };
 

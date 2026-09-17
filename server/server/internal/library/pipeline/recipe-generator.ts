@@ -58,6 +58,212 @@ export function attachRecipeToManifest(
   return { ...parsed, recipe };
 }
 
+function toWindowsPath(value: string): string {
+  return value.split("/").join("\\");
+}
+
+/**
+ * Builds steps and setup scripts for a patch/update release. Updates either
+ * ship a patcher executable (run over the base install) or an overlay
+ * directory (copied over the base install); everything may additionally be
+ * wrapped in a single- or multi-part archive.
+ */
+function buildPatchUpdateRecipe(
+  classification: ClassificationResult,
+  steps: PipelineStep[],
+): {
+  setupCommand: string | undefined;
+  setupScriptWindows: string | undefined;
+  setupScriptLinux: string | undefined;
+} {
+  const setupCommand = "drop-pipeline-setup.bat";
+  const tmp = ".drop_patch_tmp";
+  const patcher = classification.installerExe?.replaceAll("\\", "/");
+  const archive = classification.primaryArchive;
+  const isRar = archive?.toLowerCase().endsWith(".rar") ?? false;
+  const group = classification.releaseGroup ?? "Update";
+
+  if (archive) {
+    steps.push(
+      isRar
+        ? {
+            id: "extract_patch_rar",
+            action: "extract_rar",
+            params: {
+              input: archive,
+              outputDir: tmp,
+            },
+            description: `Extract multi-part update archive (${archive})`,
+          }
+        : {
+            id: "extract_patch_archive",
+            action: "extract_archive",
+            params: {
+              archiveFile: archive,
+              outputDir: tmp,
+            },
+            description: `Extract update archive (${archive})`,
+          },
+    );
+  }
+
+  // Patch contents live at the version root when unpacked, or inside the
+  // temp directory after extraction.
+  const prefix = archive ? tmp + "/" : "";
+  const patcherTarget = patcher ? prefix + patcher : undefined;
+  const overlayTarget = classification.updateDir
+    ? prefix + classification.updateDir
+    : undefined;
+
+  if (patcherTarget) {
+    steps.push({
+      id: "run_update_patcher",
+      action: "run_command",
+      params: {
+        command: patcherTarget,
+        targetDir: ".",
+      },
+      description: `Run update patcher (${patcherTarget})`,
+    });
+  } else if (overlayTarget) {
+    steps.push({
+      id: "apply_update_overlay",
+      action: "apply_crack",
+      params: {
+        crackDir: overlayTarget,
+        targetDir: ".",
+      },
+      description: `Apply update overlay (${overlayTarget})`,
+    });
+  } else if (archive) {
+    // Patch files directly inside the archive with no patcher and no
+    // dedicated overlay directory: copy everything over the base install.
+    steps.push({
+      id: "apply_update_overlay",
+      action: "apply_crack",
+      params: {
+        crackDir: tmp,
+        targetDir: ".",
+      },
+      description: "Copy patch files over the base game install",
+    });
+  }
+
+  if (archive) {
+    steps.push({
+      id: "cleanup",
+      action: "cleanup",
+      params: {
+        targets: isRar
+          ? [tmp, "*.r0*", "*.r1*", "*.r2*", "*.rar"]
+          : [tmp, archive],
+      },
+      description: "Remove update archive and temporary extraction",
+      optional: true,
+    });
+  }
+
+  return {
+    setupCommand,
+    ...buildPatchUpdateScripts({
+      group,
+      archive,
+      patcherTarget,
+      overlayTarget,
+      tmp,
+    }),
+  };
+}
+
+interface PatchUpdateScriptContext {
+  group: string;
+  archive?: string;
+  patcherTarget?: string;
+  overlayTarget?: string;
+  tmp: string;
+}
+
+/** Generates standalone `.bat`/`.sh` fallbacks for a patch/update release. */
+function buildPatchUpdateScripts(ctx: PatchUpdateScriptContext): {
+  setupScriptWindows: string;
+  setupScriptLinux: string;
+} {
+  const { group, archive, patcherTarget, overlayTarget, tmp } = ctx;
+
+  const label = "[Drop Pipeline] Applying Game Update (" + group + ")...";
+
+  const windowsPieces: string[] = ["@echo off", "echo " + batchEcho(label)];
+  if (archive) {
+    windowsPieces.push(
+      String.raw`set SEVENZIP="7z"
+if exist "%ProgramFiles%\7-Zip\7z.exe" set SEVENZIP="%ProgramFiles%\7-Zip\7z.exe"
+if exist "%ProgramFiles(x86)%\7-Zip\7z.exe" set SEVENZIP="%ProgramFiles(x86)%\7-Zip\7z.exe"
+
+%SEVENZIP% x -y ` +
+        batchQuote(archive!) +
+        ` -o` +
+        tmp +
+        `
+if %ERRORLEVEL% NEQ 0 (
+  echo [Drop Pipeline] Update archive extraction failed.
+  exit /b %ERRORLEVEL%
+)`,
+    );
+  }
+  if (patcherTarget) {
+    windowsPieces.push(
+      "echo [Drop Pipeline] Running update patcher...",
+      'start /wait "" ' + batchQuote(toWindowsPath(patcherTarget!)),
+      `if %ERRORLEVEL% NEQ 0 (
+  echo [Drop Pipeline] Update patcher failed.
+  exit /b %ERRORLEVEL%
+)`,
+    );
+  } else if (overlayTarget || archive) {
+    const source = toWindowsPath(overlayTarget ?? tmp);
+    windowsPieces.push(
+      "echo [Drop Pipeline] Applying update overlay...",
+      "xcopy /s /e /y " +
+        batchQuote(source + String.raw`\*`) +
+        " " +
+        batchQuote("."),
+    );
+  }
+  if (archive) {
+    windowsPieces.push(
+      "if exist " + batchQuote(tmp) + " rmdir /s /q " + batchQuote(tmp),
+    );
+  }
+  windowsPieces.push("echo [Drop Pipeline] Game update applied successfully!");
+  windowsPieces.push("exit /b 0");
+
+  const linuxPieces: string[] = ["#!/bin/bash", "echo " + shellQuote(label)];
+  if (archive) {
+    linuxPieces.push("7z x -y " + shellQuote(archive!) + " -o" + tmp);
+  }
+  if (patcherTarget) {
+    linuxPieces.push(
+      'echo "[Drop Pipeline] Running update patcher..."',
+      "wine " + shellQuote(patcherTarget!),
+    );
+  } else if (overlayTarget || archive) {
+    const source = overlayTarget ?? tmp;
+    linuxPieces.push(
+      `echo "[Drop Pipeline] Applying update overlay..."`,
+      "cp -rf " + shellQuote(source) + "/. .",
+    );
+  }
+  if (archive) {
+    linuxPieces.push("rm -rf " + shellQuote(tmp));
+  }
+  linuxPieces.push(`echo "[Drop Pipeline] Game update applied successfully!"`);
+
+  return {
+    setupScriptWindows: windowsPieces.join("\n"),
+    setupScriptLinux: linuxPieces.join("\n"),
+  };
+}
+
 export function generatePipelineRecipe(
   classification: ClassificationResult,
   _gameName: string,
@@ -252,8 +458,13 @@ echo "[Drop Pipeline] Scene release setup completed successfully!"
       break;
     }
 
+    case DistributionType.PatchUpdate: {
+      ({ setupCommand, setupScriptWindows, setupScriptLinux } =
+        buildPatchUpdateRecipe(classification, steps));
+      break;
+    }
+
     case DistributionType.GogInstaller: {
-      setupCommand = "drop-pipeline-setup.bat";
       const setupExe = classification.installerExe || "setup.exe";
 
       steps.push(

@@ -45,6 +45,7 @@ export interface ClassificationResult {
   primaryArchive?: string;
   multipartRars?: string[];
   installerExe?: string;
+  updateDir?: string;
   binChunks?: string[];
   crackDir?: string;
   detectedExecutables: ExecutableCandidate[];
