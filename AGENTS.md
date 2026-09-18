@@ -148,7 +148,10 @@ Source: `server/server/internal/plugins/`
   required and a missing or mismatched version is rejected
   (`PluginApiVersionError`).
 - **Capabilities** are fail-closed (declaring none denies all): `routes`,
-  `storage`, `events`, `network`, `websocket`. Undeclared use throws
+  `storage`, `events`, `network`, `websocket`, plus the SPI capabilities
+  `metadata:provider`, `cloudsave:provider`, `commerce:payment`,
+  `auth:provider`, `storage:depot` (server) and `client:library-scan`,
+  `game:runner`, `metadata:provider`, `cloudsave:provider` (client). Undeclared use throws
   `PluginCapabilityError` (routes/events at call time, storage via a guarded
   wrapper, `network` gates `ctx.fetch`, `websocket` gates
   `ctx.registerWebSocket`). `trust: "trusted"` (in-process) is the only tier;
@@ -191,7 +194,14 @@ Core `drop` exposes generic hook points:
 - `LaunchInterceptor` trait (`process/src/interceptor.rs`) for native launch
   lifecycle extension (`pre_launch`, `on_running`, `post_exit`).
 - Generic Plugin SPI (`server/server/internal/plugins/`) for backend extensions,
-  dynamic REST routes, authenticated WebSocket events, and isolated storage.
+  dynamic REST routes (with pre-parsed `context.body` / `readJson()`),
+  authenticated WebSocket events, isolated storage, and the `AuthProvider` /
+  `DepotStorageProvider` / `scheduleTask` extensions.
+- Client plugin launch pipeline (`desktop/main/internal/plugins/ClientPluginManager.ts`)
+  accumulates `LaunchOverrides` from pre-launch hooks and `RunnerProvider`
+  implementations (`game:runner`), then passes them through the Tauri
+  `launch_game` command to the native `process` crate, which merges them into
+  the resolved launch command.
 
 ### 2.9 Desktop UI conventions
 
