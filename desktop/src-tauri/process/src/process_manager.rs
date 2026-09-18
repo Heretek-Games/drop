@@ -442,16 +442,7 @@ impl ProcessManager<'_> {
             parsed
         );
 
-        let mut command = Command::new(&parsed.command);
-        command.args(&parsed.args).current_dir(&install_dir);
-        for assignment in &parsed.env {
-            if let Some((key, value)) = assignment.split_once('=') {
-                command.env(key, value);
-            }
-        }
-        process_handler.modify_command(&mut command);
-
-        let status = command.status()?;
+        let status = run_uninstaller_command(parsed, Path::new(&install_dir), process_handler)?;
         if !status.success() {
             warn!(
                 "uninstaller for {} exited with status {:?}",
@@ -866,4 +857,74 @@ pub trait ProcessHandler: Send + 'static {
     fn id(&self) -> &'static str;
     fn name(&self) -> &'static str;
     fn description(&self) -> &'static str;
+}
+
+/// Builds and runs a resolved uninstaller command with the install directory
+/// as its working directory (#235). Non-fatal by contract: a non-zero exit
+/// status is returned (and logged by the caller) instead of surfacing as an
+/// error, so the managed directory removal proceeds.
+fn run_uninstaller_command(
+    parsed: ParsedCommand,
+    install_dir: &Path,
+    handler: &(dyn ProcessHandler + Send + Sync),
+) -> Result<ExitStatus, ProcessError> {
+    let mut command = Command::new(&parsed.command);
+    command.args(&parsed.args).current_dir(install_dir);
+    for assignment in &parsed.env {
+        if let Some((key, value)) = assignment.split_once('=') {
+            command.env(key, value);
+        }
+    }
+    handler.modify_command(&mut command);
+    command.status().map_err(ProcessError::from)
+}
+
+#[cfg(test)]
+mod uninstaller_tests {
+    use super::run_uninstaller_command;
+    use crate::parser::ParsedCommand;
+    use crate::process_handlers::LinuxNativeLauncher;
+    use tempfile::TempDir;
+
+    fn marker_command(script: &str) -> ParsedCommand {
+        ParsedCommand {
+            env: vec![],
+            command: "sh".to_string(),
+            args: vec!["-c".to_string(), script.to_string()],
+        }
+    }
+
+    /// The game-provided uninstaller must run *inside* the managed install
+    /// directory so relative paths in vendor uninstall scripts resolve (#56).
+    #[cfg(unix)]
+    #[test]
+    fn uninstaller_runs_with_install_dir_as_cwd() {
+        let install_dir = TempDir::new().expect("temp install dir");
+        let status = run_uninstaller_command(
+            marker_command("touch uninstalled.marker"),
+            install_dir.path(),
+            &LinuxNativeLauncher,
+        )
+        .expect("uninstaller command should not error");
+        assert!(status.success());
+        assert!(
+            install_dir.path().join("uninstalled.marker").exists(),
+            "uninstaller must execute with the install dir as its working directory"
+        );
+    }
+
+    /// A failing uninstaller must not surface as an error: the managed
+    /// directory removal continues regardless (best-effort semantics, #56).
+    #[cfg(unix)]
+    #[test]
+    fn failing_uninstaller_is_non_fatal_but_reports_status() {
+        let install_dir = TempDir::new().expect("temp install dir");
+        let status = run_uninstaller_command(
+            marker_command("echo failing && exit 3"),
+            install_dir.path(),
+            &LinuxNativeLauncher,
+        )
+        .expect("non-zero exit is not a ProcessError");
+        assert!(!status.success());
+    }
 }
