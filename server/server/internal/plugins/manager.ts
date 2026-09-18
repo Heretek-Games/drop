@@ -14,7 +14,15 @@ import {
 } from "./errors";
 import { PluginRegistry } from "./registry";
 import { SIGNATURE_VERSION, signaturePayloadV2 } from "./signature";
-import { PLUGIN_API_VERSION } from "./types";
+import { PLUGIN_API_VERSION, SUPPORTED_API_VERSIONS } from "./types";
+import {
+  PLUGIN_SETTINGS_STORAGE_KEY,
+  applySettingsDefaults,
+  mergeSettingsPayload,
+  normalizeSettingsSchema,
+  redactSettingsValues,
+  validateSettingsValues,
+} from "./settings";
 import type {
   AuthProvider,
   CloudSavePathResolver,
@@ -30,6 +38,7 @@ import type {
   PluginStateRecord,
   PluginStatus,
   PluginStorage,
+  PluginSettingsSchema,
   RouteHandler,
   RouteHandlerContext,
   ServerPlugin,
@@ -192,6 +201,12 @@ function isIgnoredBundleFile(prefix: string, name: string): boolean {
 
 export class PluginManager {
   private readonly plugins = new Map<string, LoadedPlugin>();
+  /**
+   * Memoized storage instances per plugin so the guarded context storage and
+   * host-managed settings reads/writes share one in-memory cache and cannot
+   * observe stale copies of `state.json`.
+   */
+  private readonly storageInstances = new Map<string, PluginStorage>();
   private readonly routes = new Map<string, RegisteredRoute[]>();
   private readonly webSockets = new Map<
     string,
@@ -321,6 +336,28 @@ export class PluginManager {
     return new FilePluginStorage(pluginId, this.options.dataDir);
   }
 
+  /** Returns the memoized (unguarded) storage instance for `pluginId`. */
+  private async getStorageInstance(pluginId: string): Promise<PluginStorage> {
+    const existing = this.storageInstances.get(pluginId);
+    if (existing) return existing;
+    const created = await this.createStorage(pluginId);
+    this.storageInstances.set(pluginId, created);
+    return created;
+  }
+
+  /** Reads + default-fills the host-managed settings for `pluginId`. */
+  private async readSettingsFor(
+    pluginId: string,
+    schema: PluginSettingsSchema | undefined,
+  ): Promise<Record<string, unknown>> {
+    if (!schema) return {};
+    const storage = await this.getStorageInstance(pluginId);
+    const stored = await storage.get<Record<string, unknown>>(
+      PLUGIN_SETTINGS_STORAGE_KEY,
+    );
+    return applySettingsDefaults(schema, stored);
+  }
+
   /**
    * Restrict storage access to plugins that declared the `storage` capability.
    * Missing capability is fail-closed: every method throws rather than
@@ -356,7 +393,7 @@ export class PluginManager {
     const storage = this.guardStorage(
       id,
       capabilities,
-      await this.createStorage(id),
+      await this.getStorageInstance(id),
     );
     const pluginRoutes: RegisteredRoute[] = [];
     this.routes.set(id, pluginRoutes);
@@ -366,6 +403,10 @@ export class PluginManager {
       id,
       logger: pluginLogger,
       storage,
+      settings: await this.readSettingsFor(
+        id,
+        normalizeSettingsSchema(plugin.metadata.settingsSchema),
+      ),
       registerRoute: (
         method: HttpMethod,
         pattern: string,
@@ -1063,7 +1104,7 @@ export class PluginManager {
   /** Validate a manifest's declared contract before importing its module. */
   private assertManifestCompatible(manifest: PluginManifest): void {
     const version = manifest.apiVersion ?? 0;
-    if (version !== 1 && version !== PLUGIN_API_VERSION) {
+    if (!(SUPPORTED_API_VERSIONS as readonly number[]).includes(version)) {
       throw new PluginApiVersionError(manifest.id, PLUGIN_API_VERSION, version);
     }
     if (manifest.trust !== undefined && manifest.trust !== "trusted") {
@@ -1106,7 +1147,7 @@ export class PluginManager {
     const version = apiVersion ?? 0;
     // Every plugin must declare the contract version it was built against;
     // omitting it previously bypassed the compatibility gate entirely.
-    if (version !== 1 && version !== PLUGIN_API_VERSION) {
+    if (!(SUPPORTED_API_VERSIONS as readonly number[]).includes(version)) {
       throw new PluginApiVersionError(id, PLUGIN_API_VERSION, version);
     }
     if (trust !== undefined && trust !== "trusted") {
@@ -1214,6 +1255,7 @@ export class PluginManager {
       off();
     }
     this.pluginEventSubscriptions.delete(id);
+    this.storageInstances.delete(id);
   }
 
   async togglePlugin(id: string, enabled: boolean): Promise<boolean> {
@@ -1639,6 +1681,66 @@ export class PluginManager {
 
   getDepotProvider(id: string): DepotStorageProvider | undefined {
     return this.depotProviders.get(id)?.provider;
+  }
+
+  /** Declarative settings schema for a loaded plugin, if declared. */
+  getSettingsSchema(id: string): PluginSettingsSchema | undefined {
+    const plugin = this.plugins.get(id)?.plugin;
+    return normalizeSettingsSchema(plugin?.metadata.settingsSchema);
+  }
+
+  /** Effective settings values (including defaults) for a loaded plugin. */
+  async getPluginSettings(id: string): Promise<Record<string, unknown>> {
+    if (!this.plugins.has(id)) {
+      throw createError({
+        statusCode: 404,
+        statusMessage: `Plugin '${id}' not found`,
+      });
+    }
+    return await this.readSettingsFor(id, this.getSettingsSchema(id));
+  }
+
+  /** Settings view with `password` values redacted, for API consumers. */
+  async getPluginSettingsView(id: string): Promise<{
+    schema: PluginSettingsSchema;
+    values: Record<string, unknown>;
+    secrets: Record<string, boolean>;
+  } | null> {
+    const schema = this.getSettingsSchema(id);
+    if (!schema) return null;
+    const values = await this.readSettingsFor(id, schema);
+    const redacted = redactSettingsValues(schema, values);
+    return { schema, values: redacted.values, secrets: redacted.secrets };
+  }
+
+  /** Validate + persist a partial settings update. Returns the redacted view. */
+  async setPluginSettings(id: string, submitted: unknown) {
+    if (!this.plugins.has(id)) {
+      throw createError({
+        statusCode: 404,
+        statusMessage: `Plugin '${id}' not found`,
+      });
+    }
+    const schema = this.getSettingsSchema(id);
+    if (!schema) {
+      throw createError({
+        statusCode: 400,
+        statusMessage: `Plugin '${id}' does not declare a settingsSchema`,
+      });
+    }
+    const current = await this.readSettingsFor(id, schema);
+    const merge = mergeSettingsPayload(schema, current, submitted);
+    const validation = validateSettingsValues(schema, merge.input);
+    const errors = [...merge.errors, ...validation.errors];
+    if (errors.length > 0) {
+      throw createError({
+        statusCode: 400,
+        statusMessage: errors.join("; "),
+      });
+    }
+    const storage = await this.getStorageInstance(id);
+    await storage.set(PLUGIN_SETTINGS_STORAGE_KEY, validation.values);
+    return await this.getPluginSettingsView(id);
   }
 
   private async resolveAuth(event: H3Event): Promise<PluginAuthContext> {

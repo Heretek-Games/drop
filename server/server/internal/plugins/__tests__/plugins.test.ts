@@ -1718,6 +1718,129 @@ test("PluginManager registers and gates AuthProvider, DepotStorageProvider, and 
   assert.equal(manager.getDepotProvider("seedbox"), undefined);
 });
 
+test("PluginManager renders, persists, and redacts declarative settings", async () => {
+  const manager = createTestManager();
+
+  let capturedSettings: Record<string, unknown> | undefined;
+  const plugin: ServerPlugin = {
+    metadata: {
+      id: "settings-plugin",
+      name: "Settings",
+      version: "1.0.0",
+      apiVersion: PLUGIN_API_VERSION,
+      capabilities: ["storage"],
+      settingsSchema: {
+        fields: [
+          { key: "apiKey", label: "API Key", type: "password", required: true },
+          { key: "retries", label: "Retries", type: "number", default: 3 },
+          { key: "enabled", label: "Enabled", type: "boolean", default: true },
+          {
+            key: "mode",
+            label: "Mode",
+            type: "select",
+            default: "fast",
+            options: [
+              { label: "Fast", value: "fast" },
+              { label: "Safe", value: "safe" },
+            ],
+          },
+        ],
+      },
+    },
+    init: (ctx) => {
+      capturedSettings = ctx.settings as Record<string, unknown>;
+    },
+  };
+
+  await manager.registerPlugin(plugin);
+
+  // Defaults are loaded into the plugin context before init.
+  assert.deepEqual(capturedSettings, {
+    retries: 3,
+    enabled: true,
+    mode: "fast",
+  });
+
+  // The API view hides the secret but reports whether one is set.
+  const view = await manager.getPluginSettingsView("settings-plugin");
+  assert.ok(view);
+  assert.equal(view.values.apiKey, undefined);
+  assert.equal(view.secrets.apiKey, false);
+  assert.equal(view.values.retries, 3);
+
+  // `required` is enforced.
+  await assert.rejects(
+    () => manager.setPluginSettings("settings-plugin", { retries: 5 }),
+    /Setting 'apiKey' is required/,
+  );
+
+  // Type + unknown-key validation fails closed.
+  await assert.rejects(
+    () =>
+      manager.setPluginSettings("settings-plugin", {
+        apiKey: "k",
+        retries: "nope",
+      }),
+    /must be a finite number/,
+  );
+  await assert.rejects(
+    () =>
+      manager.setPluginSettings("settings-plugin", { apiKey: "k", nope: 1 }),
+    /Unknown setting 'nope'/,
+  );
+  await assert.rejects(
+    () =>
+      manager.setPluginSettings("settings-plugin", {
+        apiKey: "k",
+        mode: "turbo",
+      }),
+    /must be one of the declared options/,
+  );
+
+  // A valid update persists; the internal read exposes the secret.
+  await manager.setPluginSettings("settings-plugin", {
+    apiKey: "top-secret",
+    mode: "safe",
+  });
+  assert.equal(
+    (await manager.getPluginSettings("settings-plugin")).apiKey,
+    "top-secret",
+  );
+
+  const after = await manager.getPluginSettingsView("settings-plugin");
+  assert.equal(after?.values.mode, "safe");
+  assert.equal(after?.secrets.apiKey, true);
+  assert.equal(after?.values.apiKey, undefined);
+
+  // Omitting a secret keeps it; clearing it re-triggers `required`.
+  await manager.setPluginSettings("settings-plugin", { retries: 9 });
+  assert.equal(
+    (await manager.getPluginSettings("settings-plugin")).apiKey,
+    "top-secret",
+  );
+  await assert.rejects(
+    () => manager.setPluginSettings("settings-plugin", { apiKey: null }),
+    /Setting 'apiKey' is required/,
+  );
+
+  // A plugin without a schema has no settings surface.
+  const plain: ServerPlugin = {
+    metadata: {
+      id: "no-settings",
+      name: "Plain",
+      version: "1.0.0",
+      apiVersion: PLUGIN_API_VERSION,
+    },
+    init: () => {},
+  };
+  await manager.registerPlugin(plain);
+  assert.equal(await manager.getPluginSettingsView("no-settings"), null);
+  await assert.rejects(
+    () => manager.setPluginSettings("no-settings", {}),
+    /does not declare a settingsSchema/,
+  );
+});
+
 test("legacy files-only signatures still load after v2 support lands", async () => {
   const dataDir = tmpDataDir();
   const pluginDir = path.join(dataDir, "plugins", "legacy-signed");
