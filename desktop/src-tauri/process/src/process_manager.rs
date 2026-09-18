@@ -18,7 +18,7 @@ use dynfmt::Format;
 use dynfmt::SimpleCurlyFormat;
 use games::{library::push_game_update, state::GameStatusManager};
 use log::{debug, info, warn};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use shared_child::SharedChild;
 use tauri::{AppHandle, Emitter as _};
 
@@ -64,6 +64,27 @@ pub struct ProcessHandlerOption {
     id: String,
     name: String,
     description: String,
+}
+
+/// Optional launch-time overrides supplied by a client plugin's
+/// `RunnerProvider` through the plugin launch pipeline. Every field is
+/// additive: an absent override leaves the manifest/handler-derived launch
+/// command untouched, so plugins that do not opt in are unaffected.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct LaunchOverrides {
+    /// Replace the resolved executable.
+    pub executable: Option<String>,
+    /// Additional arguments appended after the resolved arguments.
+    pub arguments: Option<Vec<String>>,
+    /// Environment variables merged into the launch environment.
+    pub environment: Option<HashMap<String, String>>,
+    /// Override the working directory of the launched process.
+    pub working_directory: Option<String>,
+    /// Wrapper binary prepended to the resolved command (e.g. `umu-run`).
+    pub wrapper_bin: Option<String>,
+    /// Arguments passed to the wrapper before the resolved command.
+    pub wrapper_args: Option<Vec<String>>,
 }
 
 impl ProcessManager<'_> {
@@ -457,6 +478,7 @@ impl ProcessManager<'_> {
         &mut self,
         game_id: String,
         launch_process_index: usize,
+        overrides: Option<LaunchOverrides>,
     ) -> Result<(), ProcessError> {
         if self.processes.contains_key(&game_id) {
             return Err(ProcessError::AlreadyRunning);
@@ -705,6 +727,18 @@ impl ProcessManager<'_> {
 
         launch_parameters.0.ensure_executable()?;
 
+        if let Some(overrides) = overrides.as_ref() {
+            if let Some(working_dir) = overrides
+                .working_directory
+                .as_ref()
+                .filter(|value| !value.trim().is_empty())
+            {
+                launch_parameters.1 = PathBuf::from(working_dir);
+            }
+            apply_launch_overrides(&mut launch_parameters.0, &launch_parameters.1, overrides);
+            launch_parameters.0.ensure_executable()?;
+        }
+
         info!(
             "launching (in {}) with handler {} for platform {:?}: {:?}",
             launch_parameters.1.to_string_lossy(),
@@ -879,6 +913,46 @@ fn run_uninstaller_command(
     command.status().map_err(ProcessError::from)
 }
 
+/// Merge plugin-supplied [`LaunchOverrides`] into a resolved launch command.
+///
+/// Order is deliberate so a runner can both replace the executable and wrap it:
+/// the executable override wins first, then the wrapper prepends itself (and its
+/// arguments) around whatever command/args are current, then extra arguments are
+/// appended and environment entries merged.
+fn apply_launch_overrides(command: &mut ParsedCommand, base: &Path, overrides: &LaunchOverrides) {
+    if let Some(executable) = overrides
+        .executable
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+    {
+        command.command = executable.to_string();
+        command.make_command_absolute_if_local(base);
+    }
+
+    if let Some(wrapper) = overrides
+        .wrapper_bin
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+    {
+        let mut args = overrides.wrapper_args.clone().unwrap_or_default();
+        args.push(command.command.clone());
+        args.extend(command.args.iter().cloned());
+        command.command = wrapper.to_string();
+        command.args = args;
+        command.make_command_absolute_if_local(base);
+    }
+
+    if let Some(extra_args) = overrides.arguments.as_ref() {
+        command.args.extend(extra_args.iter().cloned());
+    }
+
+    if let Some(environment) = overrides.environment.as_ref() {
+        for (key, value) in environment {
+            command.env.push(format!("{key}={value}"));
+        }
+    }
+}
+
 #[cfg(test)]
 mod uninstaller_tests {
     use super::run_uninstaller_command;
@@ -926,5 +1000,77 @@ mod uninstaller_tests {
         )
         .expect("non-zero exit is not a ProcessError");
         assert!(!status.success());
+    }
+}
+
+#[cfg(test)]
+mod launch_override_tests {
+    use super::{LaunchOverrides, apply_launch_overrides};
+    use crate::parser::ParsedCommand;
+    use std::collections::HashMap;
+    use std::path::Path;
+
+    fn command() -> ParsedCommand {
+        ParsedCommand {
+            env: vec![],
+            command: "/games/example/game.exe".to_string(),
+            args: vec!["-dx11".to_string()],
+        }
+    }
+
+    #[test]
+    fn absent_overrides_leave_command_untouched() {
+        let mut cmd = command();
+        let overrides = LaunchOverrides::default();
+        apply_launch_overrides(&mut cmd, Path::new("/games/example"), &overrides);
+
+        assert_eq!(cmd.command, "/games/example/game.exe");
+        assert_eq!(cmd.args, vec!["-dx11"]);
+        assert!(cmd.env.is_empty());
+    }
+
+    #[test]
+    fn executable_override_replaces_the_resolved_command() {
+        let mut cmd = command();
+        let overrides = LaunchOverrides {
+            executable: Some("/opt/runner/game.exe".to_string()),
+            ..Default::default()
+        };
+        apply_launch_overrides(&mut cmd, Path::new("/games/example"), &overrides);
+
+        assert_eq!(cmd.command, "/opt/runner/game.exe");
+        assert_eq!(cmd.args, vec!["-dx11"]);
+    }
+
+    #[test]
+    fn wrapper_prepends_itself_and_arguments_around_the_game() {
+        let mut cmd = command();
+        let overrides = LaunchOverrides {
+            wrapper_bin: Some("umu-run".to_string()),
+            wrapper_args: Some(vec!["--verbose".to_string()]),
+            arguments: Some(vec!["-windowed".to_string()]),
+            ..Default::default()
+        };
+        apply_launch_overrides(&mut cmd, Path::new("/games/example"), &overrides);
+
+        assert_eq!(cmd.command, "umu-run");
+        assert_eq!(
+            cmd.args,
+            vec!["--verbose", "/games/example/game.exe", "-dx11", "-windowed"]
+        );
+    }
+
+    #[test]
+    fn environment_entries_are_merged() {
+        let mut cmd = command();
+        let mut environment = HashMap::new();
+        environment.insert("WINEPREFIX".to_string(), "/tmp/prefix".to_string());
+        let overrides = LaunchOverrides {
+            environment: Some(environment),
+            ..Default::default()
+        };
+        apply_launch_overrides(&mut cmd, Path::new("/games/example"), &overrides);
+
+        assert_eq!(cmd.env, vec!["WINEPREFIX=/tmp/prefix"]);
     }
 }

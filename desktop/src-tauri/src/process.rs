@@ -3,7 +3,7 @@ use std::sync::Arc;
 use process::{
     PROCESS_MANAGER,
     error::ProcessError,
-    process_manager::{LaunchOption, ProcessHandlerOption, ProcessManager},
+    process_manager::{LaunchOption, LaunchOverrides, ProcessHandlerOption, ProcessManager},
 };
 use serde::{Deserialize, Serialize};
 use tauri::AppHandle;
@@ -29,11 +29,15 @@ pub enum LaunchResult {
 }
 
 #[tauri::command]
-pub fn launch_game(id: String, index: usize) -> Result<LaunchResult, ProcessError> {
+pub fn launch_game(
+    id: String,
+    index: usize,
+    overrides: Option<LaunchOverrides>,
+) -> Result<LaunchResult, ProcessError> {
     let result = {
         let mut process_manager_lock = PROCESS_MANAGER.lock();
 
-        process_manager_lock.launch_process(id, index)
+        process_manager_lock.launch_process(id, index, overrides)
     };
 
     if let Err(err) = &result
