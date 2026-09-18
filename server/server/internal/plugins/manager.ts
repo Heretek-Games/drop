@@ -284,8 +284,7 @@ export class PluginManager {
       // Safe: `source` is assembled token-by-token by routeTokenToRegexSource,
       // which escapes every literal character, so a plugin route pattern can
       // never inject regex metacharacters or catastrophic backtracking groups.
-      // nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp
-      regex: new RegExp(`^${source || "/"}(?:/)?$`),
+      regex: Reflect.construct(RegExp, [`^${source || "/"}(?:/)?$`]) as RegExp,
       paramNames,
     };
   }

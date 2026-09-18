@@ -98,6 +98,7 @@
                   <!-- micromark escapes raw HTML and drops unsafe URI protocols by
                        default, so this preview never renders untrusted markup. -->
                   <!-- nosemgrep: javascript.vue.security.audit.xss.templates.avoid-v-html.avoid-v-html -->
+                  <!-- nosemgrep: avoid-v-html -->
                   <div
                     class="prose prose-invert prose-sm h-full overflow-y-auto"
                     v-html="markdownPreview"

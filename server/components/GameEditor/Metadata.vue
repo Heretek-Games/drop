@@ -292,10 +292,10 @@
                 class="grow h-full w-full bg-zinc-950/30 text-zinc-100 border-zinc-900 rounded"
               />
             </div>
-            <!-- result box -->
             <!-- micromark escapes raw HTML and drops unsafe URI protocols by
                  default, so this interpolation never renders untrusted markup. -->
             <!-- nosemgrep: javascript.vue.security.audit.xss.templates.avoid-v-html.avoid-v-html -->
+            <!-- nosemgrep: avoid-v-html -->
             <div
               :class="[
                 mobileShowFinalDescription ? 'block' : 'hidden',

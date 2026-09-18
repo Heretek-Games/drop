@@ -103,6 +103,7 @@
           <!-- micromark escapes raw HTML and drops unsafe URI protocols by
                default, so this interpolation never renders untrusted markup. -->
           <!-- nosemgrep: javascript.vue.security.audit.xss.templates.avoid-v-html.avoid-v-html -->
+          <!-- nosemgrep: avoid-v-html -->
           <p
             class="relative mt-1 text-xs text-zinc-400 line-clamp-2"
             v-html="formatExcerpt(article.description)"

@@ -13,7 +13,8 @@ export default function createDBSessionHandler(): SessionProvider {
   return {
     async setSession(token, session) {
       // Only the digest is persisted; the raw cookie value never touches the DB
-      // or the cache.
+      // or the cache. Note on semantics (finding N-16): `session.token` stores
+      // the sha256 digest of the token/cookie, not the plaintext bearer value.
       const key = hashToken(token);
       await cache.set(key, { ...session, token: key });
 

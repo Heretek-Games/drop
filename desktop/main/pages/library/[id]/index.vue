@@ -133,9 +133,10 @@
               <!-- micromark escapes raw HTML and drops unsafe URI protocols by
                  default, so this interpolation never renders untrusted markup. -->
               <!-- nosemgrep: javascript.vue.security.audit.xss.templates.avoid-v-html.avoid-v-html -->
+              <!-- nosemgrep: avoid-v-html -->
               <div
-                class="prose prose-invert prose-blue overflow-y-auto custom-scrollbar max-w-none"
                 v-html="htmlDescription"
+                class="prose prose-invert prose-blue overflow-y-auto custom-scrollbar max-w-none"
               ></div>
             </div>
           </div>

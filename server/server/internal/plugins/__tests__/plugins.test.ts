@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { createHash, createHmac } from "node:crypto";
+import { createHash, createHmac, randomBytes } from "node:crypto";
 import fs from "node:fs/promises";
 import http from "node:http";
 import os from "node:os";
@@ -1635,13 +1635,8 @@ test("legacy files-only signatures still load after v2 support lands", async () 
     aggregate.update("\0");
     aggregate.update(bytes);
   }
-  // Test fixture: this key is public by construction (it signs a deliberately
-  // legacy bundle inside this test) and is not a real secret.
-  // nosemgrep: javascript.lang.security.audit.hardcoded-hmac-key.hardcoded-hmac-key
-  const signingKey = "legacy-signing-key";
-  // Test fixture: this key is public by construction (it signs a deliberately
-  // legacy bundle inside this test) and is not a real secret.
-  // nosemgrep: javascript.lang.security.audit.hardcoded-hmac-key.hardcoded-hmac-key
+  // Test fixture: generate a random key per test run so it is not a hardcoded secret.
+  const signingKey = randomBytes(32).toString("hex");
   const legacySignature = createHmac("sha256", signingKey)
     .update(aggregate.digest("hex"))
     .digest("hex");

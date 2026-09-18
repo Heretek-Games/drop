@@ -469,9 +469,10 @@ fn well_known_platform_dirs() -> Vec<PathBuf> {
 /// so the security model of the bare-name allowlist is preserved: no user
 /// query can influence the fallback path.
 fn resolve_in_well_known_dirs(bin: &str, dirs: &[PathBuf]) -> Option<PathBuf> {
-    let candidates: Vec<String> = vec![bin.to_string()];
     #[cfg(windows)]
-    candidates.push(format!("{bin}.exe"));
+    let candidates: Vec<String> = vec![bin.to_string(), format!("{bin}.exe")];
+    #[cfg(not(windows))]
+    let candidates: Vec<String> = vec![bin.to_string()];
 
     for dir in dirs {
         for name in &candidates {
