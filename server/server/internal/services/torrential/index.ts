@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { randomBytes } from "node:crypto";
+import { randomBytes, timingSafeEqual } from "node:crypto";
 import { Service } from "..";
 import fs from "node:fs";
 import path from "node:path";
@@ -22,7 +22,7 @@ import {
 import manifestFetchProcessor from "./manifest-fetch";
 import serverGamesProcessor from "./server-games";
 
-const INTERNAL_DEPOT_URL = new URL(
+export const INTERNAL_DEPOT_URL = new URL(
   process.env.INTERNAL_DEPOT_URL ?? "http://localhost:5000",
 );
 
@@ -44,6 +44,22 @@ function resolveRpcSecret(): string {
 }
 
 const RPC_SECRET = resolveRpcSecret();
+
+export function getTorrentialRpcSecret(): string {
+  return RPC_SECRET;
+}
+
+export function verifyTorrentialRpcSecret(
+  candidate: string | null | undefined,
+): boolean {
+  if (!candidate) return false;
+  const trimmed = candidate.trim().toLowerCase();
+  if (!/^[0-9a-f]{64}$/.test(trimmed)) return false;
+  const a = Buffer.from(trimmed, "hex");
+  const b = Buffer.from(RPC_SECRET, "hex");
+  if (a.length !== b.length) return false;
+  return timingSafeEqual(a, b);
+}
 
 const TORRENTIAL_SPAWN_ENV = {
   ...process.env,

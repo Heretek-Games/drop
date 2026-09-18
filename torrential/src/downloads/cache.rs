@@ -148,10 +148,10 @@ impl ChunkCache {
     }
 
     fn index_file(path: &Path, inner: &mut Inner) {
-        let name = path
-            .file_name()
-            .map(|n| n.to_string_lossy().to_string())
-            .unwrap_or_default();
+        let name = match path.file_name() {
+            Some(n) => n.to_string_lossy().to_string(),
+            None => String::new(),
+        };
 
         if name.ends_with(PARTIAL_EXTENSION) {
             let _ = std::fs::remove_file(path);

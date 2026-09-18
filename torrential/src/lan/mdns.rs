@@ -206,9 +206,10 @@ pub fn parse_response(bytes: &[u8]) -> Vec<MdnsRecord> {
             },
             (TYPE_SRV, len) if len >= 6 => {
                 let port = read_u16(bytes, pos + 4).unwrap_or(0);
-                let target = read_name(bytes, pos + 6)
-                    .map(|(target, _)| normalize_name(&target))
-                    .unwrap_or_default();
+                let target = match read_name(bytes, pos + 6) {
+                    Some((target, _)) => normalize_name(&target),
+                    None => String::new(),
+                };
                 MdnsRecord::Srv { name, port, target }
             }
             (TYPE_TXT, _) => {

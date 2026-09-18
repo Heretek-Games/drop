@@ -15,6 +15,7 @@ use serde_json::Value;
 
 use crate::{
     conversions::convert_protobuf_manifest,
+    downloads::remote_backend::RemoteVersionBackend,
     proto::version::{VersionResponse, version_response::library_source::LibraryBackend},
     server::download::fetch_version_data,
     state::AppState,
@@ -79,11 +80,30 @@ fn create_backend(
 ) -> Result<Arc<dyn VersionBackend + Send + Sync>, StatusCode> {
     let options = serde_json::from_str::<Value>(&version_data.source.options)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    if let Some(remote_url) = options.get("remoteUrl").and_then(Value::as_str) {
+        let mut headers = reqwest::header::HeaderMap::new();
+        if let Some(obj) = options.get("remoteHeaders").and_then(Value::as_object) {
+            for (k, v) in obj {
+                if let Some(s) = v.as_str()
+                    && let (Ok(name), Ok(val)) = (
+                        reqwest::header::HeaderName::from_bytes(k.as_bytes()),
+                        reqwest::header::HeaderValue::from_str(s),
+                    )
+                {
+                    headers.insert(name, val);
+                }
+            }
+        }
+        let backend = RemoteVersionBackend::new(remote_url.to_string(), headers);
+        return Ok(Arc::new(backend));
+    }
+
     let base_path = options
         .get("baseDir")
         .and_then(Value::as_str)
         .ok_or_else(|| {
-            warn!("library source options are missing a string 'baseDir'");
+            warn!("library source options are missing a string 'baseDir' or 'remoteUrl'");
             StatusCode::INTERNAL_SERVER_ERROR
         })?;
 

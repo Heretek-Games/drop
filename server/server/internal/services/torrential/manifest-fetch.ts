@@ -16,6 +16,8 @@ import {
   DropBoundType,
   TorrentialBoundType,
 } from "../../proto/torrential/proto/core_pb";
+import { resolveRemoteDepot } from "../depot/remote";
+import { getTorrentialRpcSecret, INTERNAL_DEPOT_URL } from "./index";
 
 export default defineQueryProcessor({
   queryType: DropBoundType.VERSION_QUERY,
@@ -27,6 +29,8 @@ export default defineQueryProcessor({
         versionId: queryData.versionId,
       },
       select: {
+        gameId: true,
+        versionId: true,
         dropletManifest: true,
         versionPath: true,
         game: {
@@ -40,6 +44,29 @@ export default defineQueryProcessor({
     if (!version) throw new Error("Game version not found");
 
     const manifest = castManifest(version.dropletManifest);
+
+    const sourceOptions: Record<string, unknown> = {
+      ...(typeof version.game.library.options === "object" &&
+      version.game.library.options !== null
+        ? (version.game.library.options as Record<string, unknown>)
+        : {}),
+    };
+
+    const remoteDepot = await resolveRemoteDepot(
+      version.gameId,
+      version.versionId,
+    );
+    if (remoteDepot) {
+      if (remoteDepot.stream.pieceReader || !remoteDepot.stream.url) {
+        sourceOptions.remoteUrl = `${INTERNAL_DEPOT_URL.origin}/api/v1/internal/depot/${version.gameId}/${version.versionId}/range`;
+        sourceOptions.remoteHeaders = {
+          "x-torrential-secret": getTorrentialRpcSecret(),
+        };
+      } else {
+        sourceOptions.remoteUrl = remoteDepot.stream.url;
+        sourceOptions.remoteHeaders = remoteDepot.stream.headers ?? {};
+      }
+    }
 
     const mapEnum = (v: LibraryBackend) => {
       switch (v) {
@@ -77,12 +104,12 @@ export default defineQueryProcessor({
           ),
         }),
         source: create(VersionResponse_LibrarySourceSchema, {
-          options: JSON.stringify(version.game.library.options),
+          options: JSON.stringify(sourceOptions),
           id: version.game.library.id,
           backend: mapEnum(version.game.library.backend),
         }),
         libraryPath: version.game.libraryPath,
-        versionPath: version.versionPath!,
+        versionPath: version.versionPath ?? "",
       }),
     };
   },
