@@ -1610,6 +1610,114 @@ test("PluginManager registers and gates MetadataProvider, CloudSavePathResolver,
   assert.equal(manager.getPaymentGateway("stripe"), undefined);
 });
 
+test("PluginManager registers and gates AuthProvider, DepotStorageProvider, and scheduled tasks", async () => {
+  const manager = createTestManager();
+
+  let unregisterTask: (() => void) | undefined;
+  let taskRuns = 0;
+
+  const authPlugin: ServerPlugin = {
+    metadata: {
+      id: "ldap-auth",
+      name: "LDAP Auth",
+      version: "1.0.0",
+      apiVersion: PLUGIN_API_VERSION,
+      capabilities: ["auth:provider", "storage:depot"],
+    },
+    init: (ctx: PluginContext) => {
+      ctx.registerAuthProvider?.({
+        id: "ldap",
+        name: "LDAP",
+        authenticate: async (credentials) => ({
+          authenticated: credentials.username === "admin",
+          user: { externalId: "u1", username: credentials.username },
+        }),
+      });
+      ctx.registerDepotProvider?.({
+        id: "seedbox",
+        name: "Seedbox",
+        resolveDepotStream: async (depotId) => ({
+          url: `https://seed.example/${depotId}`,
+        }),
+      });
+      unregisterTask = ctx.scheduleTask?.("sync", 60_000, () => {
+        taskRuns += 1;
+      });
+    },
+  };
+
+  await manager.registerPlugin(authPlugin);
+
+  assert.equal(manager.getAuthProviders().length, 1);
+  assert.equal(manager.getAuthProvider("ldap")?.name, "LDAP");
+  const authResult = await manager
+    .getAuthProvider("ldap")!
+    .authenticate({ username: "admin", password: "secret" });
+  assert.equal(authResult.authenticated, true);
+
+  assert.equal(manager.getDepotProviders().length, 1);
+  assert.equal(manager.getDepotProvider("seedbox")?.name, "Seedbox");
+  const stream = await manager
+    .getDepotProvider("seedbox")!
+    .resolveDepotStream("depot-1", "game-1");
+  assert.equal(stream?.url, "https://seed.example/depot-1");
+
+  // The scheduleTask unregister callback stops the task before it ever fires.
+  assert.ok(unregisterTask);
+  unregisterTask();
+  assert.equal(taskRuns, 0);
+
+  // Capability gating fails closed for both new SPIs.
+  const deniedAuthPlugin: ServerPlugin = {
+    metadata: {
+      id: "denied-auth",
+      name: "Denied Auth",
+      version: "1.0.0",
+      apiVersion: PLUGIN_API_VERSION,
+      capabilities: ["routes"],
+    },
+    init: (ctx: PluginContext) => {
+      ctx.registerAuthProvider?.({
+        id: "denied",
+        name: "Denied",
+        authenticate: async () => ({ authenticated: false }),
+      });
+    },
+  };
+  await assert.rejects(
+    () => manager.registerPlugin(deniedAuthPlugin),
+    /attempted 'registerAuthProvider\(denied\)' without the 'auth:provider' capability/,
+  );
+
+  const deniedDepotPlugin: ServerPlugin = {
+    metadata: {
+      id: "denied-depot",
+      name: "Denied Depot",
+      version: "1.0.0",
+      apiVersion: PLUGIN_API_VERSION,
+      capabilities: ["routes"],
+    },
+    init: (ctx: PluginContext) => {
+      ctx.registerDepotProvider?.({
+        id: "denied",
+        name: "Denied",
+        resolveDepotStream: async () => null,
+      });
+    },
+  };
+  await assert.rejects(
+    () => manager.registerPlugin(deniedDepotPlugin),
+    /attempted 'registerDepotProvider\(denied\)' without the 'storage:depot' capability/,
+  );
+
+  // Unregister cleans up auth/depot entries.
+  await manager.unregisterPlugin("ldap-auth");
+  assert.equal(manager.getAuthProviders().length, 0);
+  assert.equal(manager.getAuthProvider("ldap"), undefined);
+  assert.equal(manager.getDepotProviders().length, 0);
+  assert.equal(manager.getDepotProvider("seedbox"), undefined);
+});
+
 test("legacy files-only signatures still load after v2 support lands", async () => {
   const dataDir = tmpDataDir();
   const pluginDir = path.join(dataDir, "plugins", "legacy-signed");

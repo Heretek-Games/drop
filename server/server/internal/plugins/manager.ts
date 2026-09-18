@@ -4,7 +4,7 @@ import * as path from "node:path";
 import * as fs from "node:fs/promises";
 import { pathToFileURL } from "node:url";
 import type { H3Event } from "h3";
-import { getQuery, createError } from "h3";
+import { getQuery, createError, readBody } from "h3";
 import type { Logger } from "pino";
 import { logger } from "../logging";
 import {
@@ -16,7 +16,9 @@ import { PluginRegistry } from "./registry";
 import { SIGNATURE_VERSION, signaturePayloadV2 } from "./signature";
 import { PLUGIN_API_VERSION } from "./types";
 import type {
+  AuthProvider,
   CloudSavePathResolver,
+  DepotStorageProvider,
   HttpMethod,
   MetadataProvider,
   PaymentGateway,
@@ -216,6 +218,19 @@ export class PluginManager {
   private readonly paymentGateways = new Map<
     string,
     { pluginId: string; gateway: PaymentGateway }
+  >();
+  private readonly authProviders = new Map<
+    string,
+    { pluginId: string; provider: AuthProvider }
+  >();
+  private readonly depotProviders = new Map<
+    string,
+    { pluginId: string; provider: DepotStorageProvider }
+  >();
+  /** Recurring plugin tasks keyed by `<pluginId>:<taskName>`. */
+  private readonly scheduledTasks = new Map<
+    string,
+    { pluginId: string; timer: NodeJS.Timeout }
   >();
   private readonly log: Logger = logger.child({ name: "plugin-manager" });
 
@@ -525,6 +540,86 @@ export class PluginManager {
         }
         this.paymentGateways.set(gateway.id, { pluginId: id, gateway });
         pluginLogger.debug(`Registered payment gateway: ${gateway.id}`);
+      },
+      registerAuthProvider: (provider: AuthProvider) => {
+        if (
+          !provider ||
+          typeof provider.id !== "string" ||
+          !provider.id.trim()
+        ) {
+          throw new Error("Auth provider must have a valid non-empty id");
+        }
+        if (!this.hasCapability(capabilities, "auth:provider")) {
+          throw new PluginCapabilityError(
+            id,
+            "auth:provider",
+            `registerAuthProvider(${provider.id})`,
+          );
+        }
+        const existing = this.authProviders.get(provider.id);
+        if (existing && existing.pluginId !== id) {
+          throw new Error(
+            `Auth provider '${provider.id}' is already claimed by plugin '${existing.pluginId}'`,
+          );
+        }
+        this.authProviders.set(provider.id, { pluginId: id, provider });
+        pluginLogger.debug(`Registered auth provider: ${provider.id}`);
+      },
+      registerDepotProvider: (provider: DepotStorageProvider) => {
+        if (
+          !provider ||
+          typeof provider.id !== "string" ||
+          !provider.id.trim()
+        ) {
+          throw new Error("Depot provider must have a valid non-empty id");
+        }
+        if (!this.hasCapability(capabilities, "storage:depot")) {
+          throw new PluginCapabilityError(
+            id,
+            "storage:depot",
+            `registerDepotProvider(${provider.id})`,
+          );
+        }
+        const existing = this.depotProviders.get(provider.id);
+        if (existing && existing.pluginId !== id) {
+          throw new Error(
+            `Depot provider '${provider.id}' is already claimed by plugin '${existing.pluginId}'`,
+          );
+        }
+        this.depotProviders.set(provider.id, { pluginId: id, provider });
+        pluginLogger.debug(`Registered depot provider: ${provider.id}`);
+      },
+      scheduleTask: (
+        name: string,
+        intervalMs: number,
+        task: () => Promise<void> | void,
+      ) => {
+        const key = `${id}:${name}`;
+        const existing = this.scheduledTasks.get(key);
+        if (existing) {
+          clearInterval(existing.timer);
+        }
+        const timer = setInterval(
+          () => {
+            void Promise.resolve()
+              .then(task)
+              .catch((err: unknown) => {
+                pluginLogger.error(
+                  `Scheduled task '${name}' failed: ${String(err)}`,
+                );
+              });
+          },
+          Math.max(1, intervalMs),
+        );
+        timer.unref?.();
+        this.scheduledTasks.set(key, { pluginId: id, timer });
+        return () => {
+          const entry = this.scheduledTasks.get(key);
+          if (entry) {
+            clearInterval(entry.timer);
+            this.scheduledTasks.delete(key);
+          }
+        };
       },
     };
   }
@@ -1105,6 +1200,14 @@ export class PluginManager {
     this.purgeOwned(this.metadataProviders, id);
     this.purgeOwned(this.cloudSaveResolvers, id);
     this.purgeOwned(this.paymentGateways, id);
+    this.purgeOwned(this.authProviders, id);
+    this.purgeOwned(this.depotProviders, id);
+    for (const [key, entry] of this.scheduledTasks) {
+      if (entry.pluginId === id) {
+        clearInterval(entry.timer);
+        this.scheduledTasks.delete(key);
+      }
+    }
     this.subscriptionAuthorizers.delete(id);
     const subscriptions = this.pluginEventSubscriptions.get(id) ?? [];
     for (const off of subscriptions) {
@@ -1522,6 +1625,22 @@ export class PluginManager {
     return this.paymentGateways.get(id)?.gateway;
   }
 
+  getAuthProviders(): AuthProvider[] {
+    return Array.from(this.authProviders.values()).map((e) => e.provider);
+  }
+
+  getAuthProvider(id: string): AuthProvider | undefined {
+    return this.authProviders.get(id)?.provider;
+  }
+
+  getDepotProviders(): DepotStorageProvider[] {
+    return Array.from(this.depotProviders.values()).map((e) => e.provider);
+  }
+
+  getDepotProvider(id: string): DepotStorageProvider | undefined {
+    return this.depotProviders.get(id)?.provider;
+  }
+
   private async resolveAuth(event: H3Event): Promise<PluginAuthContext> {
     if (this.options.authResolver) {
       return this.options.authResolver(event);
@@ -1593,9 +1712,15 @@ export class PluginManager {
       // Unauthenticated callers receive undefined userId
     }
 
+    const body = await readBody(event).catch(() => undefined);
+
     const context: RouteHandlerContext = {
       params: matchedParams,
       query: getQuery(event),
+      body,
+      readJson: async function <T = unknown>(): Promise<T> {
+        return body as T;
+      },
       userId,
       userAcls,
     };

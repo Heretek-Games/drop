@@ -28,7 +28,9 @@ export type ServerCapability =
   | "network"
   | "metadata:provider"
   | "cloudsave:provider"
-  | "commerce:payment";
+  | "commerce:payment"
+  | "auth:provider"
+  | "storage:depot";
 
 export type ClientCapability =
   | "ui:slot"
@@ -45,7 +47,8 @@ export type ClientCapability =
   | "system:command"
   | "metadata:provider"
   | "cloudsave:provider"
-  | "client:library-scan";
+  | "client:library-scan"
+  | "game:runner";
 
 export type PluginCapability = ServerCapability | ClientCapability;
 
@@ -58,6 +61,29 @@ export type PluginCapability = ServerCapability | ClientCapability;
 export type PluginTrust = "trusted" | "sandboxed";
 
 export type PluginStatus = "active" | "disabled" | "error" | "registered";
+
+export type PluginSettingsFieldType =
+  "string" | "password" | "number" | "boolean" | "select";
+
+export interface PluginSettingsOption {
+  label: string;
+  value: unknown;
+}
+
+export interface PluginSettingsField {
+  key: string;
+  label: string;
+  type: PluginSettingsFieldType;
+  description?: string;
+  default?: unknown;
+  options?: PluginSettingsOption[];
+  required?: boolean;
+}
+
+/** Declarative configuration schema rendered by host settings UIs. */
+export interface PluginSettingsSchema {
+  fields: PluginSettingsField[];
+}
 
 export interface PluginMetadata {
   id: string;
@@ -76,6 +102,8 @@ export interface PluginMetadata {
   targets?: PluginTarget[];
   capabilities?: PluginCapability[];
   enabled?: boolean;
+  /** Declarative configuration schema rendered automatically by host UIs. */
+  settingsSchema?: PluginSettingsSchema;
 }
 
 export interface PluginManifest extends PluginMetadata {
@@ -153,6 +181,13 @@ export interface PluginStateRecord {
 export interface RouteHandlerContext {
   params: Record<string, string>;
   query: Record<string, string | string[] | undefined>;
+  /** Request body, pre-parsed by the host for write methods. */
+  body?: unknown;
+  /**
+   * Parse the request body as JSON. Always provided by the host at runtime;
+   * optional in the type so plugin tests can build lightweight context literals.
+   */
+  readJson?<T = unknown>(): Promise<T>;
   userId?: string;
   userAcls?: string[];
 }
@@ -260,6 +295,24 @@ export interface PluginContext {
    * Requires the `commerce:payment` capability.
    */
   registerPaymentGateway(gateway: PaymentGateway): void;
+  /**
+   * Register an external authentication provider SPI implementation.
+   * Requires the `auth:provider` capability.
+   */
+  registerAuthProvider?(provider: AuthProvider): void;
+  /**
+   * Register a remote depot storage provider SPI implementation.
+   * Requires the `storage:depot` capability.
+   */
+  registerDepotProvider?(provider: DepotStorageProvider): void;
+  /**
+   * Schedule a recurring background task. Returns an unregister callback.
+   */
+  scheduleTask?(
+    name: string,
+    intervalMs: number,
+    task: () => Promise<void> | void,
+  ): () => void;
 }
 
 export interface ServerPlugin {
@@ -392,4 +445,52 @@ export interface PaymentGateway {
     payload: unknown,
     headers: Record<string, string>,
   ): Promise<PaymentWebhookResult>;
+}
+
+// ==========================================
+// Authentication Provider SPI (#12)
+// ==========================================
+
+export interface AuthUser {
+  externalId: string;
+  username: string;
+  email?: string;
+  displayName?: string;
+  groups?: string[];
+}
+
+export interface AuthResult {
+  authenticated: boolean;
+  user?: AuthUser;
+  error?: string;
+  /** True when the provider could not be reached (distinct from bad credentials). */
+  unavailable?: boolean;
+}
+
+export interface AuthProvider {
+  id: string;
+  name: string;
+  authenticate(credentials: {
+    username: string;
+    password: string;
+  }): Promise<AuthResult>;
+}
+
+// ==========================================
+// Remote Depot & Storage Provider SPI (#14, #17, #21)
+// ==========================================
+
+export interface DepotDownloadStream {
+  url?: string;
+  headers?: Record<string, string>;
+  pieceReader?: (offset: number, length: number) => Promise<Uint8Array>;
+}
+
+export interface DepotStorageProvider {
+  id: string;
+  name: string;
+  resolveDepotStream(
+    depotId: string,
+    gameId: string,
+  ): Promise<DepotDownloadStream | null>;
 }
