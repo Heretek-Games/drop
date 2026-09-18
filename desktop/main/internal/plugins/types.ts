@@ -23,7 +23,8 @@ export type ClientCapability =
   | "system:command"
   | "metadata:provider"
   | "cloudsave:provider"
-  | "client:library-scan";
+  | "client:library-scan"
+  | "game:runner";
 
 export type HttpMethod = "GET" | "POST" | "PUT" | "DELETE" | "PATCH" | "ALL";
 
@@ -43,6 +44,12 @@ export interface LaunchContext {
   gameDir: string;
   actionId?: string;
   metadata?: Record<string, unknown>;
+  /**
+   * Launch overrides contributed by pre-launch hooks and registered runner
+   * providers. The launch pipeline resolves and merges these before handing
+   * them to the host process launcher.
+   */
+  overrides?: LaunchOverrides;
 }
 
 export type LaunchStage =
@@ -193,6 +200,34 @@ export interface ClientPluginContext {
    * Requires the `cloudsave:provider` capability.
    */
   registerCloudSaveResolver?(resolver: CloudSavePathResolver): () => void;
+  /**
+   * Register a compatibility / emulation runner SPI implementation.
+   * Requires the `game:runner` capability.
+   */
+  registerRunnerProvider?(provider: RunnerProvider): () => void;
+  /**
+   * Programmatically launch a game through Drop's process manager. Overrides
+   * are merged into the resolved launch command by the native host.
+   */
+  launchGame?(gameId: string, overrides?: LaunchOverrides): Promise<void>;
+  /** Read-only library queries backed by the host library cache. */
+  library?: {
+    getGames(): Promise<unknown[]>;
+    getGame(gameId: string): Promise<unknown | null>;
+  };
+  /** Host UI notification and system-shell helpers. */
+  ui?: {
+    showToast(
+      message: string,
+      type?: "info" | "success" | "warn" | "error",
+    ): void;
+    openExternal(url: string): Promise<void>;
+  };
+  /** Local (client-side) plugin event bus. */
+  events?: {
+    on(event: string, listener: (data: unknown) => void): () => void;
+    emit(event: string, data: unknown): void;
+  };
   gameFs: ScopedGameFs;
   gameScanner: ScopedGameScanner;
   serverWs: ClientPluginWebSocket;
@@ -325,4 +360,32 @@ export interface Sidecar {
   name: string;
   /** Per-platform (and per-architecture) binaries for this sidecar. */
   targets: SidecarTarget[];
+}
+
+// ==========================================
+// Compatibility / Runner Provider SPI (#10, #13, #18)
+// ==========================================
+
+export type RunnerPlatform =
+  "windows" | "linux" | "macos" | "rom" | (string & {});
+
+/**
+ * Additive launch-time overrides a runner may request. Every field is optional;
+ * absent fields leave the manifest-derived launch command untouched.
+ */
+export interface LaunchOverrides {
+  executable?: string;
+  arguments?: string[];
+  environment?: Record<string, string>;
+  workingDirectory?: string;
+  wrapperBin?: string;
+  wrapperArgs?: string[];
+}
+
+export interface RunnerProvider {
+  id: string;
+  name: string;
+  supportedPlatforms: RunnerPlatform[];
+  detect(): Promise<{ available: boolean; version?: string }>;
+  resolveLaunch(context: LaunchContext): Promise<LaunchOverrides>;
 }

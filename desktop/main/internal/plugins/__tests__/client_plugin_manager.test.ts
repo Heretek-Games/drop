@@ -3,12 +3,15 @@ import assert from "node:assert/strict";
 import {
   ClientPluginManager,
   detectSidecarPlatform,
+  mergeLaunchOverrides,
 } from "../ClientPluginManager";
 import type {
   ClientPlugin,
   ClientPluginContext,
   CloudSavePathResolver,
+  LaunchOverrides,
   MetadataProvider,
+  RunnerProvider,
   Sidecar,
   StoreScanner,
 } from "../types";
@@ -454,6 +457,145 @@ test("ClientPluginManager aggregates PlayActions and tolerates failing providers
   assert.equal(actions.length, 2);
   assert.equal(actions[0]?.id, "action-offline");
   assert.equal(actions[1]?.id, "action-multiplayer");
+});
+
+/* ============================== Runner providers ========================== */
+
+test("ClientPluginManager gates and cleans up RunnerProvider registrations", async () => {
+  const manager = new ClientPluginManager();
+  const runner: RunnerProvider = {
+    id: "umu",
+    name: "UMU Launcher",
+    supportedPlatforms: ["linux"],
+    detect: async () => ({ available: true, version: "1.0.0" }),
+    resolveLaunch: async () => ({ wrapperBin: "umu-run" }),
+  };
+
+  const runnerPlugin: ClientPlugin = {
+    metadata: { id: "umu-plugin", name: "UMU", version: "1.0.0" },
+    init(ctx: ClientPluginContext) {
+      ctx.registerRunnerProvider?.(runner);
+    },
+  };
+
+  await manager.registerPlugin(runnerPlugin, "umu-plugin", [], ["game:runner"]);
+  assert.equal(manager.getRunnerProviders().length, 1);
+  assert.equal(manager.getRunnerProviders()[0]?.id, "umu");
+
+  // A plugin without the game:runner capability cannot register a runner.
+  const restrictedPlugin: ClientPlugin = {
+    metadata: { id: "restricted-runner", name: "Restricted", version: "1.0.0" },
+    init(ctx: ClientPluginContext) {
+      ctx.registerRunnerProvider?.(runner);
+    },
+  };
+  await manager.registerPlugin(
+    restrictedPlugin,
+    "restricted-runner",
+    [],
+    ["ui:slot"],
+  );
+  assert.equal(manager.getRunnerProviders().length, 1);
+
+  await manager.unregisterPlugin("umu-plugin");
+  assert.equal(manager.getRunnerProviders().length, 0);
+});
+
+test("executeLaunchPipeline merges runner, hook, and context overrides", async () => {
+  const manager = new ClientPluginManager();
+
+  const runnerPlugin: ClientPlugin = {
+    metadata: { id: "runner-plugin", name: "Runner", version: "1.0.0" },
+    init(ctx: ClientPluginContext) {
+      ctx.registerRunnerProvider?.({
+        id: "umu",
+        name: "UMU",
+        supportedPlatforms: ["linux", "windows"],
+        detect: async () => ({ available: true }),
+        resolveLaunch: async () => ({
+          wrapperBin: "umu-run",
+          environment: { PROTONPATH: "/opt/proton" },
+        }),
+      });
+      ctx.registerRunnerProvider?.({
+        id: "unavailable-runner",
+        name: "Unavailable",
+        supportedPlatforms: ["linux"],
+        detect: async () => ({ available: false }),
+        resolveLaunch: async () => {
+          throw new Error("resolveLaunch must not run when unavailable");
+        },
+      });
+      ctx.registerLaunchHook({
+        stage: "pre-launch:prepare",
+        execute: (launchContext) => {
+          launchContext.overrides = mergeLaunchOverrides(
+            launchContext.overrides ?? {},
+            { arguments: ["-dx11"] },
+          );
+        },
+      });
+    },
+  };
+
+  await manager.registerPlugin(
+    runnerPlugin,
+    "runner-plugin",
+    [],
+    ["game:runner", "game:launch-hook"],
+  );
+
+  const context = {
+    gameId: "game-42",
+    gameTitle: "Test Adventure",
+    gameDir: "/tmp/test-game",
+  };
+
+  let captured: LaunchOverrides | undefined;
+  const result = await manager.executeLaunchPipeline(
+    context,
+    async (overrides) => {
+      captured = overrides;
+      return "ok";
+    },
+  );
+
+  assert.equal(result, "ok");
+  assert.deepEqual(captured, {
+    arguments: ["-dx11"],
+    environment: { PROTONPATH: "/opt/proton" },
+    wrapperBin: "umu-run",
+    wrapperArgs: [],
+  });
+});
+
+test("executeLaunchPipeline returns undefined overrides when no runner applies", async () => {
+  const manager = new ClientPluginManager();
+  const context = {
+    gameId: "game-42",
+    gameTitle: "Test Adventure",
+    gameDir: "/tmp/test-game",
+  };
+
+  let captured: LaunchOverrides | undefined = { executable: "unset" };
+  await manager.executeLaunchPipeline(context, async (overrides) => {
+    captured = overrides;
+  });
+
+  assert.equal(captured, undefined);
+});
+
+test("mergeLaunchOverrides appends arguments and merges environment", () => {
+  const merged = mergeLaunchOverrides(
+    { arguments: ["-a"], environment: { A: "1" } },
+    { arguments: ["-b"], environment: { B: "2" }, executable: "run.exe" },
+  );
+
+  assert.deepEqual(merged, {
+    arguments: ["-a", "-b"],
+    environment: { A: "1", B: "2" },
+    executable: "run.exe",
+  });
 });
 
 /* ============================== sidecar staging =========================== */

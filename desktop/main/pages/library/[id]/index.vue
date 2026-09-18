@@ -969,10 +969,11 @@ async function launchIndex(index: number, actionId?: string) {
 
     const result = await clientPluginManager.executeLaunchPipeline(
       launchContext,
-      async () => {
+      async (overrides) => {
         return await invoke<LaunchResult>("launch_game", {
           id: game.id,
           index,
+          overrides,
         });
       },
     );

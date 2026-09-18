@@ -12,8 +12,10 @@ import type {
   HttpMethod,
   LaunchContext,
   LaunchHook,
+  LaunchOverrides,
   MetadataProvider,
   PlayAction,
+  RunnerProvider,
   ScopedGameFs,
   ScopedGameScanner,
   SidebarItem,
@@ -273,6 +275,30 @@ export class ClientPluginManager {
   public readonly cloudSaveResolvers = reactive<
     Array<{ pluginId: string; resolver: CloudSavePathResolver }>
   >([]);
+  public readonly runnerProviders = reactive<
+    Array<{ pluginId: string; provider: RunnerProvider }>
+  >([]);
+
+  /**
+   * Host launch delegate wired by the library view so `ctx.launchGame` can
+   * reuse the same launch-index resolution as the Play button. Falls back to a
+   * direct native launch (index 0) when unset.
+   */
+  private gameLaunchHandler?: (
+    gameId: string,
+    overrides?: LaunchOverrides,
+  ) => Promise<void>;
+
+  /** Local (client-side) plugin event bus, keyed by event name. */
+  private readonly localEvents = new Map<
+    string,
+    Set<(data: unknown) => void>
+  >();
+
+  /** Host UI toast listeners wired by the settings/library UI. */
+  public readonly toastListeners = new Set<
+    (message: string, type?: "info" | "success" | "warn" | "error") => void
+  >();
 
   public readonly serverWs: ClientPluginWebSocket = new TauriPluginWebSocket();
 
@@ -320,6 +346,17 @@ export class ClientPluginManager {
         );
       }
     }
+  }
+
+  /**
+   * Register the host launch delegate used by `ctx.launchGame`. The library
+   * view wires this so plugin-triggered launches resolve the same launch option
+   * index as the Play button; without it, launches fall back to index 0.
+   */
+  setGameLaunchHandler(
+    handler: (gameId: string, overrides?: LaunchOverrides) => Promise<void>,
+  ): void {
+    this.gameLaunchHandler = handler;
   }
 
   /**
@@ -473,6 +510,83 @@ export class ClientPluginManager {
           if (idx !== -1) this.cloudSaveResolvers.splice(idx, 1);
         };
       },
+      registerRunnerProvider: (provider: RunnerProvider) => {
+        if (capabilities.length > 0 && !capabilities.includes("game:runner")) {
+          throw new Error(
+            `Client plugin '${pluginId}' attempted 'registerRunnerProvider' without the 'game:runner' capability`,
+          );
+        }
+        if (
+          !provider ||
+          typeof provider.id !== "string" ||
+          !provider.id.trim()
+        ) {
+          throw new Error("Runner provider must have a valid non-empty id");
+        }
+        const entry = { pluginId, provider };
+        this.runnerProviders.push(entry);
+        return () => {
+          const idx = this.runnerProviders.indexOf(entry);
+          if (idx !== -1) this.runnerProviders.splice(idx, 1);
+        };
+      },
+      launchGame: async (gameId: string, overrides?: LaunchOverrides) => {
+        if (this.gameLaunchHandler) {
+          await this.gameLaunchHandler(gameId, overrides);
+          return;
+        }
+        await safeInvoke("launch_game", { id: gameId, index: 0, overrides });
+      },
+      library: {
+        getGames: async () => {
+          const response = await safeInvoke<{ library?: unknown[] }>(
+            "fetch_library",
+            {},
+            { library: [] },
+          );
+          return response?.library ?? [];
+        },
+        getGame: async (gameId: string) =>
+          await safeInvoke<unknown>("fetch_game", { gameId }, null),
+      },
+      ui: {
+        showToast: (
+          message: string,
+          type?: "info" | "success" | "warn" | "error",
+        ) => {
+          for (const listener of this.toastListeners) {
+            listener(message, type);
+          }
+          if (typeof window !== "undefined") {
+            window.dispatchEvent(
+              new CustomEvent("drop:plugin-toast", {
+                detail: { message, type: type ?? "info" },
+              }),
+            );
+          }
+        },
+        openExternal: async (url: string) => {
+          await safeInvoke("plugin_open_external", { url });
+        },
+      },
+      events: {
+        on: (event: string, listener: (data: unknown) => void) => {
+          if (!this.localEvents.has(event)) {
+            this.localEvents.set(event, new Set());
+          }
+          this.localEvents.get(event)!.add(listener);
+          return () => {
+            this.localEvents.get(event)?.delete(listener);
+          };
+        },
+        emit: (event: string, data: unknown) => {
+          const listeners = this.localEvents.get(event);
+          if (!listeners) return;
+          for (const listener of listeners) {
+            listener(data);
+          }
+        },
+      },
       gameFs: new TauriScopedGameFs(),
       gameScanner: new TauriScopedGameScanner(),
       serverWs: this.serverWs,
@@ -553,6 +667,7 @@ export class ClientPluginManager {
     this.purgeOwned(this.storeScanners, pluginId);
     this.purgeOwned(this.metadataProviders, pluginId);
     this.purgeOwned(this.cloudSaveResolvers, pluginId);
+    this.purgeOwned(this.runnerProviders, pluginId);
   }
 
   /** Removes every reactive entry owned by `pluginId` from `entries`. */
@@ -578,6 +693,10 @@ export class ClientPluginManager {
 
   getCloudSaveResolvers(): CloudSavePathResolver[] {
     return this.cloudSaveResolvers.map((e) => e.resolver);
+  }
+
+  getRunnerProviders(): RunnerProvider[] {
+    return this.runnerProviders.map((e) => e.provider);
   }
 
   /**
@@ -699,6 +818,44 @@ export class ClientPluginManager {
   }
 
   /**
+   * Resolve the launch overrides contributed by pre-launch hooks
+   * (`context.overrides`) and every applicable registered runner provider.
+   * Providers whose platform does not match the host, or that report
+   * unavailable, are skipped; a failing provider is logged and ignored so a
+   * broken runner cannot block a launch.
+   */
+  private async collectLaunchOverrides(
+    context: LaunchContext,
+  ): Promise<LaunchOverrides | undefined> {
+    const platform = detectSidecarPlatform()?.os;
+    let merged: LaunchOverrides = { ...(context.overrides ?? {}) };
+
+    for (const { provider } of this.runnerProviders) {
+      if (
+        platform &&
+        provider.supportedPlatforms.length > 0 &&
+        !provider.supportedPlatforms.includes(platform)
+      ) {
+        continue;
+      }
+      try {
+        const detection = await provider.detect();
+        if (!detection?.available) continue;
+        const overrides = await provider.resolveLaunch(context);
+        merged = mergeLaunchOverrides(merged, overrides);
+      } catch (err) {
+        console.warn(
+          "Runner provider failed to resolve launch overrides:",
+          provider.id,
+          err,
+        );
+      }
+    }
+
+    return Object.keys(merged).length > 0 ? merged : undefined;
+  }
+
+  /**
    * Playnite-style Game Launch Pipeline Coordinator.
    * Executes pre-launch hooks sorted by stage and priority.
    * If any pre-launch hook aborts, completed stages are rolled back in reverse order.
@@ -706,7 +863,7 @@ export class ClientPluginManager {
    */
   async executeLaunchPipeline<T>(
     context: LaunchContext,
-    launchFn: () => Promise<T>,
+    launchFn: (overrides?: LaunchOverrides) => Promise<T>,
   ): Promise<T> {
     const preLaunchStages: LaunchHook["stage"][] = [
       "pre-launch:validate",
@@ -723,11 +880,44 @@ export class ClientPluginManager {
     ];
 
     await this.runPreLaunchPipeline(this.sortHooks(preLaunchStages), context);
-    const launchResult = await launchFn();
+    const overrides = await this.collectLaunchOverrides(context);
+    const launchResult = await launchFn(overrides);
     await this.runPostExitPipeline(this.sortHooks(postExitStages), context);
 
     return launchResult;
   }
+}
+
+/**
+ * Merge two sets of launch overrides. Arguments and environment variables are
+ * additive; scalar fields (executable, working directory, wrapper) are replaced
+ * by the newer value.
+ */
+export function mergeLaunchOverrides(
+  base: LaunchOverrides,
+  extra: LaunchOverrides,
+): LaunchOverrides {
+  const merged: LaunchOverrides = { ...base };
+
+  if (extra.executable) merged.executable = extra.executable;
+  if (extra.arguments?.length) {
+    merged.arguments = [...(merged.arguments ?? []), ...extra.arguments];
+  }
+  if (extra.environment) {
+    merged.environment = {
+      ...(merged.environment ?? {}),
+      ...extra.environment,
+    };
+  }
+  if (extra.workingDirectory) merged.workingDirectory = extra.workingDirectory;
+  if (extra.wrapperBin) {
+    merged.wrapperBin = extra.wrapperBin;
+    merged.wrapperArgs = extra.wrapperArgs ? [...extra.wrapperArgs] : [];
+  } else if (extra.wrapperArgs?.length) {
+    merged.wrapperArgs = [...(merged.wrapperArgs ?? []), ...extra.wrapperArgs];
+  }
+
+  return merged;
 }
 
 // Global Singleton Instance
