@@ -166,6 +166,7 @@
       "method": {
         "signinDisabled": "Anmeldemethode nicht aktiviert"
       },
+      "providerUnavailable": "Der Authentifizierungsanbieter ist vorübergehend nicht erreichbar. Bitte versuche es später erneut.",
       "usernameTaken": "Nutzername bereits vergeben."
     },
     "backHome": "{arrow} Zurück zur Startseite",

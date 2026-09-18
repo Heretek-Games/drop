@@ -225,6 +225,7 @@
       "method": {
         "signinDisabled": "Sign in method not enabled"
       },
+      "providerUnavailable": "Authentication provider is temporarily unavailable. Please try again later.",
       "usernameTaken": "Username already taken."
     },
     "backHome": "{arrow} Back to home",
@@ -813,6 +814,11 @@
         "enabled": "Enabled",
         "enabledKey": "Enabled?",
         "oidc": "OpenID Connect",
+        "pluginDisable": "Disable",
+        "pluginEnable": "Enable",
+        "pluginProvidersDescription": "External providers registered by installed plugins. Only enabled providers are trusted by the login flow.",
+        "pluginProvidersEmpty": "No plugin authentication providers are registered.",
+        "pluginProvidersTitle": "Plugin authentication providers",
         "simple": "Simple (username/password)",
         "srOpenOptions": "Open options",
         "title": "Authentication"

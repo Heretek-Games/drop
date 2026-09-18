@@ -87,3 +87,17 @@ model Session {
 
     data Json // misc extra data
 }
+
+/// Maps an external authentication provider identity (e.g. an LDAP DN or
+/// directory object id) to a local Drop account. Multiple providers can map to
+/// the same user; a provider identity maps to exactly one user.
+model ExternalIdentity {
+    providerId String
+    externalId String
+    userId     String
+
+    user User @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+    @@id([providerId, externalId])
+    @@index([userId])
+}

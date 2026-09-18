@@ -1,3 +1,4 @@
+import { createError, type H3Event } from "h3";
 import { AuthMec } from "~/prisma/client/enums";
 import type { JsonArray } from "@prisma/client/runtime/client";
 import { type } from "arktype";
@@ -7,7 +8,10 @@ import authManager, {
   checkHashArgon2,
   checkHashBcrypt,
 } from "~/server/internal/auth";
+import { authenticateExternalUser } from "~/server/internal/auth/external";
 import { logger } from "~/server/internal/logging";
+
+type Translator = (key: string) => string;
 
 const signinValidator = type({
   username: "string",
@@ -18,7 +22,7 @@ const signinValidator = type({
 export default defineEventHandler<{
   body: typeof signinValidator.infer;
 }>(async (h3) => {
-  const t = await useTranslation(h3);
+  const t = (await useTranslation(h3)) as Translator;
 
   if (!authManager.getAuthProviders().Simple)
     throw createError({
@@ -54,18 +58,54 @@ export default defineEventHandler<{
     },
   });
 
-  if (!authMek)
-    throw createError({
-      statusCode: 401,
-      message: t("errors.auth.invalidUserOrPass"),
-    });
-
-  if (!authMek.user.enabled)
+  if (authMek && !authMek.user.enabled)
     throw createError({
       statusCode: 403,
       message: t("errors.auth.disabled"),
     });
 
+  // Try the local password first when the account has a local mechanism.
+  const localValid = authMek
+    ? await checkLocalPassword(authMek, body.password, t)
+    : false;
+
+  if (authMek && localValid) {
+    return await completeSignin(h3, authMek.userId, body.rememberMe);
+  }
+
+  // Fall back to providers an administrator has explicitly trusted. This covers
+  // both "no local account" and "local password did not match" so a directory
+  // account can supersede a stale local password.
+  const external = await authenticateExternalUser(body.username, body.password);
+  if (external.type === "success") {
+    return await completeSignin(h3, external.userId, body.rememberMe);
+  }
+
+  // Distinguish an unreachable provider from invalid credentials.
+  if (external.type === "unavailable")
+    throw createError({
+      statusCode: 503,
+      message: t("errors.auth.providerUnavailable"),
+    });
+
+  throw createError({
+    statusCode: 401,
+    message: t("errors.auth.invalidUserOrPass"),
+  });
+});
+
+interface LocalAuthMek {
+  userId: string;
+  version: number;
+  credentials: unknown;
+}
+
+/** Verify a local password hash, preserving the legacy bcrypt path. */
+async function checkLocalPassword(
+  authMek: LocalAuthMek,
+  password: string,
+  t: Translator,
+): Promise<boolean> {
   // LEGACY bcrypt
   if (authMek.version == 1) {
     const credentials = authMek.credentials as JsonArray | null;
@@ -77,23 +117,7 @@ export default defineEventHandler<{
         message: t("errors.auth.invalidPassState"),
       });
 
-    if (!(await checkHashBcrypt(body.password, hash)))
-      throw createError({
-        statusCode: 401,
-        message: t("errors.auth.invalidUserOrPass"),
-      });
-
-    // TODO: send user to forgot password screen or something to force them to change their password to new system
-    const result = await sessionHandler.signin(h3, authMek.userId, {
-      rememberMe: body.rememberMe ?? false,
-    });
-    if (result === "fail")
-      throw createError({
-        statusCode: 500,
-        message: "Failed to create session",
-      });
-
-    return { result: result, userId: authMek.userId };
+    return await checkHashBcrypt(password, hash);
   }
 
   // V2: argon2
@@ -104,16 +128,22 @@ export default defineEventHandler<{
       message: t("errors.auth.invalidPassState"),
     });
 
-  if (!(await checkHashArgon2(body.password, hash)))
+  return await checkHashArgon2(password, hash);
+}
+
+async function completeSignin(
+  h3: H3Event,
+  userId: string,
+  rememberMe: boolean | undefined,
+) {
+  const result = await sessionHandler.signin(h3, userId, {
+    rememberMe: rememberMe ?? false,
+  });
+  if (result === "fail")
     throw createError({
-      statusCode: 401,
-      message: t("errors.auth.invalidUserOrPass"),
+      statusCode: 500,
+      message: "Failed to create session",
     });
 
-  const result = await sessionHandler.signin(h3, authMek.userId, {
-    rememberMe: body.rememberMe ?? false,
-  });
-  if (result == "fail")
-    throw createError({ statusCode: 500, message: "Failed to create session" });
-  return { userId: authMek.userId, result };
-});
+  return { result, userId };
+}

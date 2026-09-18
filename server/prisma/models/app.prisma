@@ -2,6 +2,9 @@ model ApplicationSettings {
     timestamp DateTime @id @default(now())
 
     metadataProviders String[]
+    /// Explicit allow-list of plugin `AuthProvider` ids trusted for login.
+    /// Empty means external authentication is disabled (fail closed).
+    authProviders String[] @default([])
 
     saveSlotCountLimit   Int   @default(5)
     saveSlotSizeLimit    Float @default(10) // MB

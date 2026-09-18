@@ -157,6 +157,7 @@
       "method": {
         "signinDisabled": "Metoda logowania nie jest włączona"
       },
+      "providerUnavailable": "Dostawca uwierzytelniania jest tymczasowo niedostępny. Spróbuj ponownie później.",
       "usernameTaken": "Nazwa użytkownika jest już zajęta."
     },
     "backHome": "{arrow} Powrót do domu",

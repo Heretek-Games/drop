@@ -141,6 +141,7 @@
       "method": {
         "signinDisabled": "No entrance through these parts, arr!"
       },
+      "providerUnavailable": "The quartermaster be unreachable right now. Try again later, matey.",
       "usernameTaken": "We already have a scallywag with that 'ere name of yours."
     },
     "backHome": "{arrow} Back to yer safe harbor",

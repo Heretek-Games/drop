@@ -105,6 +105,56 @@
         </dl>
       </li>
     </ul>
+
+    <div class="mt-10 max-w-2xl lg:mx-0">
+      <h3 class="text-base font-semibold text-zinc-100">
+        {{ $t("users.admin.authentication.pluginProvidersTitle") }}
+      </h3>
+      <p class="mt-1 text-sm text-zinc-400">
+        {{ $t("users.admin.authentication.pluginProvidersDescription") }}
+      </p>
+    </div>
+
+    <div
+      v-if="pluginProviders.length === 0"
+      class="mt-4 rounded-xl border border-dashed border-zinc-700 p-6 text-center text-sm text-zinc-400"
+    >
+      {{ $t("users.admin.authentication.pluginProvidersEmpty") }}
+    </div>
+    <ul
+      v-else
+      class="mt-4 divide-y divide-zinc-800 rounded-xl border border-zinc-800 bg-zinc-900"
+    >
+      <li
+        v-for="provider in pluginProviders"
+        :key="provider.id"
+        class="flex items-center justify-between gap-x-4 px-6 py-4"
+      >
+        <div>
+          <div class="text-sm font-medium text-zinc-100">
+            {{ provider.name }}
+          </div>
+          <div class="font-mono text-xs text-zinc-500">{{ provider.id }}</div>
+        </div>
+        <button
+          type="button"
+          :disabled="savingProvider === provider.id"
+          :class="[
+            provider.enabled
+              ? 'bg-zinc-700 text-zinc-200 hover:bg-zinc-600'
+              : 'bg-blue-600 text-white hover:bg-blue-500',
+            'rounded px-3 py-1.5 text-xs font-semibold transition disabled:opacity-50',
+          ]"
+          @click="toggleProvider(provider)"
+        >
+          {{
+            provider.enabled
+              ? $t("users.admin.authentication.pluginDisable")
+              : $t("users.admin.authentication.pluginEnable")
+          }}
+        </button>
+      </li>
+    </ul>
   </div>
 </template>
 
@@ -127,6 +177,45 @@ definePageMeta({
 const { t } = useI18n();
 
 const enabledMechanisms = await $dropFetch("/api/v1/admin/auth");
+
+interface PluginAuthProvider {
+  id: string;
+  name: string;
+  enabled: boolean;
+}
+
+const pluginProviders = ref<PluginAuthProvider[]>(
+  (enabledMechanisms?.pluginProviders as PluginAuthProvider[] | undefined) ??
+    [],
+);
+const savingProvider = ref<string | null>(null);
+
+async function toggleProvider(provider: PluginAuthProvider) {
+  savingProvider.value = provider.id;
+  try {
+    const desired = pluginProviders.value
+      .map((entry) =>
+        entry.id === provider.id
+          ? { ...entry, enabled: !entry.enabled }
+          : entry,
+      )
+      .filter((entry) => entry.enabled)
+      .map((entry) => entry.id);
+
+    const res = await $dropFetch<{ providers: string[] }>(
+      "/api/v1/admin/auth/providers",
+      { method: "PATCH", body: { providers: desired } },
+    );
+
+    const enabled = new Set(res.providers ?? []);
+    pluginProviders.value = pluginProviders.value.map((entry) => ({
+      ...entry,
+      enabled: enabled.has(entry.id),
+    }));
+  } finally {
+    savingProvider.value = null;
+  }
+}
 
 const authenticationMechanisms: Array<{
   name: string;
