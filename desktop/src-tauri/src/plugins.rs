@@ -415,6 +415,22 @@ pub fn plugin_sidecar_clear(app: AppHandle, plugin_id: String) -> Result<(), Str
     Ok(())
 }
 
+/// Open an external URL in the user's default browser on behalf of a client
+/// plugin (`ctx.ui.openExternal`). Restricted to http(s) so a plugin cannot
+/// launch arbitrary local protocol handlers.
+#[tauri::command]
+pub fn plugin_open_external(app: AppHandle, url: String) -> Result<(), String> {
+    let parsed = url::Url::parse(&url).map_err(|err| err.to_string())?;
+    if !matches!(parsed.scheme(), "http" | "https") {
+        return Err(format!("refusing to open non-http(s) URL: {url}"));
+    }
+
+    use tauri_plugin_opener::OpenerExt;
+    app.opener()
+        .open_url(parsed.as_str(), None::<&str>)
+        .map_err(|err| err.to_string())
+}
+
 /// Well-known installation directories where CLI binaries for system daemons
 /// live outside an ordinary desktop session's inherited `PATH`.
 ///

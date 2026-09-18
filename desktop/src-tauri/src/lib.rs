@@ -278,6 +278,7 @@ pub fn run() {
             plugin_system_run,
             plugin_sidecar_stage,
             plugin_sidecar_clear,
+            plugin_open_external,
             // Library
             fetch_library,
             fetch_game,
