@@ -222,6 +222,122 @@
 
   <div class="mt-8 space-y-4">
     <h4 class="text-sm font-semibold text-zinc-100">Extension Settings</h4>
+
+    <div
+      v-for="plugin in settingsPlugins"
+      :key="plugin.id"
+      class="space-y-3 rounded-xl border border-zinc-800 bg-zinc-900/60 p-4"
+    >
+      <button
+        type="button"
+        class="flex w-full items-center justify-between text-left"
+        @click="toggleSettings(plugin)"
+      >
+        <span class="text-xs font-semibold text-zinc-100">{{
+          plugin.name
+        }}</span>
+        <span class="text-[11px] text-zinc-400">
+          {{ panelFor(plugin.id).open ? "Hide" : "Configure" }}
+        </span>
+      </button>
+
+      <div v-if="panelFor(plugin.id).open" class="space-y-3 pt-1">
+        <p v-if="panelFor(plugin.id).loading" class="text-xs text-zinc-400">
+          Loading settings&hellip;
+        </p>
+        <template v-else>
+          <div
+            v-for="field in plugin.settingsSchema?.fields ?? []"
+            :key="field.key"
+            class="space-y-1"
+          >
+            <label
+              v-if="field.type === 'boolean'"
+              :for="`${plugin.id}-${field.key}`"
+              class="flex items-center gap-x-2 text-xs font-medium text-zinc-300"
+            >
+              <input
+                :id="`${plugin.id}-${field.key}`"
+                v-model="panelFor(plugin.id).values[field.key]"
+                type="checkbox"
+                class="size-4 rounded border-zinc-600 bg-zinc-800 text-purple-600 focus:ring-0"
+              />
+              <span>
+                {{ field.label }}
+                <span v-if="field.required" class="text-red-400">*</span>
+              </span>
+            </label>
+            <template v-else>
+              <label
+                :for="`${plugin.id}-${field.key}`"
+                class="block text-xs font-medium text-zinc-300"
+              >
+                {{ field.label }}
+                <span v-if="field.required" class="text-red-400">*</span>
+              </label>
+              <input
+                v-if="field.type === 'password'"
+                :id="`${plugin.id}-${field.key}`"
+                v-model="passwordInputs[passwordInputId(plugin.id, field.key)]"
+                type="password"
+                autocomplete="new-password"
+                :placeholder="
+                  panelFor(plugin.id).secrets[field.key]
+                    ? '•••••••• (leave blank to keep)'
+                    : 'Not set'
+                "
+                class="block w-full rounded-md border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-xs text-zinc-200 placeholder-zinc-500 focus:border-purple-500 focus:outline-none"
+              />
+              <input
+                v-else-if="field.type === 'number'"
+                :id="`${plugin.id}-${field.key}`"
+                v-model.number="panelFor(plugin.id).values[field.key]"
+                type="number"
+                class="block w-full rounded-md border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-xs text-zinc-200 focus:border-purple-500 focus:outline-none"
+              />
+              <input
+                v-else-if="field.type === 'string'"
+                :id="`${plugin.id}-${field.key}`"
+                v-model="panelFor(plugin.id).values[field.key]"
+                type="text"
+                class="block w-full rounded-md border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-xs text-zinc-200 focus:border-purple-500 focus:outline-none"
+              />
+              <select
+                v-else-if="field.type === 'select'"
+                :id="`${plugin.id}-${field.key}`"
+                v-model="panelFor(plugin.id).values[field.key]"
+                class="block w-full rounded-md border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-xs text-zinc-200 focus:border-purple-500 focus:outline-none"
+              >
+                <option
+                  v-for="option in field.options ?? []"
+                  :key="String(option.value)"
+                  :value="option.value"
+                >
+                  {{ option.label }}
+                </option>
+              </select>
+            </template>
+            <p v-if="field.description" class="text-[11px] text-zinc-500">
+              {{ field.description }}
+            </p>
+          </div>
+
+          <p v-if="panelFor(plugin.id).error" class="text-xs text-red-400">
+            {{ panelFor(plugin.id).error }}
+          </p>
+
+          <button
+            type="button"
+            :disabled="panelFor(plugin.id).saving"
+            class="rounded-md bg-purple-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-purple-500 disabled:opacity-50"
+            @click="saveSettings(plugin)"
+          >
+            {{ panelFor(plugin.id).saving ? "Saving…" : "Save settings" }}
+          </button>
+        </template>
+      </div>
+    </div>
+
     <PluginSlot name="settings:tabs" />
   </div>
 
@@ -314,6 +430,16 @@ async function handleLoadDevPlugin() {
   }
 }
 
+export interface PluginSettingsField {
+  key: string;
+  label: string;
+  type: "string" | "password" | "number" | "boolean" | "select";
+  description?: string;
+  default?: unknown;
+  options?: Array<{ label: string; value: unknown }>;
+  required?: boolean;
+}
+
 export interface PluginItem {
   id: string;
   name: string;
@@ -324,11 +450,51 @@ export interface PluginItem {
   capabilities?: string[];
   status: "active" | "disabled" | "error";
   error?: string;
+  settingsSchema?: { fields: PluginSettingsField[] };
 }
 
 const plugins = ref<PluginItem[]>([]);
 const isLoading = ref(false);
 const error = ref<string | null>(null);
+
+interface SettingsPanelState {
+  open: boolean;
+  loaded: boolean;
+  loading: boolean;
+  saving: boolean;
+  error?: string;
+  values: Record<string, unknown>;
+  secrets: Record<string, boolean>;
+}
+
+const settingsPanels = ref<Record<string, SettingsPanelState>>({});
+const passwordInputs = ref<Record<string, string>>({});
+
+const EMPTY_PANEL: SettingsPanelState = {
+  open: false,
+  loaded: false,
+  loading: false,
+  saving: false,
+  values: {},
+  secrets: {},
+};
+
+function panelFor(id: string): SettingsPanelState {
+  return settingsPanels.value[id] ?? EMPTY_PANEL;
+}
+
+function ensurePanel(id: string): SettingsPanelState {
+  settingsPanels.value[id] ??= { ...EMPTY_PANEL };
+  return settingsPanels.value[id];
+}
+
+function passwordInputId(id: string, key: string): string {
+  return `${id}:${key}`;
+}
+
+const settingsPlugins = computed(() =>
+  plugins.value.filter((plugin) => plugin.settingsSchema?.fields?.length),
+);
 
 async function fetchPlugins() {
   isLoading.value = true;
@@ -396,6 +562,80 @@ async function handleRemovePlugin(id: string) {
     error.value = (e as string).toString();
   } finally {
     isLoading.value = false;
+  }
+}
+
+async function toggleSettings(plugin: PluginItem) {
+  const panel = ensurePanel(plugin.id);
+  panel.open = !panel.open;
+  if (panel.open && !panel.loaded) {
+    await loadSettings(plugin.id);
+  }
+}
+
+async function loadSettings(id: string) {
+  const panel = ensurePanel(id);
+  panel.loading = true;
+  panel.error = undefined;
+  try {
+    const res = await invoke<{
+      values: Record<string, unknown>;
+      secrets: Record<string, boolean>;
+    }>("plugin_request", {
+      pluginId: id,
+      method: "GET",
+      path: "settings",
+    });
+    panel.values = { ...res.values };
+    panel.secrets = res.secrets ?? {};
+    panel.loaded = true;
+  } catch (e) {
+    panel.error = (e as string).toString();
+  } finally {
+    panel.loading = false;
+  }
+}
+
+async function saveSettings(plugin: PluginItem) {
+  const panel = ensurePanel(plugin.id);
+  panel.saving = true;
+  panel.error = undefined;
+
+  const payload: Record<string, unknown> = {};
+  for (const field of plugin.settingsSchema?.fields ?? []) {
+    if (field.type === "password") {
+      // Empty input keeps the stored secret; only send a new value when typed.
+      const typed = passwordInputs.value[passwordInputId(plugin.id, field.key)];
+      if (typed) payload[field.key] = typed;
+      continue;
+    }
+    payload[field.key] = panel.values[field.key];
+  }
+
+  try {
+    const res = await invoke<{
+      values: Record<string, unknown>;
+      secrets: Record<string, boolean>;
+    }>("plugin_request", {
+      pluginId: plugin.id,
+      method: "PATCH",
+      path: "settings",
+      body: { values: payload },
+    });
+    panel.values = { ...res.values };
+    panel.secrets = res.secrets ?? {};
+    for (const field of plugin.settingsSchema?.fields ?? []) {
+      if (field.type === "password") {
+        Reflect.deleteProperty(
+          passwordInputs.value,
+          passwordInputId(plugin.id, field.key),
+        );
+      }
+    }
+  } catch (e) {
+    panel.error = (e as string).toString();
+  } finally {
+    panel.saving = false;
   }
 }
 

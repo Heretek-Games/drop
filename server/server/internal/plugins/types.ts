@@ -6,13 +6,9 @@ import type { Logger } from "pino";
  * contract changes incompatibly. Plugins declare the version they were built
  * against in `metadata.apiVersion`; mismatches are rejected at registration.
  */
-/**
- * Current plugin API version. Bump this when `PluginContext` or the manifest
- * contract changes incompatibly. Plugins declare the version they were built
- * against in `metadata.apiVersion`; mismatches are rejected at registration.
- */
-export const PLUGIN_API_VERSION = 2;
-export const SUPPORTED_API_VERSIONS = [1, 2] as const;
+export const PLUGIN_API_VERSION = 3;
+/** Versions the host accepts; `3` adds `PluginContext.settings`. */
+export const SUPPORTED_API_VERSIONS = [1, 2, 3] as const;
 
 export type HttpMethod = "GET" | "POST" | "PUT" | "DELETE" | "PATCH" | "ALL";
 
@@ -248,6 +244,14 @@ export interface PluginContext {
   id: string;
   logger: Logger;
   storage: PluginStorage;
+  /**
+   * Read-only snapshot of the values the host persisted for this plugin's
+   * `metadata.settingsSchema`, loaded before `init`. Includes `password`
+   * fields because plugins run trusted in-process; the host redacts those
+   * values from settings API responses and logs. Undefined when the plugin
+   * declares no `settingsSchema`.
+   */
+  settings?: Readonly<Record<string, unknown>>;
   registerRoute(
     method: HttpMethod,
     pattern: string,
