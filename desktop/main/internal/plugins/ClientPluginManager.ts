@@ -713,6 +713,7 @@ export class ClientPluginManager {
       "pre-launch:prepare",
       "pre-launch:stage",
       "pre-launch:network",
+      "pre-launch:network-post",
     ];
 
     const postExitStages: LaunchHook["stage"][] = [

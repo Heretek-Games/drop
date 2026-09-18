@@ -50,6 +50,7 @@ export type LaunchStage =
   | "pre-launch:prepare"
   | "pre-launch:stage"
   | "pre-launch:network"
+  | "pre-launch:network-post"
   | "launch"
   | "post-exit:cleanup"
   | "post-exit:restore"

@@ -337,6 +337,84 @@ test("ClientPluginManager pre-launch failure aborts launch and rolls back comple
   assert.deepEqual(stagesExecuted, ["validate", "stage"]);
 });
 
+test("ClientPluginManager runs pre-launch:network-post after pre-launch:network and before launch", async () => {
+  const manager = new ClientPluginManager();
+  const stagesExecuted: string[] = [];
+
+  const meshPlugin: ClientPlugin = {
+    metadata: {
+      id: "mesh-plugin",
+      name: "Mesh Plugin",
+      version: "1.0.0",
+    },
+    init(ctx: ClientPluginContext) {
+      ctx.registerLaunchHook({
+        stage: "pre-launch:network",
+        order: 10,
+        execute: () => {
+          stagesExecuted.push("network");
+        },
+      });
+    },
+  };
+
+  const gsePlugin: ClientPlugin = {
+    metadata: {
+      id: "gse-plugin",
+      name: "GSE Plugin",
+      version: "1.0.0",
+    },
+    init(ctx: ClientPluginContext) {
+      ctx.registerLaunchHook({
+        stage: "pre-launch:validate",
+        order: 10,
+        execute: () => {
+          stagesExecuted.push("validate");
+        },
+      });
+      ctx.registerLaunchHook({
+        stage: "pre-launch:network-post",
+        order: 50,
+        execute: () => {
+          stagesExecuted.push("network-post");
+        },
+      });
+    },
+  };
+
+  await manager.registerPlugin(
+    meshPlugin,
+    "mesh-plugin",
+    [],
+    ["game:launch-hook"],
+  );
+  await manager.registerPlugin(
+    gsePlugin,
+    "gse-plugin",
+    [],
+    ["game:launch-hook"],
+  );
+
+  const context = {
+    gameId: "game-42",
+    gameTitle: "Test Adventure",
+    gameDir: "/tmp/test-game",
+  };
+
+  const result = await manager.executeLaunchPipeline(context, async () => {
+    stagesExecuted.push("launched");
+    return "ok";
+  });
+
+  assert.equal(result, "ok");
+  assert.deepEqual(stagesExecuted, [
+    "validate",
+    "network",
+    "network-post",
+    "launched",
+  ]);
+});
+
 test("ClientPluginManager aggregates PlayActions and tolerates failing providers", async () => {
   const manager = new ClientPluginManager();
 
