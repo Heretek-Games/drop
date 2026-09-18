@@ -41,6 +41,7 @@ class ApplicationConfiguration {
     const initialState = await prisma.applicationSettings.create({
       data: {
         metadataProviders: [],
+        authProviders: [],
       },
     });
 

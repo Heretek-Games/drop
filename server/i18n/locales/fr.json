@@ -166,6 +166,7 @@
       "method": {
         "signinDisabled": "Méthode de connexion non activée"
       },
+      "providerUnavailable": "Le fournisseur d'authentification est temporairement indisponible. Veuillez réessayer plus tard.",
       "usernameTaken": "Nom d'utilisateur déjà pris."
     },
     "backHome": "{arrow} Retour a l'accueil",

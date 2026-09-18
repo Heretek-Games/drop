@@ -11,6 +11,8 @@ model User {
     authMecs LinkedAuthMec[]
     mfas     LinkedMFAMec[]
 
+    externalIdentities ExternalIdentity[]
+
     clients       Client[]
     notifications Notification[]
     collections   Collection[]
