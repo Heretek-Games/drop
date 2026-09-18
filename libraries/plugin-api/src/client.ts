@@ -35,6 +35,7 @@ export type LaunchStage =
   | "pre-launch:prepare"
   | "pre-launch:stage"
   | "pre-launch:network"
+  | "pre-launch:network-post"
   | "launch"
   | "post-exit:cleanup"
   | "post-exit:restore"
@@ -145,6 +146,7 @@ export interface ClientPluginContext {
   id: string;
   logger: PluginLogger;
   storage: ClientPluginStorage;
+  settings?: Readonly<Record<string, unknown>>;
   registerSlot(
     slot: UISlotName,
     component: unknown,
@@ -172,6 +174,15 @@ export interface ClientPluginContext {
    * Requires the `cloudsave:provider` capability.
    */
   registerCloudSaveResolver?(resolver: CloudSavePathResolver): () => void;
+  /**
+   * Register a game compatibility runner provider SPI implementation.
+   * Requires the `game:runner` capability.
+   */
+  registerRunnerProvider?(provider: RunnerProvider): () => void;
+  launchGame?(gameId: string, overrides?: LaunchOverrides): Promise<void>;
+  library?: unknown;
+  ui?: unknown;
+  events?: unknown;
   gameFs: ScopedGameFs;
   gameScanner: ScopedGameScanner;
   serverWs: ClientPluginWebSocket;
@@ -272,3 +283,32 @@ export interface CloudSavePathResolver {
     gameContext: GameInstallContext,
   ): Promise<CloudSavePattern[]>;
 }
+
+// ==========================================
+// Compatibility & Runner Provider SPI (#10, #13, #18)
+// ==========================================
+
+export type RunnerPlatform =
+  | "windows"
+  | "linux"
+  | "macos"
+  | "rom"
+  | (string & {});
+
+export interface LaunchOverrides {
+  executable?: string;
+  arguments?: string[];
+  environment?: Record<string, string>;
+  workingDirectory?: string;
+  wrapperBin?: string;
+  wrapperArgs?: string[];
+}
+
+export interface RunnerProvider {
+  id: string;
+  name: string;
+  supportedPlatforms: RunnerPlatform[];
+  detect(): Promise<{ available: boolean; version?: string }>;
+  resolveLaunch(context: LaunchContext): Promise<LaunchOverrides>;
+}
+

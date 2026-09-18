@@ -1,7 +1,9 @@
 import type { H3Event } from "h3";
 import type { Logger } from "pino";
 import type {
+  AuthProvider,
   CloudSavePathResolver,
+  DepotStorageProvider,
   HttpMethod,
   MetadataProvider,
   PaymentGateway,
@@ -21,8 +23,8 @@ export type * from "@drop/plugin-api";
  * contract changes incompatibly. Plugins declare the version they were built
  * against in `metadata.apiVersion`; mismatches are rejected at registration.
  */
-export const PLUGIN_API_VERSION = 2;
-export const SUPPORTED_API_VERSIONS = [1, 2] as const;
+export const PLUGIN_API_VERSION = 3;
+export const SUPPORTED_API_VERSIONS = [1, 2, 3] as const;
 
 export interface RouteHandlerContext {
   params: Record<string, string>;
@@ -87,6 +89,7 @@ export interface PluginContext {
   id: string;
   logger: Logger;
   storage: PluginStorage;
+  settings?: Readonly<Record<string, unknown>>;
   registerRoute(
     method: HttpMethod,
     pattern: string,
@@ -134,6 +137,16 @@ export interface PluginContext {
    * Requires the `commerce:payment` capability.
    */
   registerPaymentGateway(gateway: PaymentGateway): void;
+  /**
+   * Register an authentication provider SPI implementation.
+   * Requires the `auth:provider` capability.
+   */
+  registerAuthProvider?(provider: AuthProvider): void;
+  /**
+   * Register a remote depot storage provider SPI implementation.
+   * Requires the `storage:depot` capability.
+   */
+  registerDepotProvider?(provider: DepotStorageProvider): void;
 }
 
 export interface ServerPlugin {

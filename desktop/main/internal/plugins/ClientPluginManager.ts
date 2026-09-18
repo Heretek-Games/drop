@@ -99,6 +99,7 @@ export class ClientPluginManager {
           console.debug(`[Plugin:${pluginId}] ${msg}`, ...args),
       },
       storage: new TauriPluginStorage(pluginId),
+      settings: Object.freeze({}),
       registerSlot: (slot, component, options) => {
         if (!this.slots[slot]) {
           this.slots[slot] = [];

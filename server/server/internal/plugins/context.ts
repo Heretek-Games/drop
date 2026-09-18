@@ -207,6 +207,7 @@ export async function createPluginContext(
     id,
     logger: pluginLogger,
     storage,
+    settings: Object.freeze({}),
     registerRoute: (method, pattern, handler) => {
       if (!hasCapability(capabilities, "routes")) {
         throw new PluginCapabilityError(

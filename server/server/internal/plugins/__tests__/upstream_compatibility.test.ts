@@ -6,9 +6,13 @@ import * as path from "node:path";
 import { PluginManager } from "../manager";
 import {
   PLUGIN_API_VERSION,
+  SUPPORTED_API_VERSIONS,
   type ServerPlugin,
   type PluginContext,
+  type PluginManifest,
 } from "../types";
+import { assertManifestCompatible, assertPluginCompatible } from "../compat";
+import { PluginApiVersionError } from "../errors";
 
 function tmpDataDir(): string {
   const prefix = path.join(
@@ -179,3 +183,90 @@ test("Upstream Invariant: Plugin lifecycle isolation leaves zero residual state 
     "Unregistered plugin must not receive subsequent broadcasts",
   );
 });
+
+test("Upstream Invariant: Plugin SDK v0.7.0 (apiVersion 3) and settingsSchema contracts are fully compatible", async (t) => {
+  const dataDir = tmpDataDir();
+  t.after(async () => {
+    await fs.rm(dataDir, { recursive: true, force: true });
+  });
+
+  const manager = new PluginManager({ dataDir });
+
+  // 1. Assert SUPPORTED_API_VERSIONS includes 1, 2, and 3
+  assert.deepEqual(SUPPORTED_API_VERSIONS, [1, 2, 3]);
+  assert.equal(PLUGIN_API_VERSION, 3);
+
+  // 2. Compatibility check succeeds for versions 1, 2, and 3
+  for (const v of [1, 2, 3]) {
+    const manifest: PluginManifest = {
+      id: `plugin-v${v}`,
+      name: `Plugin V${v}`,
+      version: "1.0.0",
+      apiVersion: v,
+    };
+    assert.doesNotThrow(() => assertManifestCompatible(manifest));
+
+    const plugin: ServerPlugin = {
+      metadata: manifest,
+      init: () => {},
+    };
+    assert.doesNotThrow(() => assertPluginCompatible(plugin));
+  }
+
+  // 3. Incompatible versions (0, 4) throw PluginApiVersionError
+  for (const invalidVer of [0, 4]) {
+    const invalidManifest: PluginManifest = {
+      id: "invalid-ver",
+      name: "Invalid",
+      version: "1.0.0",
+      apiVersion: invalidVer,
+    };
+    assert.throws(
+      () => assertManifestCompatible(invalidManifest),
+      PluginApiVersionError,
+    );
+  }
+
+  // 4. Register a plugin using SDK v0.7.0 features: settingsSchema, ctx.settings, extended capabilities
+  let capturedSettings: Readonly<Record<string, unknown>> | undefined;
+  const v3Plugin: ServerPlugin = {
+    metadata: {
+      id: "sdk-v3-plugin",
+      name: "SDK v3 Plugin",
+      version: "1.0.0",
+      apiVersion: 3,
+      capabilities: ["routes", "auth:provider", "storage:depot"],
+      settingsSchema: {
+        fields: [
+          {
+            key: "apiKey",
+            label: "API Key",
+            type: "password",
+            required: true,
+          },
+          {
+            key: "enableFeature",
+            label: "Enable Feature",
+            type: "boolean",
+            default: true,
+          },
+        ],
+      },
+    },
+    init: (ctx: PluginContext) => {
+      capturedSettings = ctx.settings;
+    },
+  };
+
+  await manager.registerPlugin(v3Plugin);
+  const registered = manager.getPlugin("sdk-v3-plugin");
+  assert.ok(registered);
+  assert.equal(registered.metadata.apiVersion, 3);
+  assert.equal(registered.metadata.settingsSchema?.fields.length, 2);
+  assert.ok(capturedSettings);
+  assert.equal(typeof capturedSettings, "object");
+  assert.equal(Object.isFrozen(capturedSettings), true);
+
+  await manager.unregisterPlugin("sdk-v3-plugin");
+});
+

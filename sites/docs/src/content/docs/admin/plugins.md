@@ -37,11 +37,12 @@ A plugin lives in `<dataDir>/plugins/<id>/` and contains:
 ### `drop-plugin.json` Fields
 
 - `id`, `name`, `version` — required.
-- `apiVersion` — plugin API version (currently `2`; Drop maintains backwards compatibility with `1`).
+- `apiVersion` — plugin API version (currently `3`; Drop maintains backwards compatibility with `1` and `2`).
 - `targets` — `["server"]`, `["client"]`, or `["server", "client"]`.
 - `capabilities` — explicitly declared permissions:
-  - **Server**: `routes`, `storage`, `events`, `network`, `websocket`.
-  - **Client**: `ui:slot`, `ui:play-action`, `ui:context-menu`, `ui:sidebar`, `ui:topbar`, `game:launch-hook`, `game:fs`, `game:scan`, `client:storage`, `client:ws`.
+  - **Server**: `routes`, `storage`, `events`, `network`, `websocket`, `metadata:provider`, `cloudsave:provider`, `commerce:payment`, `auth:provider`, `storage:depot`.
+  - **Client**: `ui:slot`, `ui:play-action`, `ui:context-menu`, `ui:sidebar`, `ui:topbar`, `game:launch-hook`, `game:fs`, `game:scan`, `client:storage`, `client:ws`, `client:library-scan`, `game:runner`.
+- `settingsSchema` — optional declarative settings schema rendered automatically by host UIs.
 - `entry` — relative path to primary entry point (default `index.js`).
 - `checksum` — SHA-256 hex digest of the primary entry file.
 - `files` — mapping of relative bundle file paths to their individual SHA-256 digests. Required for multi-file bundles.
@@ -142,7 +143,7 @@ curl -X POST "$DROP_URL/api/v1/plugins/install" \
       "id": "my-plugin",
       "name": "My Plugin",
       "version": "1.0.0",
-      "apiVersion": 2,
+      "apiVersion": 3,
       "targets": ["server"],
       "capabilities": ["routes"],
       "entry": "dist/index.js",

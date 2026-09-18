@@ -1,10 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { ClientPluginManager } from "../ClientPluginManager";
+import { executeLaunchPipeline } from "../launch-pipeline";
 import type {
   ClientPlugin,
   ClientPluginContext,
   CloudSavePathResolver,
+  LaunchHook,
   MetadataProvider,
   StoreScanner,
 } from "../types";
@@ -207,3 +209,83 @@ test("ClientPluginManager cleans up SPI entries and slots on unregisterPlugin", 
   assert.equal(manager.getStoreScanners().length, 0);
   assert.equal(manager.getMetadataProviders().length, 0);
 });
+
+test("ClientPluginContext provides frozen settings snapshot", async () => {
+  const manager = new ClientPluginManager();
+  let capturedSettings: Readonly<Record<string, unknown>> | undefined;
+
+  const pluginWithSettings: ClientPlugin = {
+    metadata: {
+      id: "settings-test",
+      name: "Settings Test",
+      version: "1.0.0",
+    },
+    init(ctx: ClientPluginContext) {
+      capturedSettings = ctx.settings;
+    },
+  };
+
+  await manager.registerPlugin(pluginWithSettings, "settings-test", [], []);
+  assert.ok(capturedSettings);
+  assert.equal(typeof capturedSettings, "object");
+  assert.equal(Object.isFrozen(capturedSettings), true);
+
+  await manager.unregisterPlugin("settings-test");
+});
+
+test("executeLaunchPipeline executes pre-launch:network-post in sequence", async () => {
+  const executionOrder: string[] = [];
+  const hooks: LaunchHook[] = [
+    {
+      stage: "pre-launch:network-post",
+      order: 10,
+      execute: async () => {
+        executionOrder.push("network-post");
+      },
+    },
+    {
+      stage: "pre-launch:network",
+      order: 0,
+      execute: async () => {
+        executionOrder.push("network");
+      },
+    },
+    {
+      stage: "pre-launch:validate",
+      order: 0,
+      execute: async () => {
+        executionOrder.push("validate");
+      },
+    },
+    {
+      stage: "post-exit:cleanup",
+      order: 0,
+      execute: async () => {
+        executionOrder.push("cleanup");
+      },
+    },
+  ];
+
+  const result = await executeLaunchPipeline(
+    hooks,
+    {
+      gameId: "test-game",
+      gameTitle: "Test Game",
+      gameDir: "/games/test",
+    },
+    async () => {
+      executionOrder.push("launch");
+      return "launched-ok";
+    },
+  );
+
+  assert.equal(result, "launched-ok");
+  assert.deepEqual(executionOrder, [
+    "validate",
+    "network",
+    "network-post",
+    "launch",
+    "cleanup",
+  ]);
+});
+

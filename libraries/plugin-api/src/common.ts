@@ -21,7 +21,9 @@ export type ServerCapability =
   | "network"
   | "metadata:provider"
   | "cloudsave:provider"
-  | "commerce:payment";
+  | "commerce:payment"
+  | "auth:provider"
+  | "storage:depot";
 
 export type ClientCapability =
   | "ui:slot"
@@ -38,7 +40,8 @@ export type ClientCapability =
   | "system:command"
   | "metadata:provider"
   | "cloudsave:provider"
-  | "client:library-scan";
+  | "client:library-scan"
+  | "game:runner";
 
 export type PluginCapability = ServerCapability | ClientCapability;
 
@@ -50,6 +53,32 @@ export type PluginCapability = ServerCapability | ClientCapability;
 export type PluginTrust = "trusted" | "sandboxed";
 
 export type PluginStatus = "active" | "disabled" | "error" | "registered";
+
+export type PluginSettingsFieldType =
+  | "string"
+  | "password"
+  | "number"
+  | "boolean"
+  | "select";
+
+export interface PluginSettingsOption {
+  label: string;
+  value: unknown;
+}
+
+export interface PluginSettingsField {
+  key: string;
+  label: string;
+  type: PluginSettingsFieldType;
+  description?: string;
+  default?: unknown;
+  options?: PluginSettingsOption[];
+  required?: boolean;
+}
+
+export interface PluginSettingsSchema {
+  fields: PluginSettingsField[];
+}
 
 export interface PluginMetadata {
   id: string;
@@ -68,6 +97,8 @@ export interface PluginMetadata {
   targets?: PluginTarget[];
   capabilities?: PluginCapability[];
   enabled?: boolean;
+  /** Declarative configuration settings schema rendered automatically by host UIs. */
+  settingsSchema?: PluginSettingsSchema;
 }
 
 export interface PluginManifest extends PluginMetadata {
@@ -164,3 +195,51 @@ export interface PaymentGateway {
     headers: Record<string, string>,
   ): Promise<PaymentWebhookResult>;
 }
+
+// ==========================================
+// Authentication Provider SPI (#12)
+// ==========================================
+
+export interface AuthUser {
+  externalId: string;
+  username: string;
+  email?: string;
+  displayName?: string;
+  groups?: string[];
+}
+
+export interface AuthResult {
+  authenticated: boolean;
+  user?: AuthUser;
+  error?: string;
+  unavailable?: boolean;
+}
+
+export interface AuthProvider {
+  id: string;
+  name: string;
+  authenticate(credentials: {
+    username: string;
+    password: string;
+  }): Promise<AuthResult>;
+}
+
+// ==========================================
+// Remote Depot & Storage Provider SPI (#14, #17, #21)
+// ==========================================
+
+export interface DepotDownloadStream {
+  url?: string;
+  headers?: Record<string, string>;
+  pieceReader?: (offset: number, length: number) => Promise<Uint8Array>;
+}
+
+export interface DepotStorageProvider {
+  id: string;
+  name: string;
+  resolveDepotStream(
+    depotId: string,
+    gameId: string,
+  ): Promise<DepotDownloadStream | null>;
+}
+

@@ -1,4 +1,4 @@
-import { PLUGIN_API_VERSION } from "./types";
+import { PLUGIN_API_VERSION, SUPPORTED_API_VERSIONS } from "./types";
 import { PluginApiVersionError, PluginTrustError } from "./errors";
 import type { PluginManifest, ServerPlugin } from "./types";
 
@@ -15,7 +15,7 @@ export function isValidPluginId(id: string): boolean {
  */
 export function assertManifestCompatible(manifest: PluginManifest): void {
   const version = manifest.apiVersion ?? 0;
-  if (version !== 1 && version !== PLUGIN_API_VERSION) {
+  if (!(SUPPORTED_API_VERSIONS as readonly number[]).includes(version)) {
     throw new PluginApiVersionError(manifest.id, PLUGIN_API_VERSION, version);
   }
   if (manifest.trust !== undefined && manifest.trust !== "trusted") {
@@ -59,7 +59,7 @@ export function assertPluginCompatible(plugin: ServerPlugin): void {
   const version = apiVersion ?? 0;
   // Every plugin must declare the contract version it was built against;
   // omitting it previously bypassed the compatibility gate entirely.
-  if (version !== 1 && version !== PLUGIN_API_VERSION) {
+  if (!(SUPPORTED_API_VERSIONS as readonly number[]).includes(version)) {
     throw new PluginApiVersionError(id, PLUGIN_API_VERSION, version);
   }
   if (trust !== undefined && trust !== "trusted") {
