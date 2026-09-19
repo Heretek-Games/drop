@@ -1784,3 +1784,234 @@ test("plugin route patterns keep regex metacharacters literal", async () => {
 
   await manager.unregisterPlugin("regex-plugin");
 });
+
+test("PluginManager registers and gates AuthProvider, DepotStorageProvider, and scheduled tasks", async () => {
+  const manager = createTestManager();
+
+  let unregisterTask: (() => void) | undefined;
+  let taskRuns = 0;
+
+  const authPlugin: ServerPlugin = {
+    metadata: {
+      id: "ldap-auth",
+      name: "LDAP Auth",
+      version: "1.0.0",
+      apiVersion: PLUGIN_API_VERSION,
+      capabilities: ["auth:provider", "storage:depot"],
+    },
+    init: (ctx: PluginContext) => {
+      ctx.registerAuthProvider?.({
+        id: "ldap",
+        name: "LDAP",
+        authenticate: async (credentials) => ({
+          authenticated: credentials.username === "admin",
+          user: { externalId: "u1", username: credentials.username },
+        }),
+      });
+      ctx.registerDepotProvider?.({
+        id: "seedbox",
+        name: "Seedbox",
+        resolveDepotStream: async (depotId) => ({
+          url: `https://seed.example/${depotId}`,
+        }),
+      });
+      unregisterTask = ctx.scheduleTask?.("sync", 60_000, () => {
+        taskRuns += 1;
+      });
+    },
+  };
+
+  await manager.registerPlugin(authPlugin);
+
+  assert.equal(manager.getAuthProviders().length, 1);
+  assert.equal(manager.getAuthProvider("ldap")?.name, "LDAP");
+  const authResult = await manager
+    .getAuthProvider("ldap")!
+    .authenticate({ username: "admin", password: "secret" });
+  assert.equal(authResult.authenticated, true);
+
+  assert.equal(manager.getDepotProviders().length, 1);
+  assert.equal(manager.getDepotProvider("seedbox")?.name, "Seedbox");
+  const stream = await manager
+    .getDepotProvider("seedbox")!
+    .resolveDepotStream("depot-1", "game-1");
+  assert.equal(stream?.url, "https://seed.example/depot-1");
+
+  // The scheduleTask unregister callback stops the task before it ever fires.
+  assert.ok(unregisterTask);
+  unregisterTask();
+  assert.equal(taskRuns, 0);
+
+  // Capability gating fails closed for both new SPIs.
+  const deniedAuthPlugin: ServerPlugin = {
+    metadata: {
+      id: "denied-auth",
+      name: "Denied Auth",
+      version: "1.0.0",
+      apiVersion: PLUGIN_API_VERSION,
+      capabilities: ["routes"],
+    },
+    init: (ctx: PluginContext) => {
+      ctx.registerAuthProvider?.({
+        id: "denied",
+        name: "Denied",
+        authenticate: async () => ({ authenticated: false }),
+      });
+    },
+  };
+  await assert.rejects(
+    () => manager.registerPlugin(deniedAuthPlugin),
+    /attempted 'registerAuthProvider\(denied\)' without the 'auth:provider' capability/,
+  );
+
+  const deniedDepotPlugin: ServerPlugin = {
+    metadata: {
+      id: "denied-depot",
+      name: "Denied Depot",
+      version: "1.0.0",
+      apiVersion: PLUGIN_API_VERSION,
+      capabilities: ["routes"],
+    },
+    init: (ctx: PluginContext) => {
+      ctx.registerDepotProvider?.({
+        id: "denied",
+        name: "Denied",
+        resolveDepotStream: async () => null,
+      });
+    },
+  };
+  await assert.rejects(
+    () => manager.registerPlugin(deniedDepotPlugin),
+    /attempted 'registerDepotProvider\(denied\)' without the 'storage:depot' capability/,
+  );
+
+  // Unregister cleans up auth/depot entries.
+  await manager.unregisterPlugin("ldap-auth");
+  assert.equal(manager.getAuthProviders().length, 0);
+  assert.equal(manager.getAuthProvider("ldap"), undefined);
+  assert.equal(manager.getDepotProviders().length, 0);
+  assert.equal(manager.getDepotProvider("seedbox"), undefined);
+});
+
+test("PluginManager renders, persists, and redacts declarative settings", async () => {
+  const manager = createTestManager();
+
+  let capturedSettings: Record<string, unknown> | undefined;
+  const plugin: ServerPlugin = {
+    metadata: {
+      id: "settings-plugin",
+      name: "Settings",
+      version: "1.0.0",
+      apiVersion: PLUGIN_API_VERSION,
+      capabilities: ["storage"],
+      settingsSchema: {
+        fields: [
+          { key: "apiKey", label: "API Key", type: "password", required: true },
+          { key: "retries", label: "Retries", type: "number", default: 3 },
+          { key: "enabled", label: "Enabled", type: "boolean", default: true },
+          {
+            key: "mode",
+            label: "Mode",
+            type: "select",
+            default: "fast",
+            options: [
+              { label: "Fast", value: "fast" },
+              { label: "Safe", value: "safe" },
+            ],
+          },
+        ],
+      },
+    },
+    init: (ctx) => {
+      capturedSettings = ctx.settings as Record<string, unknown>;
+    },
+  };
+
+  await manager.registerPlugin(plugin);
+
+  // Defaults are loaded into the plugin context before init.
+  assert.deepEqual(capturedSettings, {
+    retries: 3,
+    enabled: true,
+    mode: "fast",
+  });
+
+  // The API view hides the secret but reports whether one is set.
+  const view = await manager.getPluginSettingsView("settings-plugin");
+  assert.ok(view);
+  assert.equal(view.values.apiKey, undefined);
+  assert.equal(view.secrets.apiKey, false);
+  assert.equal(view.values.retries, 3);
+
+  // `required` is enforced.
+  await assert.rejects(
+    () => manager.setPluginSettings("settings-plugin", { retries: 5 }),
+    /Setting 'apiKey' is required/,
+  );
+
+  // Type + unknown-key validation fails closed.
+  await assert.rejects(
+    () =>
+      manager.setPluginSettings("settings-plugin", {
+        apiKey: "k",
+        retries: "nope",
+      }),
+    /must be a finite number/,
+  );
+  await assert.rejects(
+    () =>
+      manager.setPluginSettings("settings-plugin", { apiKey: "k", nope: 1 }),
+    /Unknown setting 'nope'/,
+  );
+  await assert.rejects(
+    () =>
+      manager.setPluginSettings("settings-plugin", {
+        apiKey: "k",
+        mode: "turbo",
+      }),
+    /must be one of the declared options/,
+  );
+
+  // A valid update persists; the internal read exposes the secret.
+  await manager.setPluginSettings("settings-plugin", {
+    apiKey: "top-secret",
+    mode: "safe",
+  });
+  assert.equal(
+    (await manager.getPluginSettings("settings-plugin")).apiKey,
+    "top-secret",
+  );
+
+  const after = await manager.getPluginSettingsView("settings-plugin");
+  assert.equal(after?.values.mode, "safe");
+  assert.equal(after?.secrets.apiKey, true);
+  assert.equal(after?.values.apiKey, undefined);
+
+  // Omitting a secret keeps it; clearing it re-triggers `required`.
+  await manager.setPluginSettings("settings-plugin", { retries: 9 });
+  assert.equal(
+    (await manager.getPluginSettings("settings-plugin")).apiKey,
+    "top-secret",
+  );
+  await assert.rejects(
+    () => manager.setPluginSettings("settings-plugin", { apiKey: null }),
+    /Setting 'apiKey' is required/,
+  );
+
+  // A plugin without a schema has no settings surface.
+  const plain: ServerPlugin = {
+    metadata: {
+      id: "no-settings",
+      name: "Plain",
+      version: "1.0.0",
+      apiVersion: PLUGIN_API_VERSION,
+    },
+    init: () => {},
+  };
+  await manager.registerPlugin(plain);
+  assert.equal(await manager.getPluginSettingsView("no-settings"), null);
+  await assert.rejects(
+    () => manager.setPluginSettings("no-settings", {}),
+    /does not declare a settingsSchema/,
+  );
+});

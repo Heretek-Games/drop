@@ -8,14 +8,43 @@ import type {
   HttpMethod,
   LaunchContext,
   LaunchHook,
+  LaunchOverrides,
   MetadataProvider,
   PlayAction,
+  RunnerProvider,
   SidebarItem,
+  Sidecar,
   StoreScanner,
   TopBarItem,
   UISlotName,
   UISlotRegistration,
 } from "./types";
+
+/** Platform data used to pick the matching sidecar target. */
+export interface SidecarPlatform {
+  os: "linux" | "macos" | "windows";
+  arch: "x64" | "arm64";
+}
+
+/**
+ * Best-effort host platform detection for sidecar target selection. Runs in
+ * the desktop webview, where Tauri provides a real UA; wrong guesses never
+ * break anything because staging is sha256-verified per target and failures
+ * fall back to PATH resolution.
+ */
+export function detectSidecarPlatform(): SidecarPlatform | null {
+  if (typeof navigator === "undefined") return null;
+  const ua = navigator.userAgent ?? "";
+  let os: SidecarPlatform["os"] | null = null;
+  if (/windows/i.test(ua)) os = "windows";
+  else if (/macintosh|mac os x/i.test(ua)) os = "macos";
+  else if (/linux/i.test(ua)) os = "linux";
+  if (!os) return null;
+  const arch: SidecarPlatform["arch"] = /aarch64|arm64|apple m[123]/i.test(ua)
+    ? "arm64"
+    : "x64";
+  return { os, arch };
+}
 import { safeInvoke } from "./host";
 import { TauriPluginStorage } from "./host/storage";
 import { TauriScopedGameFs } from "./host/game-fs";
@@ -55,10 +84,84 @@ export class ClientPluginManager {
   public readonly cloudSaveResolvers = reactive<
     Array<{ pluginId: string; resolver: CloudSavePathResolver }>
   >([]);
+  public readonly runnerProviders = reactive<
+    Array<{ pluginId: string; provider: RunnerProvider }>
+  >([]);
+
+  /**
+   * Host launch delegate wired by the library view so `ctx.launchGame` can
+   * reuse the same launch-index resolution as the Play button. Falls back to a
+   * direct native launch (index 0) when unset.
+   */
+  private gameLaunchHandler?: (
+    gameId: string,
+    overrides?: LaunchOverrides,
+  ) => Promise<void>;
+
+  /** Local (client-side) plugin event bus, keyed by event name. */
+  private readonly localEvents = new Map<
+    string,
+    Set<(data: unknown) => void>
+  >();
 
   public readonly serverWs: ClientPluginWebSocket = new TauriPluginWebSocket();
 
   public readonly isInitialized = ref(false);
+
+  /**
+   * Register the host launch delegate used by `ctx.launchGame`. The library
+   * view wires this so plugin-triggered launches resolve the same launch option
+   * index as the Play button; without it, launches fall back to index 0.
+   */
+  setGameLaunchHandler(
+    handler: (gameId: string, overrides?: LaunchOverrides) => Promise<void>,
+  ): void {
+    this.gameLaunchHandler = handler;
+  }
+
+  /**
+   * Stage the sidecar binary for the current platform that a plugin bundle
+   * declares. The Tauri command verifies the SHA-256, stages the binary under
+   * the plugin's app-data bin dir and makes it executable, so `ctx.system.run`
+   * later resolves the allowlisted bare name against it. Non-fatal: hosts
+   * without a matching target stay on PATH/fallbacks.
+   */
+  async stageSidecars(
+    pluginId: string,
+    commands: string[],
+    sidecars: Sidecar[] | undefined,
+  ): Promise<void> {
+    if (!Array.isArray(sidecars) || sidecars.length === 0) return;
+    const platform = detectSidecarPlatform();
+    if (!platform) {
+      console.debug("Unknown sidecar platform; skipping staging");
+      return;
+    }
+    const commandSet = new Set(commands);
+    for (const sidecar of sidecars) {
+      if (!commandSet.has(sidecar.name)) continue;
+      const target = sidecar.targets.find(
+        (t) => t.os === platform.os && t.arch === platform.arch,
+      );
+      if (!target) continue;
+      try {
+        await safeInvoke("plugin_sidecar_stage", {
+          pluginId,
+          name: sidecar.name,
+          asset: target.path,
+          sha256: target.sha256,
+        });
+        console.debug("Staged sidecar:", pluginId, sidecar.name);
+      } catch (err) {
+        console.warn(
+          "Failed to stage sidecar; falling back to PATH resolution:",
+          pluginId,
+          sidecar.name,
+          err,
+        );
+      }
+    }
+  }
 
   /**
    * Register and initialize a client plugin instance.
@@ -68,6 +171,7 @@ export class ClientPluginManager {
     id?: string,
     commands: string[] = [],
     capabilities: string[] = [],
+    sidecars: Sidecar[] = [],
   ): Promise<void> {
     const pluginId = id || plugin.metadata?.id || "anonymous-plugin";
     if (this.plugins.has(pluginId)) {
@@ -86,6 +190,10 @@ export class ClientPluginManager {
       );
     }
 
+    // Stage declared sidecar binaries (sha256-verified) before init so
+    // `ctx.system.run` can resolve their allowlisted bare names.
+    await this.stageSidecars(pluginId, commands, sidecars);
+
     const context: ClientPluginContext = {
       id: pluginId,
       logger: {
@@ -99,7 +207,10 @@ export class ClientPluginManager {
           console.debug(`[Plugin:${pluginId}] ${msg}`, ...args),
       },
       storage: new TauriPluginStorage(pluginId),
-      settings: Object.freeze({}),
+      // Client-side declarative settings are optional; the key is always
+      // present for surface parity with the server context but stays undefined
+      // until the host injects a schema-backed snapshot.
+      settings: undefined,
       registerSlot: (slot, component, options) => {
         if (!this.slots[slot]) {
           this.slots[slot] = [];
@@ -215,6 +326,66 @@ export class ClientPluginManager {
           if (idx !== -1) this.cloudSaveResolvers.splice(idx, 1);
         };
       },
+      registerRunnerProvider: (provider: RunnerProvider) => {
+        if (capabilities.length > 0 && !capabilities.includes("game:runner")) {
+          throw new Error(
+            `Client plugin '${pluginId}' attempted 'registerRunnerProvider' without the 'game:runner' capability`,
+          );
+        }
+        if (
+          !provider ||
+          typeof provider.id !== "string" ||
+          !provider.id.trim()
+        ) {
+          throw new Error("Runner provider must have a valid non-empty id");
+        }
+        const entry = { pluginId, provider };
+        this.runnerProviders.push(entry);
+        return () => {
+          const idx = this.runnerProviders.indexOf(entry);
+          if (idx !== -1) this.runnerProviders.splice(idx, 1);
+        };
+      },
+      launchGame: async (gameId: string, overrides?: LaunchOverrides) => {
+        if (this.gameLaunchHandler) {
+          await this.gameLaunchHandler(gameId, overrides);
+          return;
+        }
+        // Best-effort fallback: launch option 0. The library view wires
+        // `setGameLaunchHandler` so launch index + overrides resolve correctly.
+        await safeInvoke("launch_game", { id: gameId, index: 0 });
+      },
+      ui: {
+        openExternal: (url: string) =>
+          safeInvoke("plugin_open_external", { url }),
+      },
+      events: {
+        on: (event: string, listener: (data: unknown) => void) => {
+          let listeners = this.localEvents.get(event);
+          if (!listeners) {
+            listeners = new Set();
+            this.localEvents.set(event, listeners);
+          }
+          listeners.add(listener);
+          return () => {
+            const current = this.localEvents.get(event);
+            if (!current) return;
+            current.delete(listener);
+            if (current.size === 0) this.localEvents.delete(event);
+          };
+        },
+        emit: (event: string, data: unknown) => {
+          const listeners = this.localEvents.get(event);
+          if (!listeners) return;
+          for (const listener of [...listeners]) {
+            try {
+              listener(data);
+            } catch (err) {
+              console.error(`Plugin event listener for '${event}' threw:`, err);
+            }
+          }
+        },
+      },
       gameFs: new TauriScopedGameFs(),
       gameScanner: new TauriScopedGameScanner(),
       serverWs: this.serverWs,
@@ -258,6 +429,11 @@ export class ClientPluginManager {
       // Best effort: the plugin may never have registered a allowlist.
     });
 
+    // Drop any staged sidecar binaries for this plugin.
+    await safeInvoke("plugin_sidecar_clear", { pluginId }).catch(() => {
+      // Best effort: the plugin may never have staged a sidecar.
+    });
+
     // Clean up UI slots registered by this plugin
     for (const slotName of Object.keys(this.slots) as UISlotName[]) {
       this.slots[slotName] = this.slots[slotName].filter(
@@ -269,6 +445,7 @@ export class ClientPluginManager {
     this.purgeOwned(this.storeScanners, pluginId);
     this.purgeOwned(this.metadataProviders, pluginId);
     this.purgeOwned(this.cloudSaveResolvers, pluginId);
+    this.purgeOwned(this.runnerProviders, pluginId);
   }
 
   /** Removes every reactive entry owned by `pluginId` from `entries`. */
@@ -296,6 +473,10 @@ export class ClientPluginManager {
     return this.cloudSaveResolvers.map((e) => e.resolver);
   }
 
+  getRunnerProviders(): RunnerProvider[] {
+    return this.runnerProviders.map((e) => e.provider);
+  }
+
   /**
    * Load client plugin bundle from a URL (e.g. served by Drop server).
    */
@@ -305,6 +486,7 @@ export class ClientPluginManager {
     cssUrl?: string,
     commands: string[] = [],
     capabilities: string[] = [],
+    sidecars: Sidecar[] = [],
   ): Promise<void> {
     if (cssUrl) {
       const link = document.createElement("link");
@@ -327,7 +509,13 @@ export class ClientPluginManager {
       );
     }
 
-    await this.registerPlugin(pluginExport, pluginId, commands, capabilities);
+    await this.registerPlugin(
+      pluginExport,
+      pluginId,
+      commands,
+      capabilities,
+      sidecars,
+    );
   }
 
   /**

@@ -1,10 +1,13 @@
+use std::fs;
+use std::path::PathBuf;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
-use tauri::State;
+use tauri::{AppHandle, State};
 use tokio::process::Command as TokioCommand;
 
 use crate::allowlist::{PluginCommandAllowlist, validate_command_name};
+use crate::sidecar::plugin_sidecar_bin_dir;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -64,6 +67,7 @@ pub fn plugin_register_commands(
 /// rely on a blocklist to contain a malicious plugin; there is none by design.
 #[tauri::command]
 pub async fn plugin_system_run(
+    app: AppHandle,
     plugin_id: String,
     bin: String,
     args: Option<Vec<String>>,
@@ -88,7 +92,25 @@ pub async fn plugin_system_run(
         }
     }
 
-    let mut command = TokioCommand::new(&bin);
+    // Prefer a staged sidecar binary (sha256-verified when it was staged) when
+    // the allowlisted name matches one. The staged tree is checked to be a
+    // regular, non-symlink file; otherwise fall back to PATH resolution.
+    let mut executable = PathBuf::from(&bin);
+    if let Some(dir) = plugin_sidecar_bin_dir(&app, &plugin_id) {
+        let candidate = dir.join(if cfg!(windows) {
+            format!("{bin}.exe")
+        } else {
+            bin.clone()
+        });
+        let is_regular = fs::symlink_metadata(&candidate)
+            .map(|meta| meta.is_file() && !meta.is_symlink())
+            .unwrap_or(false);
+        if is_regular {
+            executable = candidate;
+        }
+    }
+
+    let mut command = TokioCommand::new(&executable);
     command
         .args(args.unwrap_or_default())
         .stdin(std::process::Stdio::null())

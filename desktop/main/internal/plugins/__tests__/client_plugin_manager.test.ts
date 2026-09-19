@@ -8,6 +8,7 @@ import type {
   CloudSavePathResolver,
   LaunchHook,
   MetadataProvider,
+  RunnerProvider,
   StoreScanner,
 } from "../types";
 
@@ -210,9 +211,9 @@ test("ClientPluginManager cleans up SPI entries and slots on unregisterPlugin", 
   assert.equal(manager.getMetadataProviders().length, 0);
 });
 
-test("ClientPluginContext provides frozen settings snapshot", async () => {
+test("ClientPluginContext exposes settings for surface parity", async () => {
   const manager = new ClientPluginManager();
-  let capturedSettings: Readonly<Record<string, unknown>> | undefined;
+  let captured: ClientPluginContext | undefined;
 
   const pluginWithSettings: ClientPlugin = {
     metadata: {
@@ -221,16 +222,108 @@ test("ClientPluginContext provides frozen settings snapshot", async () => {
       version: "1.0.0",
     },
     init(ctx: ClientPluginContext) {
-      capturedSettings = ctx.settings;
+      captured = ctx;
     },
   };
 
   await manager.registerPlugin(pluginWithSettings, "settings-test", [], []);
-  assert.ok(capturedSettings);
-  assert.equal(typeof capturedSettings, "object");
-  assert.equal(Object.isFrozen(capturedSettings), true);
+  assert.ok(captured);
+  // The key is always present for parity with the server context; the value is
+  // undefined until the host injects a schema-backed snapshot.
+  assert.ok(Object.hasOwn(captured as ClientPluginContext, "settings"));
+  assert.equal(captured.settings, undefined);
 
   await manager.unregisterPlugin("settings-test");
+});
+
+test("ClientPluginManager registers and gates RunnerProvider SPI", async () => {
+  const manager = new ClientPluginManager();
+
+  const runner: RunnerProvider = {
+    id: "proton-runner",
+    name: "Proton",
+    supportedPlatforms: ["windows"],
+    detect: async () => ({ available: true, version: "9.0" }),
+    resolveLaunch: async () => ({ wrapperBin: "proton", wrapperArgs: ["run"] }),
+  };
+
+  const plugin: ClientPlugin = {
+    metadata: { id: "runner-plugin", name: "Runner", version: "1.0.0" },
+    init(ctx: ClientPluginContext) {
+      ctx.registerRunnerProvider?.(runner);
+    },
+  };
+
+  await manager.registerPlugin(plugin, "runner-plugin", [], ["game:runner"]);
+  assert.equal(manager.getRunnerProviders().length, 1);
+  assert.equal(manager.getRunnerProviders()[0]?.name, "Proton");
+
+  // Missing capability fails closed (init errors are swallowed, so the
+  // provider must simply not be registered).
+  const denied: ClientPlugin = {
+    metadata: { id: "runner-denied", name: "Denied", version: "1.0.0" },
+    init(ctx: ClientPluginContext) {
+      ctx.registerRunnerProvider?.({
+        id: "denied",
+        name: "Denied",
+        supportedPlatforms: ["linux"],
+        detect: async () => ({ available: false }),
+        resolveLaunch: async () => ({}),
+      });
+    },
+  };
+  await manager.registerPlugin(denied, "runner-denied", [], ["ui:slot"]);
+  assert.equal(manager.getRunnerProviders().length, 1);
+
+  await manager.unregisterPlugin("runner-plugin");
+  assert.equal(manager.getRunnerProviders().length, 0);
+});
+
+test("ClientPluginContext exposes the SDK client surface", async () => {
+  const manager = new ClientPluginManager();
+  let captured: ClientPluginContext | undefined;
+
+  const plugin: ClientPlugin = {
+    metadata: { id: "surface", name: "Surface", version: "1.0.0" },
+    init(ctx: ClientPluginContext) {
+      captured = ctx;
+    },
+  };
+
+  await manager.registerPlugin(plugin, "surface", [], []);
+  assert.ok(captured);
+  const members = [
+    "id",
+    "logger",
+    "storage",
+    "settings",
+    "registerSlot",
+    "registerPlayAction",
+    "registerGameMenuItem",
+    "registerSidebarItem",
+    "registerTopBarItem",
+    "registerLaunchHook",
+    "registerStoreScanner",
+    "registerMetadataProvider",
+    "registerCloudSaveResolver",
+    "registerRunnerProvider",
+    "launchGame",
+    "ui",
+    "events",
+    "gameFs",
+    "gameScanner",
+    "serverWs",
+    "system",
+    "serverRequest",
+  ] as const;
+  for (const member of members) {
+    assert.ok(
+      Object.hasOwn(captured as ClientPluginContext, member),
+      `ClientPluginContext is missing '${member}'`,
+    );
+  }
+
+  await manager.unregisterPlugin("surface");
 });
 
 test("executeLaunchPipeline executes pre-launch:network-post in sequence", async () => {
@@ -288,4 +381,3 @@ test("executeLaunchPipeline executes pre-launch:network-post in sequence", async
     "cleanup",
   ]);
 });
-

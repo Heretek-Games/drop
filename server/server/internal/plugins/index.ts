@@ -4,6 +4,7 @@ import { helloWorldPlugin } from "./builtin/hello-world";
 export * from "./types";
 export * from "./errors";
 export * from "./storage";
+export * from "./settings";
 export * from "./manager";
 export { helloWorldPlugin } from "./builtin/hello-world";
 

@@ -55,11 +55,7 @@ export type PluginTrust = "trusted" | "sandboxed";
 export type PluginStatus = "active" | "disabled" | "error" | "registered";
 
 export type PluginSettingsFieldType =
-  | "string"
-  | "password"
-  | "number"
-  | "boolean"
-  | "select";
+  "string" | "password" | "number" | "boolean" | "select";
 
 export interface PluginSettingsOption {
   label: string;
@@ -103,6 +99,12 @@ export interface PluginMetadata {
 
 export interface PluginManifest extends PluginMetadata {
   entry?: string;
+  /**
+   * Legacy alias for `client.entry`. Drop Desktop reads `client.entry`
+   * (defaulting to `bundle.js`) and never consults this field, so new
+   * manifests should declare the client entry inside the `client` block.
+   */
+  clientEntry?: string;
   /** SHA-256 of the entry file, hex. Verified before the bundle is imported. */
   checksum?: string;
   /**
@@ -128,11 +130,15 @@ export interface PluginManifest extends PluginMetadata {
 
   server?: {
     entry: string;
+    /** TypeScript/JavaScript source the CLI bundles into `entry`. */
+    source?: string;
     capabilities: ServerCapability[];
     storageVersion?: number;
   };
   client?: {
     entry: string;
+    /** TypeScript/JavaScript source the CLI bundles into `entry`. */
+    source?: string;
     css?: string;
     capabilities: ClientCapability[];
     slots?: Array<{ slot: string; component: string }>;
@@ -141,7 +147,36 @@ export interface PluginManifest extends PluginMetadata {
      * (requires the `system:command` capability). Enforced by the desktop host.
      */
     commands?: string[];
+    /**
+     * Native sidecar binaries shipped inside the plugin bundle and staged by
+     * the desktop host at activation time (requires the `system:sidecar`
+     * capability). Each declared sidecar `name` must also appear in `commands`;
+     * the host stages the target whose `os`/`arch` match the current platform,
+     * verifies `sha256`, and resolves the allowlisted bare name against the
+     * staged binary.
+     */
+    sidecars?: Sidecar[];
   };
+}
+
+/** One declared native sidecar executable bundled with the client plugin. */
+export interface Sidecar {
+  /** Bare executable name; must also be listed in `client.commands`. */
+  name: string;
+  /** Per-platform (and per-architecture) binaries for this sidecar. */
+  targets: SidecarTarget[];
+}
+
+/** A platform-specific sidecar binary declared inside the plugin bundle. */
+export interface SidecarTarget {
+  /** Target operating system. */
+  os: "linux" | "macos" | "windows";
+  /** Target CPU architecture. */
+  arch: "x64" | "arm64";
+  /** Bundle-relative path to the binary (POSIX separators). */
+  path: string;
+  /** SHA-256 hex digest of the binary contents, verified by build, validate, and the hosts. */
+  sha256: string;
 }
 
 export interface PluginStateRecord {
@@ -242,4 +277,3 @@ export interface DepotStorageProvider {
     gameId: string,
   ): Promise<DepotDownloadStream | null>;
 }
-

@@ -64,6 +64,7 @@ mod collections;
 mod download_manager;
 mod downloads;
 mod games;
+mod plugin_host;
 mod process;
 mod remote;
 mod scheduler;
@@ -74,6 +75,7 @@ use client::*;
 use download_manager::*;
 use downloads::*;
 use games::*;
+use plugin_host::*;
 use plugins::*;
 use process::*;
 use remote::*;
@@ -265,6 +267,9 @@ pub fn run() {
             plugin_storage_set,
             plugin_storage_delete,
             plugin_storage_list_keys,
+            plugin_sidecar_stage,
+            plugin_sidecar_clear,
+            plugin_open_external,
             // Library
             fetch_library,
             fetch_game,

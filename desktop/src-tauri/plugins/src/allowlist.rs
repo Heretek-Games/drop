@@ -30,7 +30,7 @@ pub struct PluginCommandAllowlist(pub Mutex<HashMap<String, HashSet<String>>>);
 /// Only bare executable names are allowed (no path separators, no leading `.`
 /// or `-`, ASCII alphanumerics plus `_`, `-`, `.`). This is a syntax check,
 /// not a trust decision: trust comes from the per-plugin allowlist itself.
-pub(crate) fn validate_command_name(command: &str) -> Result<(), String> {
+pub fn validate_command_name(command: &str) -> Result<(), String> {
     if command.is_empty() || command.len() > 64 {
         return Err(format!("invalid command length: '{command}'"));
     }

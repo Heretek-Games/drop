@@ -23,17 +23,28 @@ import {
 } from "./bundle";
 import type { PluginBundleHost, PluginUpdateInfo } from "./bundle";
 import type {
+  AuthProvider,
   CloudSavePathResolver,
+  DepotStorageProvider,
   MetadataProvider,
   PaymentGateway,
   PluginManifest,
   PluginMetadata,
+  PluginSettingsSchema,
   PluginStatus,
   PluginStorage,
   ServerPlugin,
   SubscriptionContext,
   WebSocketContext,
 } from "./types";
+import {
+  PLUGIN_SETTINGS_STORAGE_KEY,
+  applySettingsDefaults,
+  mergeSettingsPayload,
+  normalizeSettingsSchema,
+  redactSettingsValues,
+  validateSettingsValues,
+} from "./settings";
 
 /** Resolved caller identity passed to route handlers. */
 export interface PluginAuthContext {
@@ -71,6 +82,17 @@ export class PluginManager {
   private readonly webSockets = new PluginWebSocketRegistry();
   private readonly events = new PluginEventBus();
   private readonly spi = new PluginSpiRegistry();
+  /**
+   * Memoized storage instances per plugin so the guarded context storage and
+   * host-managed settings reads/writes share one instance and cannot observe
+   * stale copies of the on-disk state.
+   */
+  private readonly storageInstances = new Map<string, PluginStorage>();
+  /** Recurring plugin tasks keyed by `<pluginId>:<taskName>`. */
+  private readonly scheduledTasks = new Map<
+    string,
+    { pluginId: string; timer: NodeJS.Timeout }
+  >();
   private readonly lifecycle: PluginLifecycle;
   private readonly contextHost: PluginContextHost;
   private readonly bundleHost: PluginBundleHost;
@@ -83,7 +105,9 @@ export class PluginManager {
       events: this.events,
       spi: this.spi,
       log: this.log,
-      createStorage: (pluginId) => this.createStorage(pluginId),
+      createStorage: (pluginId) => this.getStorageInstance(pluginId),
+      scheduleTask: (pluginId, name, intervalMs, task) =>
+        this.scheduleTask(pluginId, name, intervalMs, task),
     };
     this.bundleHost = {
       log: this.log,
@@ -112,6 +136,61 @@ export class PluginManager {
     return new FilePluginStorage(pluginId, this.options.dataDir);
   }
 
+  private async getStorageInstance(pluginId: string): Promise<PluginStorage> {
+    const existing = this.storageInstances.get(pluginId);
+    if (existing) return existing;
+    const created = await this.createStorage(pluginId);
+    this.storageInstances.set(pluginId, created);
+    return created;
+  }
+
+  /**
+   * Register a recurring task for a plugin. Re-registering the same
+   * `<pluginId>:<name>` replaces the previous timer. Timers are unref'd so they
+   * never keep the process alive.
+   */
+  private scheduleTask(
+    pluginId: string,
+    name: string,
+    intervalMs: number,
+    task: () => void | Promise<void>,
+  ): () => void {
+    if (typeof name !== "string" || !name.trim()) {
+      throw new Error("Task name must be a non-empty string");
+    }
+    if (
+      typeof intervalMs !== "number" ||
+      !Number.isFinite(intervalMs) ||
+      intervalMs <= 0
+    ) {
+      throw new Error(
+        "Task interval must be a positive number of milliseconds",
+      );
+    }
+    const key = `${pluginId}:${name}`;
+    const existing = this.scheduledTasks.get(key);
+    if (existing) {
+      clearInterval(existing.timer);
+      this.scheduledTasks.delete(key);
+    }
+    const timer = setInterval(() => {
+      void Promise.resolve()
+        .then(task)
+        .catch((err) =>
+          this.log.error(`Plugin task '${key}' threw: ${String(err)}`),
+        );
+    }, intervalMs);
+    timer.unref?.();
+    this.scheduledTasks.set(key, { pluginId, timer });
+    return () => {
+      const entry = this.scheduledTasks.get(key);
+      if (entry) {
+        clearInterval(entry.timer);
+        this.scheduledTasks.delete(key);
+      }
+    };
+  }
+
   private async loadRegistry(): Promise<PluginRegistry> {
     const registryPath =
       this.options.registryPath ?? process.env.DROP_PLUGIN_REGISTRY;
@@ -126,6 +205,13 @@ export class PluginManager {
     this.webSockets.release(id);
     this.spi.release(id);
     this.events.release(id);
+    this.storageInstances.delete(id);
+    for (const [key, entry] of this.scheduledTasks) {
+      if (entry.pluginId === id) {
+        clearInterval(entry.timer);
+        this.scheduledTasks.delete(key);
+      }
+    }
   }
 
   private async resolveAuth(event: H3Event): Promise<PluginAuthContext> {
@@ -247,6 +333,95 @@ export class PluginManager {
 
   getPaymentGateway(id: string): PaymentGateway | undefined {
     return this.spi.getPaymentGateway(id);
+  }
+
+  getAuthProviders(): AuthProvider[] {
+    return this.spi.getAuthProviders();
+  }
+
+  getAuthProvider(id: string): AuthProvider | undefined {
+    return this.spi.getAuthProvider(id);
+  }
+
+  getDepotProviders(): DepotStorageProvider[] {
+    return this.spi.getDepotProviders();
+  }
+
+  getDepotProvider(id: string): DepotStorageProvider | undefined {
+    return this.spi.getDepotProvider(id);
+  }
+
+  /** Declarative settings schema for a loaded plugin, if declared. */
+  getSettingsSchema(id: string): PluginSettingsSchema | undefined {
+    const plugin = this.lifecycle.get(id);
+    return normalizeSettingsSchema(plugin?.metadata.settingsSchema);
+  }
+
+  /** Reads + default-fills the host-managed settings for `pluginId`. */
+  private async readSettingsFor(
+    pluginId: string,
+    schema: PluginSettingsSchema | undefined,
+  ): Promise<Record<string, unknown>> {
+    if (!schema) return {};
+    const storage = await this.getStorageInstance(pluginId);
+    const stored = await storage.get<Record<string, unknown>>(
+      PLUGIN_SETTINGS_STORAGE_KEY,
+    );
+    return applySettingsDefaults(schema, stored);
+  }
+
+  /** Effective settings values (including defaults) for a loaded plugin. */
+  async getPluginSettings(id: string): Promise<Record<string, unknown>> {
+    if (!this.lifecycle.getRecord(id)) {
+      throw createError({
+        statusCode: 404,
+        statusMessage: `Plugin '${id}' not found`,
+      });
+    }
+    return await this.readSettingsFor(id, this.getSettingsSchema(id));
+  }
+
+  /** Settings view with `password` values redacted, for API consumers. */
+  async getPluginSettingsView(id: string): Promise<{
+    schema: PluginSettingsSchema;
+    values: Record<string, unknown>;
+    secrets: Record<string, boolean>;
+  } | null> {
+    const schema = this.getSettingsSchema(id);
+    if (!schema) return null;
+    const values = await this.readSettingsFor(id, schema);
+    const redacted = redactSettingsValues(schema, values);
+    return { schema, values: redacted.values, secrets: redacted.secrets };
+  }
+
+  /** Validate + persist a partial settings update. Returns the redacted view. */
+  async setPluginSettings(id: string, submitted: unknown) {
+    if (!this.lifecycle.getRecord(id)) {
+      throw createError({
+        statusCode: 404,
+        statusMessage: `Plugin '${id}' not found`,
+      });
+    }
+    const schema = this.getSettingsSchema(id);
+    if (!schema) {
+      throw createError({
+        statusCode: 400,
+        statusMessage: `Plugin '${id}' does not declare a settingsSchema`,
+      });
+    }
+    const current = await this.readSettingsFor(id, schema);
+    const merge = mergeSettingsPayload(schema, current, submitted);
+    const validation = validateSettingsValues(schema, merge.input);
+    const errors = [...merge.errors, ...validation.errors];
+    if (errors.length > 0) {
+      throw createError({
+        statusCode: 400,
+        statusMessage: errors.join("; "),
+      });
+    }
+    const storage = await this.getStorageInstance(id);
+    await storage.set(PLUGIN_SETTINGS_STORAGE_KEY, validation.values);
+    return await this.getPluginSettingsView(id);
   }
 
   async getClientAssetPath(

@@ -22,6 +22,15 @@ interface RemotePluginInfo {
     entry?: string;
     css?: string;
     commands?: string[];
+    sidecars?: Array<{
+      name: string;
+      targets: Array<{
+        os: "linux" | "macos" | "windows";
+        arch: "x64" | "arm64";
+        path: string;
+        sha256: string;
+      }>;
+    }>;
   };
 }
 
@@ -38,6 +47,9 @@ async function loadRemotePlugin(plugin: RemotePluginInfo): Promise<void> {
   const commands = Array.isArray(plugin.client?.commands)
     ? plugin.client.commands
     : [];
+  const sidecars = Array.isArray(plugin.client?.sidecars)
+    ? plugin.client.sidecars
+    : [];
 
   try {
     await clientPluginManager.loadFromUrl(
@@ -45,6 +57,8 @@ async function loadRemotePlugin(plugin: RemotePluginInfo): Promise<void> {
       clientJsUrl,
       clientCssUrl,
       commands,
+      [],
+      sidecars,
     );
   } catch (loadErr) {
     console.debug(

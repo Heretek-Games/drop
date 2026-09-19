@@ -147,6 +147,15 @@ export interface PluginContext {
    * Requires the `storage:depot` capability.
    */
   registerDepotProvider?(provider: DepotStorageProvider): void;
+  /**
+   * Schedule a recurring background task. Returns an unregister callback that
+   * stops the task and is invoked automatically when the plugin unloads.
+   */
+  scheduleTask?(
+    name: string,
+    intervalMs: number,
+    task: () => void | Promise<void>,
+  ): () => void;
 }
 
 export interface ServerPlugin {

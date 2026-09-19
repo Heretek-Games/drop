@@ -4,7 +4,9 @@ import type { PluginEventBus } from "./events";
 import type { PluginRouteTable } from "./routes";
 import type { PluginWebSocketRegistry } from "./websocket";
 import type {
+  AuthProvider,
   CloudSavePathResolver,
+  DepotStorageProvider,
   MetadataProvider,
   PaymentGateway,
   PluginCapability,
@@ -12,6 +14,11 @@ import type {
   PluginStorage,
   ServerPlugin,
 } from "./types";
+import {
+  PLUGIN_SETTINGS_STORAGE_KEY,
+  applySettingsDefaults,
+  normalizeSettingsSchema,
+} from "./settings";
 
 function hasCapability(
   capabilities: PluginCapability[] | undefined,
@@ -51,6 +58,14 @@ export class PluginSpiRegistry {
   private readonly paymentGateways = new Map<
     string,
     { pluginId: string; gateway: PaymentGateway }
+  >();
+  private readonly authProviders = new Map<
+    string,
+    { pluginId: string; provider: AuthProvider }
+  >();
+  private readonly depotProviders = new Map<
+    string,
+    { pluginId: string; provider: DepotStorageProvider }
   >();
 
   registerMetadataProvider(
@@ -125,10 +140,60 @@ export class PluginSpiRegistry {
     this.paymentGateways.set(gateway.id, { pluginId, gateway });
   }
 
+  registerAuthProvider(
+    pluginId: string,
+    provider: AuthProvider,
+    capabilities: PluginCapability[] | undefined,
+  ): void {
+    if (!provider || typeof provider.id !== "string" || !provider.id.trim()) {
+      throw new Error("Auth provider must have a valid non-empty id");
+    }
+    if (!hasCapability(capabilities, "auth:provider")) {
+      throw new PluginCapabilityError(
+        pluginId,
+        "auth:provider",
+        `registerAuthProvider(${provider.id})`,
+      );
+    }
+    const existing = this.authProviders.get(provider.id);
+    if (existing && existing.pluginId !== pluginId) {
+      throw new Error(
+        `Auth provider '${provider.id}' is already claimed by plugin '${existing.pluginId}'`,
+      );
+    }
+    this.authProviders.set(provider.id, { pluginId, provider });
+  }
+
+  registerDepotProvider(
+    pluginId: string,
+    provider: DepotStorageProvider,
+    capabilities: PluginCapability[] | undefined,
+  ): void {
+    if (!provider || typeof provider.id !== "string" || !provider.id.trim()) {
+      throw new Error("Depot provider must have a valid non-empty id");
+    }
+    if (!hasCapability(capabilities, "storage:depot")) {
+      throw new PluginCapabilityError(
+        pluginId,
+        "storage:depot",
+        `registerDepotProvider(${provider.id})`,
+      );
+    }
+    const existing = this.depotProviders.get(provider.id);
+    if (existing && existing.pluginId !== pluginId) {
+      throw new Error(
+        `Depot provider '${provider.id}' is already claimed by plugin '${existing.pluginId}'`,
+      );
+    }
+    this.depotProviders.set(provider.id, { pluginId, provider });
+  }
+
   release(pluginId: string): void {
     purgeOwned(this.metadataProviders, pluginId);
     purgeOwned(this.cloudSaveResolvers, pluginId);
     purgeOwned(this.paymentGateways, pluginId);
+    purgeOwned(this.authProviders, pluginId);
+    purgeOwned(this.depotProviders, pluginId);
   }
 
   getMetadataProviders(): MetadataProvider[] {
@@ -154,7 +219,31 @@ export class PluginSpiRegistry {
   getPaymentGateway(id: string): PaymentGateway | undefined {
     return this.paymentGateways.get(id)?.gateway;
   }
+
+  getAuthProviders(): AuthProvider[] {
+    return Array.from(this.authProviders.values()).map((e) => e.provider);
+  }
+
+  getAuthProvider(id: string): AuthProvider | undefined {
+    return this.authProviders.get(id)?.provider;
+  }
+
+  getDepotProviders(): DepotStorageProvider[] {
+    return Array.from(this.depotProviders.values()).map((e) => e.provider);
+  }
+
+  getDepotProvider(id: string): DepotStorageProvider | undefined {
+    return this.depotProviders.get(id)?.provider;
+  }
 }
+
+/** Schedules a recurring plugin task; returns an unregister callback. */
+export type PluginTaskScheduler = (
+  pluginId: string,
+  name: string,
+  intervalMs: number,
+  task: () => void | Promise<void>,
+) => () => void;
 
 /** Resources a plugin context is built from. */
 export interface PluginContextHost {
@@ -163,6 +252,7 @@ export interface PluginContextHost {
   events: PluginEventBus;
   spi: PluginSpiRegistry;
   createStorage(pluginId: string): Promise<PluginStorage>;
+  scheduleTask: PluginTaskScheduler;
   log: Logger;
 }
 
@@ -200,14 +290,26 @@ export async function createPluginContext(
   const id = plugin.metadata.id;
   const capabilities = plugin.metadata.capabilities;
   const pluginLogger = host.log.child({ plugin: id });
-  const storage = guardStorage(id, capabilities, await host.createStorage(id));
+  // Host-managed settings read from the unguarded storage so a plugin can
+  // declare a `settingsSchema` without also needing the `storage` capability.
+  const rawStorage = await host.createStorage(id);
+  const storage = guardStorage(id, capabilities, rawStorage);
   host.routes.create(id);
+
+  const schema = normalizeSettingsSchema(plugin.metadata.settingsSchema);
+  let settings: Readonly<Record<string, unknown>> | undefined;
+  if (schema) {
+    const stored = await rawStorage.get<Record<string, unknown>>(
+      PLUGIN_SETTINGS_STORAGE_KEY,
+    );
+    settings = Object.freeze(applySettingsDefaults(schema, stored));
+  }
 
   return {
     id,
     logger: pluginLogger,
     storage,
-    settings: Object.freeze({}),
+    settings,
     registerRoute: (method, pattern, handler) => {
       if (!hasCapability(capabilities, "routes")) {
         throw new PluginCapabilityError(
@@ -283,5 +385,15 @@ export async function createPluginContext(
       host.spi.registerPaymentGateway(id, gateway, capabilities);
       pluginLogger.debug(`Registered payment gateway: ${gateway.id}`);
     },
+    registerAuthProvider: (provider) => {
+      host.spi.registerAuthProvider(id, provider, capabilities);
+      pluginLogger.debug(`Registered auth provider: ${provider.id}`);
+    },
+    registerDepotProvider: (provider) => {
+      host.spi.registerDepotProvider(id, provider, capabilities);
+      pluginLogger.debug(`Registered depot provider: ${provider.id}`);
+    },
+    scheduleTask: (name, intervalMs, task) =>
+      host.scheduleTask(id, name, intervalMs, task),
   };
 }
